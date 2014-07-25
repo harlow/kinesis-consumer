@@ -19,5 +19,12 @@ _cgo_export.*
 
 _testmain.go
 
-*.exe
 *.test
+*.exe
+
+# vim temp files
+.*.swp
+.*.swo
+
+# System files
+.DS_Store
