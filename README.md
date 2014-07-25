@@ -11,4 +11,3 @@ production ready._
 Clone the repository.
 
     $ git clone git@github.com:harlow/go-etl.git
-
