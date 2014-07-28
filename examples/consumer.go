@@ -13,8 +13,7 @@ func main() {
 	k := kinesis.New("", "", kinesis.Region{})
 	s := "inputStream"
 
-	c := etl.RedisCheckpoint{}
-	c.SetAppName("sampleApp")
+	c := etl.RedisCheckpoint{appName: "sampleApp"}
 
 	e := etl.S3Emitter{}
 	e.SetBucketName("bucketName")
