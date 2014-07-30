@@ -13,7 +13,7 @@ type Checkpoint interface {
 }
 
 type RedisCheckpoint struct {
-	appName        string
+	AppName        string
 	client         redis.Client
 	sequenceNumber string
 }
@@ -41,5 +41,5 @@ func (c *RedisCheckpoint) SetCheckpoint(streamName string, shardID string, seque
 }
 
 func (c RedisCheckpoint) keyGen(streamName string, shardID string) string {
-	return fmt.Sprintf("%v:checkpoint:%v:%v", c.appName, streamName, shardID)
+	return fmt.Sprintf("%v:checkpoint:%v:%v", c.AppName, streamName, shardID)
 }

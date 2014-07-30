@@ -2,9 +2,7 @@ package etl
 
 import (
 	"bytes"
-	"fmt"
 	"testing"
-	"time"
 )
 
 func TestNumMessagesToBuffer(t *testing.T) {
@@ -137,20 +135,5 @@ func TestData(t *testing.T) {
 
 	if !bytes.Equal(b.Data(), body) {
 		t.Errorf("Data() want %v", body)
-	}
-}
-
-func TestFileName(t *testing.T) {
-	var r1, s1 = []byte("Record1"), "Seq1"
-	var r2, s2 = []byte("Record2"), "Seq2"
-	date := time.Now().UTC().Format("2006-01-02")
-	name := fmt.Sprintf("/%v/Seq1-Seq2.txt", date)
-
-	b := MsgBuffer{}
-	b.ConsumeRecord(r1, s1)
-	b.ConsumeRecord(r2, s2)
-
-	if b.FileName() != name {
-		t.Errorf("FileName() = want %v", b.FileName(), name)
 	}
 }

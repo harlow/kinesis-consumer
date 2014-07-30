@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+
 	"github.com/harlow/go-etl"
 	"github.com/joho/godotenv"
 	"github.com/sendgridlabs/go-kinesis"
@@ -10,14 +11,10 @@ import (
 func main() {
 	godotenv.Load()
 
-	k := kinesis.New("", "", kinesis.Region{})
 	s := "inputStream"
-
-	c := etl.RedisCheckpoint{appName: "sampleApp"}
-
-	e := etl.S3Emitter{}
-	e.SetBucketName("bucketName")
-
+	k := kinesis.New("", "", kinesis.Region{})
+	c := etl.RedisCheckpoint{AppName: "sampleApp"}
+	e := etl.S3Emitter{S3Bucket: "bucketName"}
 	// t := etl.EventTransformer{}
 
 	args := kinesis.NewArgs()

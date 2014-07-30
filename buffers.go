@@ -1,10 +1,13 @@
 package etl
 
-import (
-	"bytes"
-	"fmt"
-	"time"
-)
+import "bytes"
+
+type Buffer interface {
+	Data() []byte
+	FirstSequenceNumber() string
+	LastSequenceNumber() string
+	NumMessagesInBuffer() int
+}
 
 type MsgBuffer struct {
 	buffer              bytes.Buffer
@@ -38,11 +41,6 @@ func (b MsgBuffer) SequenceExists(sequenceNumber string) bool {
 		}
 	}
 	return false
-}
-
-func (b MsgBuffer) FileName() string {
-	date := time.Now().UTC().Format("2006-01-02")
-	return fmt.Sprintf("/%v/%v-%v.txt", date, b.firstSequenceNumber, b.lastSequenceNumber)
 }
 
 func (b MsgBuffer) Data() []byte {
