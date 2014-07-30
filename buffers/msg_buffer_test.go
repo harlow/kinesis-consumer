@@ -5,16 +5,6 @@ import (
 	"testing"
 )
 
-func TestNumMessagesToBuffer(t *testing.T) {
-	const n = 25
-	b := MsgBuffer{numMessagesToBuffer: n}
-	r := b.NumMessagesToBuffer()
-
-	if r != n {
-		t.Errorf("NumMessagesToBuffer() = %v, want %v", r, n)
-	}
-}
-
 func TestConsumeRecord(t *testing.T) {
 	var r1, s1 = []byte("Record1"), "Seq1"
 	var r2, s2 = []byte("Recrod2"), "Seq2"
@@ -57,12 +47,12 @@ func TestSequenceExists(t *testing.T) {
 	}
 }
 
-func TestFlushBuffer(t *testing.T) {
+func TestFlush(t *testing.T) {
 	var r1, s1 = []byte("Record"), "SeqNum"
 	b := MsgBuffer{}
 	b.ConsumeRecord(r1, s1)
 
-	b.FlushBuffer()
+	b.Flush()
 
 	if b.NumMessagesInBuffer() != 0 {
 		t.Errorf("NumMessagesInBuffer() want %v", 0)
@@ -110,7 +100,7 @@ func TestShouldFlush(t *testing.T) {
 	var r1, s1 = []byte("Record1"), "Seq1"
 	var r2, s2 = []byte("Recrod2"), "Seq2"
 
-	b := MsgBuffer{numMessagesToBuffer: n}
+	b := MsgBuffer{NumMessagesToBuffer: n}
 	b.ConsumeRecord(r1, s1)
 
 	if b.ShouldFlush() != false {

@@ -6,12 +6,12 @@ type MsgBuffer struct {
 	buffer              bytes.Buffer
 	firstSequenceNumber string
 	lastSequenceNumber  string
-	numMessagesToBuffer int
+	NumMessagesToBuffer int
 	sequencesInBuffer   []string
 }
 
-func (b MsgBuffer) NumMessagesToBuffer() int {
-	return b.numMessagesToBuffer
+func NewMessageBuffer(n int) *MsgBuffer {
+	return &MsgBuffer{NumMessagesToBuffer: n}
 }
 
 func (b *MsgBuffer) ConsumeRecord(data []byte, sequenceNumber string) {
@@ -44,19 +44,19 @@ func (b MsgBuffer) NumMessagesInBuffer() int {
 	return len(b.sequencesInBuffer)
 }
 
-func (b *MsgBuffer) FlushBuffer() {
+func (b *MsgBuffer) Flush() {
 	b.buffer.Reset()
 	b.sequencesInBuffer = b.sequencesInBuffer[:0]
 }
 
 func (b MsgBuffer) ShouldFlush() bool {
-	return len(b.sequencesInBuffer) >= b.NumMessagesToBuffer()
-}
-
-func (b MsgBuffer) LastSequenceNumber() string {
-	return b.lastSequenceNumber
+	return len(b.sequencesInBuffer) >= b.NumMessagesToBuffer
 }
 
 func (b MsgBuffer) FirstSequenceNumber() string {
 	return b.firstSequenceNumber
+}
+
+func (b MsgBuffer) LastSequenceNumber() string {
+	return b.lastSequenceNumber
 }

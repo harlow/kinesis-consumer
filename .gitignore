@@ -19,6 +19,9 @@ _cgo_export.*
 
 _testmain.go
 
-*.env
-*.exe
 *.test
+*.exe
+
+# vim temp files
+.*.swp
+.*.swo

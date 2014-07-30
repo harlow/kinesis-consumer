@@ -12,20 +12,20 @@ type RedisCheckpoint struct {
 	sequenceNumber string
 }
 
-func (c RedisCheckpoint) SequenceNumber() string {
-	return c.sequenceNumber
-}
-
 func (c *RedisCheckpoint) CheckpointExists(streamName string, shardID string) bool {
 	key := c.keyGen(streamName, shardID)
 	val, _ := c.client.Get(key)
 
-	if val != nil {
+	if val != nil && string(val) != "" {
 		c.sequenceNumber = string(val)
 		return true
 	} else {
 		return false
 	}
+}
+
+func (c RedisCheckpoint) SequenceNumber() string {
+	return c.sequenceNumber
 }
 
 func (c *RedisCheckpoint) SetCheckpoint(streamName string, shardID string, sequenceNumber string) {
