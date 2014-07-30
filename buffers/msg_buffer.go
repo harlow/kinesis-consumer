@@ -1,13 +1,6 @@
-package etl
+package buffers
 
 import "bytes"
-
-type Buffer interface {
-	Data() []byte
-	FirstSequenceNumber() string
-	LastSequenceNumber() string
-	NumMessagesInBuffer() int
-}
 
 type MsgBuffer struct {
 	buffer              bytes.Buffer

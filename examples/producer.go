@@ -2,7 +2,8 @@ package main
 
 import (
   "fmt"
-  "github.com/harlow/go-etl"
+
+  "github.com/harlow/go-etl/utils"
   "github.com/joho/godotenv"
   "github.com/sendgridlabs/go-kinesis"
 )
@@ -28,7 +29,7 @@ func main() {
   streamName := "inputStream"
   ksis := kinesis.New("", "", kinesis.Region{})
 
-  etl.CreateAndWaitForStreamToBecomeAvailable(ksis, streamName, 2)
+  utils.CreateAndWaitForStreamToBecomeAvailable(ksis, streamName, 2)
   putSampleDataOnStream(ksis, streamName, 50)
   // deleteStream(ksis, streamName)
 }

@@ -1,9 +1,10 @@
-package etl
+package utils
 
 import (
 	"fmt"
-	"github.com/sendgridlabs/go-kinesis"
 	"time"
+
+	"github.com/sendgridlabs/go-kinesis"
 )
 
 func CreateAndWaitForStreamToBecomeAvailable(ksis *kinesis.Kinesis, streamName string, shardCount int) {

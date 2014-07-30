@@ -1,16 +1,10 @@
-package etl
+package checkpoints
 
 import (
 	"fmt"
 
 	"github.com/hoisie/redis"
 )
-
-type Checkpoint interface {
-	CheckpointExists(streamName string, shardID string) bool
-	SequenceNumber() string
-	SetCheckpoint(streamName string, shardID string, sequenceNumber string)
-}
 
 type RedisCheckpoint struct {
 	AppName        string

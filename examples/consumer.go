@@ -3,7 +3,9 @@ package main
 import (
 	"fmt"
 
-	"github.com/harlow/go-etl"
+	"github.com/harlow/go-etl/checkpoints"
+	"github.com/harlow/go-etl/emitters"
+	"github.com/harlow/go-etl/utils"
 	"github.com/joho/godotenv"
 	"github.com/sendgridlabs/go-kinesis"
 )
@@ -13,9 +15,9 @@ func main() {
 
 	s := "inputStream"
 	k := kinesis.New("", "", kinesis.Region{})
-	c := etl.RedisCheckpoint{AppName: "sampleApp"}
-	e := etl.S3Emitter{S3Bucket: "bucketName"}
-	// t := etl.EventTransformer{}
+	c := checkpoints.RedisCheckpoint{AppName: "sampleApp"}
+	e := emitters.S3Emitter{S3Bucket: "bucketName"}
+	// t := transformers.EventTransformer{}
 
 	args := kinesis.NewArgs()
 	args.Add("StreamName", s)
@@ -27,7 +29,7 @@ func main() {
 	}
 
 	for _, shard := range streamInfo.StreamDescription.Shards {
-		go etl.GetRecords(k, &c, e, s, shard.ShardId)
+		go utils.GetRecords(k, &c, e, s, shard.ShardId)
 	}
 
 	select {}

@@ -1,8 +1,9 @@
-package etl
+package checkpoints
 
 import (
-	"github.com/hoisie/redis"
 	"testing"
+
+	"github.com/hoisie/redis"
 )
 
 func TestKeyGen(t *testing.T) {
