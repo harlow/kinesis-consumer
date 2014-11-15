@@ -16,7 +16,7 @@ import (
 type RedshiftEmitter struct {
 	Delimiter string
 	Format    string
-	Jsonpath  string
+	Jsonpaths string
 	S3Bucket  string
 	TableName string
 }
@@ -51,9 +51,12 @@ func (e RedshiftEmitter) copyStatement(s3File string) string {
 	b.WriteString(fmt.Sprintf("CREDENTIALS 'aws_access_key_id=%v;", os.Getenv("AWS_ACCESS_KEY")))
 	b.WriteString(fmt.Sprintf("aws_secret_access_key=%v' ", os.Getenv("AWS_SECRET_KEY")))
 
-	if e.Format == "json" {
+	switch e.Format {
+	case "json":
 		b.WriteString(fmt.Sprintf("json 'auto'"))
-	} else {
+	case "jsonpaths":
+		b.WriteString(fmt.Sprintf("json '%v'", e.Jsonpaths))
+	default:
 		b.WriteString(fmt.Sprintf("DELIMITER '%v'", e.Delimiter))
 	}
 
