@@ -48,6 +48,7 @@ func (p Pipeline) ProcessShard(ksis *kinesis.Kinesis, shardID string) {
 
 		if err != nil {
 			fmt.Printf("GetRecords ERROR: %v\n", err)
+			time.Sleep(10 * time.Second)
 			continue
 		}
 
@@ -71,7 +72,7 @@ func (p Pipeline) ProcessShard(ksis *kinesis.Kinesis, shardID string) {
 			break
 		} else {
 			fmt.Printf("Sleeping: %v\n", shardID)
-			time.Sleep(5 * time.Second)
+			time.Sleep(10 * time.Second)
 		}
 
 		if p.Buffer.ShouldFlush() {
