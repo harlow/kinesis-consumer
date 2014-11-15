@@ -7,5 +7,5 @@ package connector
 // Implementations may choose to fail the entire set of records in the buffer or to fail records
 // individually.
 type Emitter interface {
-	Emit(buffer Buffer)
+	Emit(b Buffer, t Transformer)
 }

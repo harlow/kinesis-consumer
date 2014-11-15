@@ -23,9 +23,9 @@ type RedshiftEmitter struct {
 
 // Invoked when the buffer is full. This method leverages the S3Emitter and then issues a copy command to
 // Redshift data store.
-func (e RedshiftEmitter) Emit(b Buffer) {
+func (e RedshiftEmitter) Emit(b Buffer, t Transformer) {
 	s3Emitter := S3Emitter{S3Bucket: e.S3Bucket}
-	s3Emitter.Emit(b)
+	s3Emitter.Emit(b, t)
 	s3File := s3Emitter.S3FileName(b.FirstSequenceNumber(), b.LastSequenceNumber())
 	db, err := sql.Open("postgres", os.Getenv("REDSHIFT_URL"))
 

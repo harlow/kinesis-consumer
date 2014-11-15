@@ -1,7 +1,8 @@
 package connector
 
-// Transformer is used to transform data from a Record (byte array) to the data model for
+// Transformer is used to transform data (byte array) to a Record for
 // processing in the application.
 type Transformer interface {
-	ToModel(data []byte) Model
+	ToRecord(data []byte) Record
+	FromRecord(r Record) []byte
 }

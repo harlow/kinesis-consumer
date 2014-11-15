@@ -61,10 +61,10 @@ func (p Pipeline) ProcessShard(ksis *kinesis.Kinesis, shardID string) {
 					continue
 				}
 
-				var m = p.Transformer.ToModel(data)
+				r := p.Transformer.ToRecord(data)
 
-				if p.Filter.KeepRecord(m) {
-					p.Buffer.Add(m, v.SequenceNumber)
+				if p.Filter.KeepRecord(r) {
+					p.Buffer.ProcessRecord(r, v.SequenceNumber)
 				}
 			}
 		} else if recordSet.NextShardIterator == "" || shardIterator == recordSet.NextShardIterator || err != nil {
@@ -77,7 +77,7 @@ func (p Pipeline) ProcessShard(ksis *kinesis.Kinesis, shardID string) {
 
 		if p.Buffer.ShouldFlush() {
 			fmt.Printf("Emitting to Shard: %v\n", shardID)
-			p.Emitter.Emit(p.Buffer)
+			p.Emitter.Emit(p.Buffer, p.Transformer)
 			p.Checkpoint.SetCheckpoint(shardID, p.Buffer.LastSequenceNumber())
 			p.Buffer.Flush()
 		}

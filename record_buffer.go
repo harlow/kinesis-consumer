@@ -7,12 +7,12 @@ type RecordBuffer struct {
 	NumRecordsToBuffer  int
 	firstSequenceNumber string
 	lastSequenceNumber  string
-	recordsInBuffer     []Model
+	recordsInBuffer     []Record
 	sequencesInBuffer   []string
 }
 
 // Adds a message to the buffer.
-func (b *RecordBuffer) Add(record Model, sequenceNumber string) {
+func (b *RecordBuffer) ProcessRecord(record Record, sequenceNumber string) {
 	if len(b.sequencesInBuffer) == 0 {
 		b.firstSequenceNumber = sequenceNumber
 	}
@@ -26,7 +26,7 @@ func (b *RecordBuffer) Add(record Model, sequenceNumber string) {
 }
 
 // Returns the records in the buffer.
-func (b *RecordBuffer) Records() []Model {
+func (b *RecordBuffer) Records() []Record {
 	return b.recordsInBuffer
 }
 

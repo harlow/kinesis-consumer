@@ -26,16 +26,17 @@ func (e S3Emitter) S3FileName(firstSeq string, lastSeq string) string {
 }
 
 // Invoked when the buffer is full. This method emits the set of filtered records.
-func (e S3Emitter) Emit(buf Buffer) {
+func (e S3Emitter) Emit(b Buffer, t Transformer) {
 	auth, _ := aws.EnvAuth()
 	s3Con := s3.New(auth, aws.USEast)
 	bucket := s3Con.Bucket(e.S3Bucket)
-	s3File := e.S3FileName(buf.FirstSequenceNumber(), buf.LastSequenceNumber())
+	s3File := e.S3FileName(b.FirstSequenceNumber(), b.LastSequenceNumber())
 
 	var buffer bytes.Buffer
 
-	for _, r := range buf.Records() {
-		buffer.WriteString(r.ToString())
+	for _, r := range b.Records() {
+		var s = t.FromRecord(r)
+		buffer.Write(s)
 	}
 
 	err := bucket.Put(s3File, buffer.Bytes(), "text/plain", s3.Private, s3.Options{})
@@ -43,6 +44,6 @@ func (e S3Emitter) Emit(buf Buffer) {
 	if err != nil {
 		fmt.Printf("Error occured while uploding to S3: %v\n", err)
 	} else {
-		fmt.Printf("Emitted %v records to S3 in s3://%v%v\n", buf.NumRecordsInBuffer(), e.S3Bucket, s3File)
+		fmt.Printf("Emitted %v records to S3 in s3://%v%v\n", b.NumRecordsInBuffer(), e.S3Bucket, s3File)
 	}
 }
