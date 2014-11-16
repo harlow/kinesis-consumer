@@ -5,6 +5,7 @@ package connector
 // decides whether a record will be added to the buffer to be emitted.
 type RecordBuffer struct {
 	NumRecordsToBuffer  int
+
 	firstSequenceNumber string
 	lastSequenceNumber  string
 	recordsInBuffer     []Record

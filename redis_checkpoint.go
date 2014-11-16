@@ -9,8 +9,9 @@ import (
 // A Redis implementation of the Checkpont interface. This class is used to enable the Pipeline.ProcessShard
 // to checkpoint their progress.
 type RedisCheckpoint struct {
-	AppName        string
-	StreamName     string
+	AppName    string
+	StreamName string
+
 	client         redis.Client
 	sequenceNumber string
 }
