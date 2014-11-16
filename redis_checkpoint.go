@@ -10,9 +10,9 @@ import (
 // to checkpoint their progress.
 type RedisCheckpoint struct {
 	AppName        string
+	StreamName     string
 	client         redis.Client
 	sequenceNumber string
-	StreamName     string
 }
 
 // Check whether a checkpoint for a particular Shard exists. Typically used to determine whether we should
