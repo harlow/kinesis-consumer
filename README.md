@@ -4,8 +4,8 @@ __Note:__ _This codebase is a under active development._
 
 ### Kinesis connector applications written in Go
 
-This is a port of the [AWS Kinesis connector libraries][2] from Java to Go for extracting streaming event data
-into S3, Redshift, DynamoDB, and more. See the [API Docs][1] for package documentation.
+This is a port of the [Amazon Kinesis Connector Library][1] from Java to Go. Its used for extracting streaming event data
+into S3, Redshift, DynamoDB, and more. See the [API Docs][2] for package documentation.
 
 ## Overview
 
@@ -26,8 +26,6 @@ A connector pipeline uses the following interfaces:
 Install the library:
 
     $ go get github.com/harlow/kinesis-connectors
-
-The library has been broken into several components (buffers, checkpoints, filters, transformers, and emitters). These compontents can be mixed and matched to generate the desired functionality.
 
 ### Example Redshift Pipeline
 
@@ -131,6 +129,5 @@ func main() {
 }
 ```
 
-[1]: http://godoc.org/github.com/harlow/kinesis-connectors
-[2]: http://aws.amazon.com/kinesis/
-[3]: https://github.com/awslabs/amazon-kinesis-connectors
+[1]: https://github.com/awslabs/amazon-kinesis-connectors
+[2]: http://godoc.org/github.com/harlow/kinesis-connectors
