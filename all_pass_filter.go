@@ -4,6 +4,6 @@ package connector
 type AllPassFilter struct{}
 
 // Returns true for all records.
-func (b *AllPassFilter) KeepRecord(r Record) bool {
+func (b *AllPassFilter) KeepRecord(r interface{}) bool {
 	return true
 }

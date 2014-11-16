@@ -6,5 +6,5 @@ package connector
 // A method enabling the buffer to filter records. Return false if you don't want to hold on to
 // the record.
 type Filter interface {
-	KeepRecord(r Record) bool
+	KeepRecord(r interface{}) bool
 }

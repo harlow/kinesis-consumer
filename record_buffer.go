@@ -4,16 +4,16 @@ package connector
 // records that are periodically flushed. It is configured with an implementation of Filter that
 // decides whether a record will be added to the buffer to be emitted.
 type RecordBuffer struct {
-	NumRecordsToBuffer  int
+	NumRecordsToBuffer int
 
 	firstSequenceNumber string
 	lastSequenceNumber  string
-	recordsInBuffer     []Record
+	recordsInBuffer     []interface{}
 	sequencesInBuffer   []string
 }
 
 // Adds a message to the buffer.
-func (b *RecordBuffer) ProcessRecord(record Record, sequenceNumber string) {
+func (b *RecordBuffer) ProcessRecord(record interface{}, sequenceNumber string) {
 	if len(b.sequencesInBuffer) == 0 {
 		b.firstSequenceNumber = sequenceNumber
 	}
@@ -27,7 +27,7 @@ func (b *RecordBuffer) ProcessRecord(record Record, sequenceNumber string) {
 }
 
 // Returns the records in the buffer.
-func (b *RecordBuffer) Records() []Record {
+func (b *RecordBuffer) Records() []interface{} {
 	return b.recordsInBuffer
 }
 

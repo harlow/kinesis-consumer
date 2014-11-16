@@ -6,11 +6,11 @@ package connector
 // time limit in seconds. The ShouldFlush() method may indicate that the buffer is full based on
 // these limits.
 type Buffer interface {
-	ProcessRecord(record Record, sequenceNumber string)
+	ProcessRecord(record interface{}, sequenceNumber string)
 	FirstSequenceNumber() string
 	Flush()
 	LastSequenceNumber() string
 	NumRecordsInBuffer() int
-	Records() []Record
+	Records() []interface{}
 	ShouldFlush() bool
 }
