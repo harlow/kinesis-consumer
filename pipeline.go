@@ -1,7 +1,7 @@
 package connector
 
 import (
-	"fmt"
+	"log"
 	"time"
 
 	"github.com/sendgridlabs/go-kinesis"
@@ -35,8 +35,7 @@ func (p Pipeline) ProcessShard(ksis *kinesis.Kinesis, shardID string) {
 	shardInfo, err := ksis.GetShardIterator(args)
 
 	if err != nil {
-		fmt.Printf("Error fetching shard itterator: %v", err)
-		return
+		log.Fatalf("GetShardIterator ERROR: %v\n", err)
 	}
 
 	shardIterator := shardInfo.ShardIterator
@@ -47,9 +46,7 @@ func (p Pipeline) ProcessShard(ksis *kinesis.Kinesis, shardID string) {
 		recordSet, err := ksis.GetRecords(args)
 
 		if err != nil {
-			fmt.Printf("GetRecords ERROR: %v\n", err)
-			time.Sleep(10 * time.Second)
-			continue
+			log.Fatalf("GetRecords ERROR: %v\n", err)
 		}
 
 		if len(recordSet.Records) > 0 {
@@ -57,7 +54,7 @@ func (p Pipeline) ProcessShard(ksis *kinesis.Kinesis, shardID string) {
 				data, err := v.GetData()
 
 				if err != nil {
-					fmt.Printf("GetData ERROR: %v\n", err)
+					log.Printf("GetData ERROR: %v\n", err)
 					continue
 				}
 
@@ -68,15 +65,13 @@ func (p Pipeline) ProcessShard(ksis *kinesis.Kinesis, shardID string) {
 				}
 			}
 		} else if recordSet.NextShardIterator == "" || shardIterator == recordSet.NextShardIterator || err != nil {
-			fmt.Printf("NextShardIterator ERROR: %v\n", err)
+			log.Printf("NextShardIterator ERROR: %v\n", err)
 			break
 		} else {
-			fmt.Printf("Sleeping: %v\n", shardID)
-			time.Sleep(10 * time.Second)
+			time.Sleep(5 * time.Second)
 		}
 
 		if p.Buffer.ShouldFlush() {
-			fmt.Printf("Emitting to Shard: %v\n", shardID)
 			p.Emitter.Emit(p.Buffer, p.Transformer)
 			p.Checkpoint.SetCheckpoint(shardID, p.Buffer.LastSequenceNumber())
 			p.Buffer.Flush()

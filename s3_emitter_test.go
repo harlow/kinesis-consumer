@@ -7,12 +7,13 @@ import (
 )
 
 func TestS3FileName(t *testing.T) {
-	d := time.Now().UTC().Format("2006-01-02")
-	n := fmt.Sprintf("/%v/a-b.txt", d)
+	d := time.Now().UTC().Format("2006/01/02")
 	e := S3Emitter{}
-	f := e.S3FileName("a", "b")
 
-	if f != n {
-		t.Errorf("S3FileName() = want %v", f, n)
+	expected := fmt.Sprintf("%v/a-b", d)
+	result := e.S3FileName("a", "b")
+
+	if result != expected {
+		t.Errorf("S3FileName() = %v want %v", result, expected)
 	}
 }
