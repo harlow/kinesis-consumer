@@ -3,6 +3,7 @@ package connector
 import (
 	"bytes"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/crowdmob/goamz/aws"
@@ -22,8 +23,8 @@ type S3Emitter struct {
 // S3FileName generates a file name based on the First and Last sequence numbers from the buffer. The current
 // UTC date (YYYY-MM-DD) is base of the path to logically group days of batches.
 func (e S3Emitter) S3FileName(firstSeq string, lastSeq string) string {
-	date := time.Now().UTC().Format("2006-01-02")
-	return fmt.Sprintf("/%v/%v-%v.txt", date, firstSeq, lastSeq)
+	date := time.Now().UTC().Format("2006/01/02")
+	return fmt.Sprintf("%v/%v-%v", date, firstSeq, lastSeq)
 }
 
 // Emit is invoked when the buffer is full. This method emits the set of filtered records.
@@ -43,8 +44,8 @@ func (e S3Emitter) Emit(b Buffer, t Transformer) {
 	err := bucket.Put(s3File, buffer.Bytes(), "text/plain", s3.Private, s3.Options{})
 
 	if err != nil {
-		fmt.Printf("Error occured while uploding to S3: %v\n", err)
+		log.Printf("S3Put ERROR: %v\n", err)
 	} else {
-		fmt.Printf("Emitted %v records to S3 in s3://%v%v\n", b.NumRecordsInBuffer(), e.S3Bucket, s3File)
+		log.Printf("[%v] records emitted to [%s]\n", b.NumRecordsInBuffer(), e.S3Bucket)
 	}
 }

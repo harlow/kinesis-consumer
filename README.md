@@ -87,7 +87,7 @@ func NewPipeline(cfg Config) *connector.Pipeline {
     StreamName: cfg.KinesisStream,
   }
 
-  e := connector.RedshiftEmitter{
+  e := connector.RedshiftBasicEmtitter{
     TableName: cfg.TableName,
     S3Bucket:  cfg.S3Bucket,
     Format:    cfg.Format,
