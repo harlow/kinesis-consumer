@@ -8,7 +8,7 @@ func (r TestRecord) ToDelimitedString() string {
 	return "test"
 }
 
-func (r TestRecord) ToJson() []byte {
+func (r TestRecord) ToJSON() []byte {
 	return []byte("test")
 }
 

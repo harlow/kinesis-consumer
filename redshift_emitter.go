@@ -7,10 +7,11 @@ import (
 	"log"
 	"os"
 
+	// Postgres package is used when sql.Open is called
 	_ "github.com/lib/pq"
 )
 
-// This struct is an implementation of Emitter that buffered batches of records into Redshift one by one.
+// RedshiftEmitter is an implementation of Emitter that buffered batches of records into Redshift one by one.
 // It first emits records into S3 and then perfors the Redshift JSON COPY command. S3 storage of buffered
 // data achieved using the S3Emitter. A link to jsonpaths must be provided when configuring the struct.
 type RedshiftEmitter struct {
@@ -21,8 +22,8 @@ type RedshiftEmitter struct {
 	TableName string
 }
 
-// Invoked when the buffer is full. This method leverages the S3Emitter and then issues a copy command to
-// Redshift data store.
+// Emit is invoked when the buffer is full. This method leverages the S3Emitter and
+// then issues a copy command to Redshift data store.
 func (e RedshiftEmitter) Emit(b Buffer, t Transformer) {
 	s3Emitter := S3Emitter{S3Bucket: e.S3Bucket}
 	s3Emitter.Emit(b, t)

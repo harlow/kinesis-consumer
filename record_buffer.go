@@ -1,8 +1,7 @@
 package connector
 
-// This struct is a basic implementation of the Buffer interface. It is a wrapper on a buffer of
-// records that are periodically flushed. It is configured with an implementation of Filter that
-// decides whether a record will be added to the buffer to be emitted.
+// RecordBuffer is a basic implementation of the Buffer interface.
+// It buffer's records and answers questions on when it should be periodically flushed.
 type RecordBuffer struct {
 	NumRecordsToBuffer int
 
@@ -12,7 +11,7 @@ type RecordBuffer struct {
 	sequencesInBuffer   []string
 }
 
-// Adds a message to the buffer.
+// ProcessRecord adds a message to the buffer.
 func (b *RecordBuffer) ProcessRecord(record interface{}, sequenceNumber string) {
 	if len(b.sequencesInBuffer) == 0 {
 		b.firstSequenceNumber = sequenceNumber
@@ -26,17 +25,17 @@ func (b *RecordBuffer) ProcessRecord(record interface{}, sequenceNumber string) 
 	}
 }
 
-// Returns the records in the buffer.
+// Records returns the records in the buffer.
 func (b *RecordBuffer) Records() []interface{} {
 	return b.recordsInBuffer
 }
 
-// Returns the number of messages in the buffer.
+// NumRecordsInBuffer returns the number of messages in the buffer.
 func (b RecordBuffer) NumRecordsInBuffer() int {
 	return len(b.sequencesInBuffer)
 }
 
-// Flushes the content in the buffer and resets the sequence counter.
+// Flush empties the buffer and resets the sequence counter.
 func (b *RecordBuffer) Flush() {
 	b.recordsInBuffer = b.recordsInBuffer[:0]
 	b.sequencesInBuffer = b.sequencesInBuffer[:0]
@@ -52,17 +51,17 @@ func (b *RecordBuffer) sequenceExists(sequenceNumber string) bool {
 	return false
 }
 
-// Determines if the buffer has reached its target size.
+// ShouldFlush determines if the buffer has reached its target size.
 func (b *RecordBuffer) ShouldFlush() bool {
 	return len(b.sequencesInBuffer) >= b.NumRecordsToBuffer
 }
 
-// Returns the sequence number of the first message in the buffer.
+// FirstSequenceNumber returns the sequence number of the first message in the buffer.
 func (b *RecordBuffer) FirstSequenceNumber() string {
 	return b.firstSequenceNumber
 }
 
-// Returns the sequence number of the last message in the buffer.
+// LastSequenceNumber returns the sequence number of the last message in the buffer.
 func (b *RecordBuffer) LastSequenceNumber() string {
 	return b.lastSequenceNumber
 }

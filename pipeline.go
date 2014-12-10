@@ -7,7 +7,8 @@ import (
 	"github.com/sendgridlabs/go-kinesis"
 )
 
-// This struct is used by the main application to configure instances of the user's implemented pipline.
+// Pipeline is used as a record processor to configure a pipline.
+//
 // The user should implement this such that each method returns a configured implementation of each
 // interface. It has a data type (Model) as Records come in as a byte[] and are transformed to a Model.
 // Then they are buffered in Model form and when the buffer is full, Models's are passed to the emitter.
@@ -20,6 +21,8 @@ type Pipeline struct {
 	Transformer Transformer
 }
 
+// ProcessShard kicks off the process of a Kinesis Shard.
+// It is a long running process that will continue to read from the shard.
 func (p Pipeline) ProcessShard(ksis *kinesis.Kinesis, shardID string) {
 	args := kinesis.NewArgs()
 	args.Add("ShardId", shardID)
@@ -54,7 +57,7 @@ func (p Pipeline) ProcessShard(ksis *kinesis.Kinesis, shardID string) {
 
 		if len(recordSet.Records) > 0 {
 			for _, v := range recordSet.Records {
-				data, err := v.GetData()
+				data := v.GetData()
 
 				if err != nil {
 					fmt.Printf("GetData ERROR: %v\n", err)

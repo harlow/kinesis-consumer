@@ -46,7 +46,7 @@ func upcaseInitial(str string) string {
 	return ""
 }
 
-// Opens the file path and loads config values into the sturct.
+// LoadConfig opens the file path and loads config values into the sturct.
 func LoadConfig(config interface{}, filename string) error {
 	lines, err := readLines(filename)
 
@@ -89,7 +89,8 @@ func LoadConfig(config interface{}, filename string) error {
 	return nil
 }
 
-// Creates a new Kinesis stream (uses existing stream if exists) and waits for it to become available.
+// CreateAndWaitForStreamToBecomeAvailable creates a new Kinesis stream (uses
+// existing stream if exists) and waits for it to become available.
 func CreateAndWaitForStreamToBecomeAvailable(k *kinesis.Kinesis, streamName string, shardCount int) {
 	if !StreamExists(k, streamName) {
 		err := k.CreateStream(streamName, shardCount)
@@ -119,7 +120,7 @@ func CreateAndWaitForStreamToBecomeAvailable(k *kinesis.Kinesis, streamName stri
 	}
 }
 
-// Check if a Kinesis stream exists.
+// StreamExists checks if a Kinesis stream exists.
 func StreamExists(k *kinesis.Kinesis, streamName string) bool {
 	args := kinesis.NewArgs()
 	resp, _ := k.ListStreams(args)
@@ -131,7 +132,7 @@ func StreamExists(k *kinesis.Kinesis, streamName string) bool {
 	return false
 }
 
-// Delete a Kinesis stream.
+// DeleteStream deletes a current Kinesis stream.
 func DeleteStream(k *kinesis.Kinesis, streamName string) {
 	err := k.DeleteStream("test")
 
