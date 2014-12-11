@@ -131,15 +131,3 @@ func StreamExists(k *kinesis.Kinesis, streamName string) bool {
 	}
 	return false
 }
-
-// DeleteStream deletes a current Kinesis stream.
-func DeleteStream(k *kinesis.Kinesis, streamName string) {
-	err := k.DeleteStream("test")
-
-	if err != nil {
-		fmt.Printf("DeleteStream ERROR: %v\n", err)
-		return
-	}
-
-	fmt.Printf("Stream [%v] is DELETING\n", streamName)
-}
