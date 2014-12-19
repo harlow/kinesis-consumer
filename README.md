@@ -1,10 +1,10 @@
 # Golang Kinesis Connectors
 
-__Note:__ _This codebase is a under active development._
+__Note:__ _This codebase is a under active development. Expect breaking changes until 1.0 version release._
 
 ### Kinesis connector applications written in Go
 
-This is a port of the [Amazon Kinesis Connector Library][1] from Java to Go. Its used for extracting streaming event data
+Inspired by the [Amazon Kinesis Connector Library][1]. These components are used for extracting streaming event data
 into S3, Redshift, DynamoDB, and more. See the [API Docs][2] for package documentation.
 
 ## Overview
