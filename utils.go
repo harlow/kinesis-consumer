@@ -89,9 +89,9 @@ func LoadConfig(config interface{}, filename string) error {
 	return nil
 }
 
-// CreateAndWaitForStreamToBecomeAvailable creates a new Kinesis stream (uses
-// existing stream if exists) and waits for it to become available.
-func CreateAndWaitForStreamToBecomeAvailable(k *kinesis.Kinesis, streamName string, shardCount int) {
+// CreateStream creates a new Kinesis stream (uses existing stream if exists) and
+// waits for it to become available.
+func CreateStream(k *kinesis.Kinesis, streamName string, shardCount int) {
 	if !StreamExists(k, streamName) {
 		err := k.CreateStream(streamName, shardCount)
 
@@ -123,7 +123,11 @@ func CreateAndWaitForStreamToBecomeAvailable(k *kinesis.Kinesis, streamName stri
 // StreamExists checks if a Kinesis stream exists.
 func StreamExists(k *kinesis.Kinesis, streamName string) bool {
 	args := kinesis.NewArgs()
-	resp, _ := k.ListStreams(args)
+	resp, err := k.ListStreams(args)
+	if err != nil {
+		fmt.Printf("ListStream ERROR: %v\n", err)
+		return false
+	}
 	for _, s := range resp.StreamNames {
 		if s == streamName {
 			return true
