@@ -8,7 +8,7 @@ import (
 
 func TestKey(t *testing.T) {
 	k := "app:checkpoint:stream:shard"
-	c := RedisCheckpoint{AppName: "app", StreamName: "stream"}
+	c := Checkpoint{AppName: "app", StreamName: "stream"}
 
 	r := c.key("shard")
 
@@ -21,7 +21,7 @@ func TestCheckpointExists(t *testing.T) {
 	var rc redis.Client
 	k := "app:checkpoint:stream:shard"
 	rc.Set(k, []byte("fakeSeqNum"))
-	c := RedisCheckpoint{AppName: "app", StreamName: "stream"}
+	c := Checkpoint{AppName: "app", StreamName: "stream"}
 
 	r := c.CheckpointExists("shard")
 
@@ -35,7 +35,7 @@ func TestCheckpointExists(t *testing.T) {
 func TestSetCheckpoint(t *testing.T) {
 	k := "app:checkpoint:stream:shard"
 	var rc redis.Client
-	c := RedisCheckpoint{AppName: "app", StreamName: "stream"}
+	c := Checkpoint{AppName: "app", StreamName: "stream"}
 	c.SetCheckpoint("shard", "fakeSeqNum")
 
 	r, _ := rc.Get(k)

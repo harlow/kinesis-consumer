@@ -1,0 +1,8 @@
+language: go
+script: go test
+notifications:
+  email: false
+branches:
+  only:
+    - master
+    - development
