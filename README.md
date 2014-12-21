@@ -153,8 +153,6 @@ func main() {
 	// Keep alive
 	<-make(chan int)
 }
-
-}
 ```
 
 [1]: https://github.com/awslabs/amazon-kinesis-connectors
