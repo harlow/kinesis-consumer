@@ -48,7 +48,7 @@ func (e RedshiftBasicEmtitter) Emit(b Buffer, t Transformer) {
 func (e RedshiftBasicEmtitter) copyStatement(s3File string) string {
 	b := new(bytes.Buffer)
 	b.WriteString(fmt.Sprintf("COPY %v ", e.TableName))
-	b.WriteString(fmt.Sprintf("FROM 's3://%v%v' ", e.S3Bucket, s3File))
+	b.WriteString(fmt.Sprintf("FROM 's3://%v/%v' ", e.S3Bucket, s3File))
 	b.WriteString(fmt.Sprintf("CREDENTIALS 'aws_access_key_id=%v;", os.Getenv("AWS_ACCESS_KEY")))
 	b.WriteString(fmt.Sprintf("aws_secret_access_key=%v' ", os.Getenv("AWS_SECRET_KEY")))
 	switch e.Format {
