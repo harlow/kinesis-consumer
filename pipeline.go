@@ -2,9 +2,12 @@ package connector
 
 import (
 	"log"
+	"math"
+	"os"
 	"time"
 
-	"github.com/sendgridlabs/go-kinesis"
+	"github.com/ezoic/go-kinesis"
+	l4g "github.com/ezoic/sol/log4go"
 )
 
 // Pipeline is used as a record processor to configure a pipline.
@@ -19,6 +22,28 @@ type Pipeline struct {
 	Filter      Filter
 	StreamName  string
 	Transformer Transformer
+}
+
+// this determines whether the error is recoverable
+func (p Pipeline) isRecoverableError(err error) bool {
+	r := false
+
+	cErr, ok := err.(*kinesis.Error)
+	if ok && cErr.Code == "ProvisionedThroughputExceeded" {
+		r = true
+	}
+
+	return true
+}
+
+// handle the aws exponential backoff
+func (p Pipeline) handleAwsWaitTimeExp(attempts int) {
+
+	//http://docs.aws.amazon.com/general/latest/gr/api-retries.html
+	// wait up to 5 minutes based on the aws exponential backoff algorithm
+	waitTime := time.Duration(math.Min(100*math.Pow(2, float64(attempts)), 300000)) * time.Millisecond
+	time.Sleep(waitTime)
+
 }
 
 // ProcessShard kicks off the process of a Kinesis Shard.
@@ -43,13 +68,26 @@ func (p Pipeline) ProcessShard(ksis *kinesis.Kinesis, shardID string) {
 
 	shardIterator := shardInfo.ShardIterator
 
+	consecutiveErrorAttempts := 0
+
 	for {
+
+		// handle the aws backoff stuff
+		p.handleAwsWaitTimeExp(consecutiveErrorAttempts)
+
 		args = kinesis.NewArgs()
 		args.Add("ShardIterator", shardIterator)
 		recordSet, err := ksis.GetRecords(args)
 
 		if err != nil {
-			log.Fatalf("GetRecords ERROR: %v\n", err)
+			if p.isRecoverableError(err) {
+				consecutiveErrorAttempts++
+			} else {
+				l4g.Critical("GetRecords ERROR: %v\n", err)
+				os.Exit(1)
+			}
+		} else {
+			consecutiveErrorAttempts = 0
 		}
 
 		if len(recordSet.Records) > 0 {
@@ -57,7 +95,7 @@ func (p Pipeline) ProcessShard(ksis *kinesis.Kinesis, shardID string) {
 				data := v.GetData()
 
 				if err != nil {
-					log.Printf("GetData ERROR: %v\n", err)
+					l4g.Error("GetData ERROR: %v\n", err)
 					continue
 				}
 

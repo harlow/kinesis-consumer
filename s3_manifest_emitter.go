@@ -3,7 +3,7 @@ package connector
 import (
 	"log"
 
-	"github.com/sendgridlabs/go-kinesis"
+	"github.com/ezoic/go-kinesis"
 )
 
 // An implementation of Emitter that puts event data on S3 file, and then puts the

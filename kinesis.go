@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sendgridlabs/go-kinesis"
+	"github.com/ezoic/go-kinesis"
 )
 
 // CreateStream creates a new Kinesis stream (uses existing stream if exists) and
