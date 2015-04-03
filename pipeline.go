@@ -33,7 +33,7 @@ func (p Pipeline) isRecoverableError(err error) bool {
 		r = true
 	}
 
-	return true
+	return r
 }
 
 // handle the aws exponential backoff
