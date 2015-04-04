@@ -42,7 +42,7 @@ func (e RedshiftBasicEmtitter) Emit(b Buffer, t Transformer) {
 		os.Exit(1)
 	}
 
-	l4g.Debug("Redshift load completed.\n")
+	l4g.Debug("Redshift load completed.")
 	db.Close()
 }
 
