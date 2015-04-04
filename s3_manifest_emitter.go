@@ -1,9 +1,8 @@
 package connector
 
 import (
-	"log"
-
 	"github.com/ezoic/go-kinesis"
+	l4g "github.com/ezoic/sol/log4go"
 )
 
 // An implementation of Emitter that puts event data on S3 file, and then puts the
@@ -30,8 +29,8 @@ func (e S3ManifestEmitter) Emit(b Buffer, t Transformer) {
 	_, err := e.Ksis.PutRecord(args)
 
 	if err != nil {
-		log.Printf("PutRecord ERROR: %v", err)
+		l4g.Error("PutRecord ERROR: %v", err)
 	} else {
-		log.Printf("[%s] emitted to [%s]", b.FirstSequenceNumber(), e.OutputStream)
+		l4g.Info("[%s] emitted to [%s]", b.FirstSequenceNumber(), e.OutputStream)
 	}
 }

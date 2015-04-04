@@ -3,11 +3,11 @@ package connector
 import (
 	"bytes"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/crowdmob/goamz/aws"
 	"github.com/crowdmob/goamz/s3"
+	l4g "github.com/ezoic/sol/log4go"
 )
 
 // S3Emitter is an implementation of Emitter used to store files from a Kinesis stream in S3.
@@ -44,8 +44,8 @@ func (e S3Emitter) Emit(b Buffer, t Transformer) {
 	err := bucket.Put(s3File, buffer.Bytes(), "text/plain", s3.Private, s3.Options{})
 
 	if err != nil {
-		log.Printf("S3Put ERROR: %v\n", err)
+		l4g.Error("S3Put ERROR: %v", err)
 	} else {
-		log.Printf("[%v] records emitted to [%s]\n", b.NumRecordsInBuffer(), e.S3Bucket)
+		l4g.Info("[%v] records emitted to [%s]", b.NumRecordsInBuffer(), e.S3Bucket)
 	}
 }

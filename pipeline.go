@@ -1,7 +1,6 @@
 package connector
 
 import (
-	"log"
 	"math"
 	"os"
 	"time"
@@ -63,7 +62,8 @@ func (p Pipeline) ProcessShard(ksis *kinesis.Kinesis, shardID string) {
 	shardInfo, err := ksis.GetShardIterator(args)
 
 	if err != nil {
-		log.Fatalf("GetShardIterator ERROR: %v\n", err)
+		l4g.Critical("GetShardIterator ERROR: %v", err)
+		os.Exit(1)
 	}
 
 	shardIterator := shardInfo.ShardIterator
@@ -108,7 +108,7 @@ func (p Pipeline) ProcessShard(ksis *kinesis.Kinesis, shardID string) {
 				}
 			}
 		} else if recordSet.NextShardIterator == "" || shardIterator == recordSet.NextShardIterator || err != nil {
-			log.Printf("NextShardIterator ERROR: %v\n", err)
+			l4g.Error("NextShardIterator ERROR: %v", err)
 			break
 		} else {
 			time.Sleep(5 * time.Second)
