@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"fmt"
+	"log"
 	"os"
 
 	// Postgres package is used when sql.Open is called
@@ -31,15 +32,13 @@ func (e RedshiftBasicEmtitter) Emit(b Buffer, t Transformer) {
 	db, err := sql.Open("postgres", os.Getenv("REDSHIFT_URL"))
 
 	if err != nil {
-		l4g.Critical(err)
-		os.Exit(1)
+		log.Fatal(err)
 	}
 
 	_, err = db.Exec(e.copyStatement(s3File))
 
 	if err != nil {
-		l4g.Critical(err)
-		os.Exit(1)
+		log.Fatal(err)
 	}
 
 	l4g.Debug("Redshift load completed.")

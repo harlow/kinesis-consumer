@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"time"
@@ -35,9 +36,7 @@ func (e RedshiftManifestEmitter) Emit(b Buffer, t Transformer) {
 	db, err := sql.Open("postgres", os.Getenv("REDSHIFT_URL"))
 
 	if err != nil {
-		l4g.Critical(err)
-		os.Exit(1)
-
+		log.Fatal(err)
 	}
 
 	// Aggregate file paths as strings
@@ -57,8 +56,7 @@ func (e RedshiftManifestEmitter) Emit(b Buffer, t Transformer) {
 	_, err = db.Exec(c)
 
 	if err != nil {
-		l4g.Critical(err)
-		os.Exit(1)
+		log.Fatal(err)
 	}
 
 	// Insert file paths into File Names table
@@ -66,8 +64,7 @@ func (e RedshiftManifestEmitter) Emit(b Buffer, t Transformer) {
 	_, err = db.Exec(i)
 
 	if err != nil {
-		l4g.Critical(err)
-		os.Exit(1)
+		log.Fatal(err)
 	}
 
 	l4g.Info("[%v] copied to Redshift", manifestFileName)

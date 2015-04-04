@@ -1,8 +1,8 @@
 package connector
 
 import (
+	"log"
 	"math"
-	"os"
 	"time"
 
 	"github.com/ezoic/go-kinesis"
@@ -62,8 +62,7 @@ func (p Pipeline) ProcessShard(ksis *kinesis.Kinesis, shardID string) {
 	shardInfo, err := ksis.GetShardIterator(args)
 
 	if err != nil {
-		l4g.Critical("GetShardIterator ERROR: %v", err)
-		os.Exit(1)
+		log.Fatalf("GetShardIterator ERROR: %v\n", err)
 	}
 
 	shardIterator := shardInfo.ShardIterator
@@ -85,8 +84,7 @@ func (p Pipeline) ProcessShard(ksis *kinesis.Kinesis, shardID string) {
 				consecutiveErrorAttempts++
 				continue
 			} else {
-				l4g.Critical("GetRecords ERROR: %v\n", err)
-				os.Exit(1)
+				log.Fatalf("GetRecords ERROR: %v\n", err)
 			}
 		} else {
 			consecutiveErrorAttempts = 0
