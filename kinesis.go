@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/ezoic/go-kinesis"
-	l4g "github.com/ezoic/sol/log4go"
+	l4g "github.com/ezoic/log4go"
 )
 
 // CreateStream creates a new Kinesis stream (uses existing stream if exists) and

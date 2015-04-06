@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/ezoic/go-kinesis"
-	l4g "github.com/ezoic/sol/log4go"
+	l4g "github.com/ezoic/log4go"
 )
 
 // Pipeline is used as a record processor to configure a pipline.

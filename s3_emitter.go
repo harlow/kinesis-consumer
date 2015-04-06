@@ -7,7 +7,7 @@ import (
 
 	"github.com/crowdmob/goamz/aws"
 	"github.com/crowdmob/goamz/s3"
-	l4g "github.com/ezoic/sol/log4go"
+	l4g "github.com/ezoic/log4go"
 )
 
 // S3Emitter is an implementation of Emitter used to store files from a Kinesis stream in S3.

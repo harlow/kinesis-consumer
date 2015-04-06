@@ -8,7 +8,7 @@ import (
 	"os"
 
 	// Postgres package is used when sql.Open is called
-	l4g "github.com/ezoic/sol/log4go"
+	l4g "github.com/ezoic/log4go"
 	_ "github.com/lib/pq"
 )
 

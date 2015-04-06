@@ -2,7 +2,7 @@ package connector
 
 import (
 	"github.com/ezoic/go-kinesis"
-	l4g "github.com/ezoic/sol/log4go"
+	l4g "github.com/ezoic/log4go"
 )
 
 // An implementation of Emitter that puts event data on S3 file, and then puts the
