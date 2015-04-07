@@ -28,7 +28,7 @@ func (p Pipeline) isRecoverableError(err error) bool {
 	r := false
 
 	cErr, ok := err.(*kinesis.Error)
-	if ok && cErr.Code == "ProvisionedThroughputExceeded" {
+	if ok && cErr.Code == "ProvisionedThroughputExceededException" {
 		r = true
 	}
 
