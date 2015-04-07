@@ -3,6 +3,7 @@ package connector
 import (
 	"log"
 	"math"
+	"reflect"
 	"time"
 
 	"github.com/ezoic/go-kinesis"
@@ -23,12 +24,18 @@ type Pipeline struct {
 	Transformer Transformer
 }
 
+var pipelineRecoverableErrorCodes = map[string]bool{
+	"ProvisionedThroughputExceededException": true,
+}
+
 // this determines whether the error is recoverable
 func (p Pipeline) isRecoverableError(err error) bool {
 	r := false
 
+	l4g.Debug("isRecoverableError, type %s, value (+%v)", reflect.TypeOf(err).Name(), err)
+
 	cErr, ok := err.(*kinesis.Error)
-	if ok && cErr.Code == "ProvisionedThroughputExceededException" {
+	if ok && pipelineRecoverableErrorCodes[cErr.Code] == true {
 		r = true
 	}
 
