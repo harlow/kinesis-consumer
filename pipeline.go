@@ -31,6 +31,10 @@ type pipelineIsRecoverableErrorFunc func(error) bool
 func pipelineKinesisIsRecoverableError(err error) bool {
 	recoverableErrorCodes := map[string]bool{
 		"ProvisionedThroughputExceededException": true,
+		"InternalFailure":                        true,
+		"Throttling":                             true,
+		"ServiceUnavailable":                     true,
+		//"ExpiredIteratorException":               true,
 	}
 	r := false
 	cErr, ok := err.(*kinesis.Error)
@@ -151,7 +155,7 @@ func (p Pipeline) ProcessShard(ksis *kinesis.Kinesis, shardID string) {
 			l4g.Error("NextShardIterator ERROR: %v", err)
 			break
 		} else {
-			//time.Sleep(5 * time.Second)
+			time.Sleep(5 * time.Second)
 		}
 
 		if p.Buffer.ShouldFlush() {
