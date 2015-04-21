@@ -4,6 +4,7 @@ import (
 	"log"
 	"math"
 	"net"
+	"net/url"
 	"reflect"
 	"time"
 
@@ -44,6 +45,15 @@ func pipelineKinesisIsRecoverableError(err error) bool {
 	return r
 }
 
+func pipelineUrlIsRecoverableError(err error) bool {
+	r := false
+	_, ok := err.(*url.Error)
+	if ok {
+		r = true
+	}
+	return r
+}
+
 func pipelineNetIsRecoverableError(err error) bool {
 	recoverableErrors := map[string]bool{
 		"connection reset by peer": true,
@@ -57,14 +67,14 @@ func pipelineNetIsRecoverableError(err error) bool {
 }
 
 var pipelineIsRecoverableErrors = []pipelineIsRecoverableErrorFunc{
-	pipelineKinesisIsRecoverableError, pipelineNetIsRecoverableError,
+	pipelineKinesisIsRecoverableError, pipelineNetIsRecoverableError, pipelineUrlIsRecoverableError,
 }
 
 // this determines whether the error is recoverable
 func (p Pipeline) isRecoverableError(err error) bool {
 	r := false
 
-	log.Printf("isRecoverableError, type %s, value (+%v)\n", reflect.TypeOf(err).String(), err)
+	log.Printf("isRecoverableError, type %s, value (%#v)\n", reflect.TypeOf(err).String(), err)
 
 	for _, errF := range pipelineIsRecoverableErrors {
 		r = errF(err)
@@ -114,6 +124,10 @@ func (p Pipeline) ProcessShard(ksis *kinesis.Kinesis, shardID string) {
 	consecutiveErrorAttempts := 0
 
 	for {
+
+		if consecutiveErrorAttempts > 50 {
+			log.Fatalln("Too many consecutive error attempts")
+		}
 
 		// handle the aws backoff stuff
 		p.handleAwsWaitTimeExp(consecutiveErrorAttempts)
