@@ -110,6 +110,7 @@ func main() {
 			Checkpoint:  &c,
 			Emitter:     &e,
 			Filter:      &f,
+			Logger:      log.New(os.Stdout, "KINESIS: ", log.Ldate|log.Ltime|log.Lshortfile),
 			StreamName:  cfg.Kinesis.InputStream,
 			Transformer: &t,
 		}
@@ -144,6 +145,7 @@ func main() {
 			Checkpoint:  &c,
 			Emitter:     &e,
 			Filter:      &f,
+			Logger:      log.New(os.Stdout, "KINESIS: ", log.Ldate|log.Ltime|log.Lshortfile),
 			StreamName:  cfg.Kinesis.OutputStream,
 			Transformer: &t,
 		}

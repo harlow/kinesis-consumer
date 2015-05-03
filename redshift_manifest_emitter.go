@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"strings"
 	"time"
@@ -25,6 +24,7 @@ type RedshiftManifestEmitter struct {
 	FileTable     string
 	Format        string
 	Jsonpaths     string
+	Logger        Logger
 	S3Bucket      string
 	SecretKey     string
 }
@@ -35,7 +35,7 @@ func (e RedshiftManifestEmitter) Emit(b Buffer, t Transformer) {
 	db, err := sql.Open("postgres", os.Getenv("REDSHIFT_URL"))
 
 	if err != nil {
-		log.Fatal(err)
+		e.Logger.Fatalf("sql.Open ERROR: %v\n", err)
 	}
 
 	// Aggregate file paths as strings
@@ -55,7 +55,7 @@ func (e RedshiftManifestEmitter) Emit(b Buffer, t Transformer) {
 	_, err = db.Exec(c)
 
 	if err != nil {
-		log.Fatal(err)
+		e.Logger.Fatalf("db.Exec ERROR: %v\n", err)
 	}
 
 	// Insert file paths into File Names table
@@ -63,10 +63,10 @@ func (e RedshiftManifestEmitter) Emit(b Buffer, t Transformer) {
 	_, err = db.Exec(i)
 
 	if err != nil {
-		log.Fatal(err)
+		e.Logger.Fatalf("db.Exec ERROR: %v\n", err)
 	}
 
-	log.Printf("[%v] copied to Redshift", manifestFileName)
+	e.Logger.Printf("[%v] copied to Redshift", manifestFileName)
 	db.Close()
 }
 

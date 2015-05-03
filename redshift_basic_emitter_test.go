@@ -5,7 +5,7 @@ import (
 )
 
 func TestCopyStatement(t *testing.T) {
-	e := RedshiftBasicEmtitter{
+	e := RedshiftBasicEmitter{
 		Delimiter: ",",
 		S3Bucket:  "test_bucket",
 		TableName: "test_table",

@@ -1,8 +1,6 @@
 package connector
 
 import (
-	"log"
-
 	"github.com/sendgridlabs/go-kinesis"
 )
 
@@ -12,6 +10,7 @@ type S3ManifestEmitter struct {
 	OutputStream string
 	S3Bucket     string
 	Ksis         *kinesis.Kinesis
+	Logger       Logger
 }
 
 func (e S3ManifestEmitter) Emit(b Buffer, t Transformer) {
@@ -30,8 +29,8 @@ func (e S3ManifestEmitter) Emit(b Buffer, t Transformer) {
 	_, err := e.Ksis.PutRecord(args)
 
 	if err != nil {
-		log.Printf("PutRecord ERROR: %v", err)
+		e.Logger.Printf("PutRecord ERROR: %v", err)
 	} else {
-		log.Printf("[%s] emitted to [%s]", b.FirstSequenceNumber(), e.OutputStream)
+		e.Logger.Printf("[%s] emitted to [%s]", b.FirstSequenceNumber(), e.OutputStream)
 	}
 }

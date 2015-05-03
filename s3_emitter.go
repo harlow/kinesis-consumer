@@ -3,7 +3,6 @@ package connector
 import (
 	"bytes"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/crowdmob/goamz/aws"
@@ -17,6 +16,7 @@ import (
 // from the first and last sequence numbers of the records contained in that file separated by a
 // dash. This struct requires the configuration of an S3 bucket and endpoint.
 type S3Emitter struct {
+	Logger   Logger
 	S3Bucket string
 }
 
@@ -44,8 +44,8 @@ func (e S3Emitter) Emit(b Buffer, t Transformer) {
 	err := bucket.Put(s3File, buffer.Bytes(), "text/plain", s3.Private, s3.Options{})
 
 	if err != nil {
-		log.Printf("S3Put ERROR: %v\n", err)
+		e.Logger.Fatalf("S3Put ERROR: %v\n", err.Error())
 	} else {
-		log.Printf("[%v] records emitted to [%s]\n", b.NumRecordsInBuffer(), e.S3Bucket)
+		e.Logger.Printf("[%v] records emitted to [%s]\n", b.NumRecordsInBuffer(), e.S3Bucket)
 	}
 }

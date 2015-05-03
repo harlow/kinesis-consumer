@@ -1,7 +1,6 @@
 package connector
 
 import (
-	"log"
 	"time"
 
 	"github.com/sendgridlabs/go-kinesis"
@@ -17,6 +16,7 @@ type Pipeline struct {
 	Checkpoint  Checkpoint
 	Emitter     Emitter
 	Filter      Filter
+	Logger      Logger
 	StreamName  string
 	Transformer Transformer
 }
@@ -38,7 +38,7 @@ func (p Pipeline) ProcessShard(ksis *kinesis.Kinesis, shardID string) {
 	shardInfo, err := ksis.GetShardIterator(args)
 
 	if err != nil {
-		log.Fatalf("GetShardIterator ERROR: %v\n", err)
+		p.Logger.Fatalf("GetShardIterator ERROR: %v\n", err)
 	}
 
 	shardIterator := shardInfo.ShardIterator
@@ -49,7 +49,7 @@ func (p Pipeline) ProcessShard(ksis *kinesis.Kinesis, shardID string) {
 		recordSet, err := ksis.GetRecords(args)
 
 		if err != nil {
-			log.Fatalf("GetRecords ERROR: %v\n", err)
+			p.Logger.Fatalf("GetRecords ERROR: %v\n", err)
 		}
 
 		if len(recordSet.Records) > 0 {
@@ -57,7 +57,7 @@ func (p Pipeline) ProcessShard(ksis *kinesis.Kinesis, shardID string) {
 				data := v.GetData()
 
 				if err != nil {
-					log.Printf("GetData ERROR: %v\n", err)
+					p.Logger.Printf("GetData ERROR: %v\n", err)
 					continue
 				}
 
@@ -68,7 +68,7 @@ func (p Pipeline) ProcessShard(ksis *kinesis.Kinesis, shardID string) {
 				}
 			}
 		} else if recordSet.NextShardIterator == "" || shardIterator == recordSet.NextShardIterator || err != nil {
-			log.Printf("NextShardIterator ERROR: %v\n", err)
+			p.Logger.Printf("NextShardIterator ERROR: %v\n", err)
 			break
 		} else {
 			time.Sleep(5 * time.Second)
