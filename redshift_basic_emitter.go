@@ -32,7 +32,28 @@ func (e RedshiftBasicEmtitter) Emit(b Buffer, t Transformer) {
 	s3Emitter.Emit(b, t)
 	s3File := s3Emitter.S3FileName(b.FirstSequenceNumber(), b.LastSequenceNumber())
 
-	_, err := e.Db.Exec(e.copyStatement(s3File))
+	stmt := e.copyStatement(s3File)
+
+	var err error
+	for i := 0; i < 10; i++ {
+
+		// handle aws backoff, this may be necessary if, for example, the
+		// s3 file has not appeared to the database yet
+		handleAwsWaitTimeExp(i)
+
+		// load into the database
+		_, err := e.Db.Exec(stmt)
+
+		// if the request succeeded, or its an unrecoverable error, break out of the loop
+		// because we are done
+		if err == nil || isRecoverableError(err) == false {
+			break
+		}
+
+		// recoverable error, lets warn
+		l4g.Warn(err)
+
+	}
 
 	if err != nil {
 		log.Fatal(err)

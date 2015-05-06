@@ -2,10 +2,6 @@ package connector
 
 import (
 	"log"
-	"math"
-	"net"
-	"net/url"
-	"reflect"
 	"time"
 
 	"github.com/ezoic/go-kinesis"
@@ -25,78 +21,6 @@ type Pipeline struct {
 	StreamName                string
 	Transformer               Transformer
 	CheckpointFilteredRecords bool
-}
-
-type pipelineIsRecoverableErrorFunc func(error) bool
-
-func pipelineKinesisIsRecoverableError(err error) bool {
-	recoverableErrorCodes := map[string]bool{
-		"ProvisionedThroughputExceededException": true,
-		"InternalFailure":                        true,
-		"Throttling":                             true,
-		"ServiceUnavailable":                     true,
-		//"ExpiredIteratorException":               true,
-	}
-	r := false
-	cErr, ok := err.(*kinesis.Error)
-	if ok && recoverableErrorCodes[cErr.Code] == true {
-		r = true
-	}
-	return r
-}
-
-func pipelineUrlIsRecoverableError(err error) bool {
-	r := false
-	_, ok := err.(*url.Error)
-	if ok {
-		r = true
-	}
-	return r
-}
-
-func pipelineNetIsRecoverableError(err error) bool {
-	recoverableErrors := map[string]bool{
-		"connection reset by peer": true,
-	}
-	r := false
-	cErr, ok := err.(*net.OpError)
-	if ok && recoverableErrors[cErr.Err.Error()] == true {
-		r = true
-	}
-	return r
-}
-
-var pipelineIsRecoverableErrors = []pipelineIsRecoverableErrorFunc{
-	pipelineKinesisIsRecoverableError, pipelineNetIsRecoverableError, pipelineUrlIsRecoverableError,
-}
-
-// this determines whether the error is recoverable
-func (p Pipeline) isRecoverableError(err error) bool {
-	r := false
-
-	log.Printf("isRecoverableError, type %s, value (%#v)\n", reflect.TypeOf(err).String(), err)
-
-	for _, errF := range pipelineIsRecoverableErrors {
-		r = errF(err)
-		if r {
-			break
-		}
-	}
-
-	return r
-}
-
-// handle the aws exponential backoff
-func (p Pipeline) handleAwsWaitTimeExp(attempts int) {
-
-	//http://docs.aws.amazon.com/general/latest/gr/api-retries.html
-	// wait up to 5 minutes based on the aws exponential backoff algorithm
-	if attempts > 0 {
-		waitTime := time.Duration(math.Min(100*math.Pow(2, float64(attempts)), 300000)) * time.Millisecond
-		l4g.Finest("handleAwsWaitTimeExp:%s", waitTime.String())
-		time.Sleep(waitTime)
-	}
-
 }
 
 // ProcessShard kicks off the process of a Kinesis Shard.
@@ -130,14 +54,14 @@ func (p Pipeline) ProcessShard(ksis *kinesis.Kinesis, shardID string) {
 		}
 
 		// handle the aws backoff stuff
-		p.handleAwsWaitTimeExp(consecutiveErrorAttempts)
+		handleAwsWaitTimeExp(consecutiveErrorAttempts)
 
 		args = kinesis.NewArgs()
 		args.Add("ShardIterator", shardIterator)
 		recordSet, err := ksis.GetRecords(args)
 
 		if err != nil {
-			if p.isRecoverableError(err) {
+			if isRecoverableError(err) {
 				l4g.Info("recoverable error, %s", err)
 				consecutiveErrorAttempts++
 				continue
