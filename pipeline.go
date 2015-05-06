@@ -1,7 +1,6 @@
 package connector
 
 import (
-	"math"
 	"time"
 
 	"github.com/sendgridlabs/go-kinesis"
@@ -19,24 +18,6 @@ type Pipeline struct {
 	Filter      Filter
 	StreamName  string
 	Transformer Transformer
-}
-
-// determine whether the error is recoverable
-func (p Pipeline) isRecoverableError(err error) bool {
-	cErr, ok := err.(*kinesis.Error)
-	if ok && cErr.Code == "ProvisionedThroughputExceeded" {
-		return true
-	}
-	return false
-}
-
-// handle the aws exponential backoff
-// http://docs.aws.amazon.com/general/latest/gr/api-retries.html
-func (p Pipeline) handleAwsWaitTimeExp(attempts int) {
-	// wait up to 5 minutes based on the aws exponential backoff algorithm
-	logger.Printf("waitingnow")
-	waitTime := time.Duration(math.Min(100*math.Pow(2, float64(attempts)), 300000)) * time.Millisecond
-	time.Sleep(waitTime)
 }
 
 // ProcessShard kicks off the process of a Kinesis Shard.
@@ -63,15 +44,19 @@ func (p Pipeline) ProcessShard(ksis *kinesis.Kinesis, shardID string) {
 	consecutiveErrorAttempts := 0
 
 	for {
+		if consecutiveErrorAttempts > 50 {
+			logger.Fatalf("Too many consecutive error attempts")
+		}
+
 		args = kinesis.NewArgs()
 		args.Add("ShardIterator", shardIterator)
 		recordSet, err := ksis.GetRecords(args)
 
 		if err != nil {
-			if p.isRecoverableError(err) {
+			if isRecoverableError(err) {
 				logger.Printf("GetRecords RECOVERABLE_ERROR: %v\n", err)
 				consecutiveErrorAttempts++
-				p.handleAwsWaitTimeExp(consecutiveErrorAttempts)
+				handleAwsWaitTimeExp(consecutiveErrorAttempts)
 				continue
 			} else {
 				logger.Fatalf("GetRecords ERROR: %v\n", err)

@@ -33,9 +33,20 @@ func (e RedshiftBasicEmitter) Emit(b Buffer, t Transformer) {
 		logger.Fatalf("sql.Open ERROR: %v\n", err)
 	}
 
-	_, err = db.Exec(e.copyStatement(s3File))
+	for i := 0; i < 10; i++ {
+		// handle aws backoff, this may be necessary if, for example, the
+		// s3 file has not appeared to the database yet
+		handleAwsWaitTimeExp(i)
 
-	if err != nil {
+		// load S3File into database
+		_, err = db.Exec(e.copyStatement(s3File))
+
+		// if the request succeeded, or its an unrecoverable error, break out of
+		// the loop because we are done
+		if err == nil || isRecoverableError(err) == false {
+			break
+		}
+
 		logger.Fatalf("db.Exec ERROR: %v\n", err)
 	}
 
