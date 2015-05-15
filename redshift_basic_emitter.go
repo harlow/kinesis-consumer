@@ -7,6 +7,7 @@ import (
 	"os"
 
 	// Postgres package is used when sql.Open is called
+	l4g "github.com/ezoic/log4go"
 	_ "github.com/lib/pq"
 )
 
@@ -18,7 +19,9 @@ type RedshiftBasicEmitter struct {
 	Format    string
 	Jsonpaths string
 	S3Bucket  string
+	S3Prefix  string
 	TableName string
+	Db        *sql.DB
 }
 
 // Emit is invoked when the buffer is full. This method leverages the S3Emitter and
@@ -27,27 +30,42 @@ func (e RedshiftBasicEmitter) Emit(b Buffer, t Transformer) {
 	s3Emitter := S3Emitter{S3Bucket: e.S3Bucket}
 	s3Emitter.Emit(b, t)
 	s3File := s3Emitter.S3FileName(b.FirstSequenceNumber(), b.LastSequenceNumber())
-	db, err := sql.Open("postgres", os.Getenv("REDSHIFT_URL"))
 
-	if err != nil {
-		logger.Fatalf("sql.Open ERROR: %v\n", err)
+	stmt := e.copyStatement(s3File)
+
+	var err error
+	for i := 0; i < 10; i++ {
+
+		// handle aws backoff, this may be necessary if, for example, the
+		// s3 file has not appeared to the database yet
+		handleAwsWaitTimeExp(i)
+
+		// load into the database
+		_, err := e.Db.Exec(stmt)
+
+		// if the request succeeded, or its an unrecoverable error, break out of the loop
+		// because we are done
+		if err == nil || isRecoverableError(err) == false {
+			break
+		}
+
+		// recoverable error, lets warn
+		l4g.Warn(err)
+
 	}
-
-	_, err = db.Exec(e.copyStatement(s3File))
 
 	if err != nil {
 		logger.Fatalf("db.Exec ERROR: %v\n", err)
 	}
 
 	logger.Printf("Redshift load completed.\n")
-	db.Close()
 }
 
 // Creates the SQL copy statement issued to Redshift cluster.
 func (e RedshiftBasicEmitter) copyStatement(s3File string) string {
 	b := new(bytes.Buffer)
 	b.WriteString(fmt.Sprintf("COPY %v ", e.TableName))
-	b.WriteString(fmt.Sprintf("FROM 's3://%v%v' ", e.S3Bucket, s3File))
+	b.WriteString(fmt.Sprintf("FROM 's3://%v/%v' ", e.S3Bucket, s3File))
 	b.WriteString(fmt.Sprintf("CREDENTIALS 'aws_access_key_id=%v;", os.Getenv("AWS_ACCESS_KEY")))
 	b.WriteString(fmt.Sprintf("aws_secret_access_key=%v' ", os.Getenv("AWS_SECRET_KEY")))
 	switch e.Format {
@@ -59,5 +77,6 @@ func (e RedshiftBasicEmitter) copyStatement(s3File string) string {
 		b.WriteString(fmt.Sprintf("DELIMITER '%v'", e.Delimiter))
 	}
 	b.WriteString(";")
+	l4g.Debug(b.String())
 	return b.String()
 }
