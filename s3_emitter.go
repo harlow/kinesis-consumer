@@ -16,7 +16,6 @@ import (
 // from the first and last sequence numbers of the records contained in that file separated by a
 // dash. This struct requires the configuration of an S3 bucket and endpoint.
 type S3Emitter struct {
-	Logger   Logger
 	S3Bucket string
 }
 
@@ -44,8 +43,8 @@ func (e S3Emitter) Emit(b Buffer, t Transformer) {
 	err := bucket.Put(s3File, buffer.Bytes(), "text/plain", s3.Private, s3.Options{})
 
 	if err != nil {
-		e.Logger.Fatalf("S3Put ERROR: %v\n", err.Error())
+		logger.Fatalf("S3Put ERROR: %v\n", err.Error())
 	} else {
-		e.Logger.Printf("[%v] records emitted to [%s]\n", b.NumRecordsInBuffer(), e.S3Bucket)
+		logger.Printf("[%v] records emitted to [%s]\n", b.NumRecordsInBuffer(), e.S3Bucket)
 	}
 }

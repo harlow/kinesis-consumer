@@ -17,7 +17,6 @@ type RedshiftBasicEmitter struct {
 	Delimiter string
 	Format    string
 	Jsonpaths string
-	Logger    Logger
 	S3Bucket  string
 	TableName string
 }
@@ -31,16 +30,16 @@ func (e RedshiftBasicEmitter) Emit(b Buffer, t Transformer) {
 	db, err := sql.Open("postgres", os.Getenv("REDSHIFT_URL"))
 
 	if err != nil {
-		e.Logger.Fatalf("sql.Open ERROR: %v\n", err)
+		logger.Fatalf("sql.Open ERROR: %v\n", err)
 	}
 
 	_, err = db.Exec(e.copyStatement(s3File))
 
 	if err != nil {
-		e.Logger.Fatalf("db.Exec ERROR: %v\n", err)
+		logger.Fatalf("db.Exec ERROR: %v\n", err)
 	}
 
-	e.Logger.Printf("Redshift load completed.\n")
+	logger.Printf("Redshift load completed.\n")
 	db.Close()
 }
 

@@ -10,7 +10,6 @@ type S3ManifestEmitter struct {
 	OutputStream string
 	S3Bucket     string
 	Ksis         *kinesis.Kinesis
-	Logger       Logger
 }
 
 func (e S3ManifestEmitter) Emit(b Buffer, t Transformer) {
@@ -29,8 +28,8 @@ func (e S3ManifestEmitter) Emit(b Buffer, t Transformer) {
 	_, err := e.Ksis.PutRecord(args)
 
 	if err != nil {
-		e.Logger.Printf("PutRecord ERROR: %v", err)
+		logger.Printf("PutRecord ERROR: %v", err)
 	} else {
-		e.Logger.Printf("[%s] emitted to [%s]", b.FirstSequenceNumber(), e.OutputStream)
+		logger.Printf("[%s] emitted to [%s]", b.FirstSequenceNumber(), e.OutputStream)
 	}
 }
