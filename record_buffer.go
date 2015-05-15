@@ -20,7 +20,9 @@ func (b *RecordBuffer) ProcessRecord(record interface{}, sequenceNumber string) 
 	b.lastSequenceNumber = sequenceNumber
 
 	if !b.sequenceExists(sequenceNumber) {
-		b.recordsInBuffer = append(b.recordsInBuffer, record)
+		if record != nil {
+			b.recordsInBuffer = append(b.recordsInBuffer, record)
+		}
 		b.sequencesInBuffer = append(b.sequencesInBuffer, sequenceNumber)
 	}
 }
@@ -32,7 +34,7 @@ func (b *RecordBuffer) Records() []interface{} {
 
 // NumRecordsInBuffer returns the number of messages in the buffer.
 func (b RecordBuffer) NumRecordsInBuffer() int {
-	return len(b.sequencesInBuffer)
+	return len(b.recordsInBuffer)
 }
 
 // Flush empties the buffer and resets the sequence counter.
