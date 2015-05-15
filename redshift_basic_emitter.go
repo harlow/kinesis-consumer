@@ -7,7 +7,7 @@ import (
 	"os"
 
 	// Postgres package is used when sql.Open is called
-	l4g "github.com/ezoic/log4go"
+
 	_ "github.com/lib/pq"
 )
 
@@ -50,7 +50,7 @@ func (e RedshiftBasicEmitter) Emit(b Buffer, t Transformer) {
 		}
 
 		// recoverable error, lets warn
-		l4g.Warn(err)
+		logger.Printf("%v", err)
 
 	}
 
@@ -77,6 +77,6 @@ func (e RedshiftBasicEmitter) copyStatement(s3File string) string {
 		b.WriteString(fmt.Sprintf("DELIMITER '%v'", e.Delimiter))
 	}
 	b.WriteString(";")
-	l4g.Debug(b.String())
+	logger.Printf(b.String())
 	return b.String()
 }

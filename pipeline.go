@@ -1,10 +1,10 @@
 package connector
 
 import (
+	"log"
 	"time"
 
-	"github.com/ezoic/go-kinesis"
-	l4g "github.com/ezoic/log4go"
+	"github.com/sendgridlabs/go-kinesis"
 )
 
 // Pipeline is used as a record processor to configure a pipline.
@@ -61,11 +61,11 @@ func (p Pipeline) ProcessShard(ksis *kinesis.Kinesis, shardID string) {
 
 		if err != nil {
 			if isRecoverableError(err) {
-				p.Logger.Infof("recoverable error, %s", err)
+				logger.Printf("recoverable error, %s", err)
 				consecutiveErrorAttempts++
 				continue
 			} else {
-				p.Logger.Fatalf("GetRecords ERROR: %v\n", err)
+				logger.Fatalf("GetRecords ERROR: %v\n", err)
 			}
 		} else {
 			consecutiveErrorAttempts = 0

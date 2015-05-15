@@ -5,8 +5,8 @@ import (
 	"net"
 	"testing"
 
-	"github.com/ezoic/go-kinesis"
 	"github.com/lib/pq"
+	"github.com/sendgridlabs/go-kinesis"
 )
 
 func Test_isRecoverableError(t *testing.T) {

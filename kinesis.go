@@ -3,8 +3,7 @@ package connector
 import (
 	"time"
 
-	"github.com/ezoic/go-kinesis"
-	l4g "github.com/ezoic/log4go"
+	"github.com/sendgridlabs/go-kinesis"
 )
 
 // CreateStream creates a new Kinesis stream (uses existing stream if exists) and
@@ -14,7 +13,7 @@ func CreateStream(k *kinesis.Kinesis, streamName string, shardCount int) {
 		err := k.CreateStream(streamName, shardCount)
 
 		if err != nil {
-			l4g.Error("CreateStream ERROR: %v", err)
+			logger.Printf("CreateStream ERROR: %v", err)
 			return
 		}
 	}
@@ -27,7 +26,7 @@ func CreateStream(k *kinesis.Kinesis, streamName string, shardCount int) {
 		args.Add("StreamName", streamName)
 		resp, _ = k.DescribeStream(args)
 		streamStatus := resp.StreamDescription.StreamStatus
-		l4g.Info("Stream [%v] is %v", streamName, streamStatus)
+		logger.Printf("Stream [%v] is %v", streamName, streamStatus)
 
 		if streamStatus != "ACTIVE" {
 			time.Sleep(4 * time.Second)
@@ -43,7 +42,7 @@ func StreamExists(k *kinesis.Kinesis, streamName string) bool {
 	args := kinesis.NewArgs()
 	resp, err := k.ListStreams(args)
 	if err != nil {
-		l4g.Error("ListStream ERROR: %v", err)
+		logger.Printf("ListStream ERROR: %v", err)
 		return false
 	}
 	for _, s := range resp.StreamNames {

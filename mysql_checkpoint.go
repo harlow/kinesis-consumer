@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 
-	l4g "github.com/ezoic/log4go"
 	_ "github.com/go-sql-driver/mysql"
 )
 
@@ -24,13 +23,13 @@ type MysqlCheckpoint struct {
 // TRIM_HORIZON or AFTER_SEQUENCE_NUMBER (if checkpoint exists).
 func (c *MysqlCheckpoint) CheckpointExists(shardID string) bool {
 
-	l4g.Finest("SELECT sequence_number FROM " + c.TableName + " WHERE checkpoint_key = ?")
+	logger.Printf("SELECT sequence_number FROM " + c.TableName + " WHERE checkpoint_key = ?")
 
 	row := c.Db.QueryRow("SELECT sequence_number FROM "+c.TableName+" WHERE checkpoint_key = ?", c.key(shardID))
 	var val string
 	err := row.Scan(&val)
 	if err == nil {
-		l4g.Finest("sequence:%s", val)
+		logger.Printf("sequence:%s", val)
 		c.sequenceNumber = val
 		return true
 	}

@@ -9,9 +9,8 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/ezoic/go-kinesis"
-	l4g "github.com/ezoic/log4go"
 	"github.com/lib/pq"
+	"github.com/sendgridlabs/go-kinesis"
 )
 
 type isRecoverableErrorFunc func(error) bool
@@ -97,7 +96,7 @@ func handleAwsWaitTimeExp(attempts int) {
 	// wait up to 5 minutes based on the aws exponential backoff algorithm
 	if attempts > 0 {
 		waitTime := time.Duration(math.Min(100*math.Pow(2, float64(attempts)), 300000)) * time.Millisecond
-		l4g.Finest("handleAwsWaitTimeExp:%s", waitTime.String())
+		logger.Printf("handleAwsWaitTimeExp:%s", waitTime.String())
 		time.Sleep(waitTime)
 	}
 

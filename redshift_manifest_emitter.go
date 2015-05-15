@@ -11,7 +11,6 @@ import (
 
 	"github.com/crowdmob/goamz/aws"
 	"github.com/crowdmob/goamz/s3"
-	l4g "github.com/ezoic/log4go"
 	_ "github.com/lib/pq"
 )
 
@@ -119,7 +118,7 @@ func (e RedshiftManifestEmitter) writeManifestToS3(files []string, manifestFileN
 	content := e.generateManifestFile(files)
 	err := bucket.Put(manifestFileName, content, "text/plain", s3.Private, s3.Options{})
 	if err != nil {
-		l4g.Error("Error occured while uploding to S3: %v", err)
+		logger.Printf("Error occured while uploding to S3: %v", err)
 	}
 }
 

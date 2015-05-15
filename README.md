@@ -83,7 +83,6 @@ func newS3Pipeline(cfg Config) *connector.Pipeline {
 		Checkpoint:  c,
 		Emitter:     e,
 		Filter:      f,
-		Logger:      log.New(os.Stdout, "KINESIS: ", log.Ldate|log.Ltime|log.Lshortfile),
 		StreamName:  cfg.Kinesis.StreamName,
 		Transformer: t,
 	}
