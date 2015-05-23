@@ -2,6 +2,8 @@ package connector
 
 import (
 	"fmt"
+	"io/ioutil"
+	"log"
 	"net"
 	"testing"
 
@@ -10,6 +12,8 @@ import (
 )
 
 func Test_isRecoverableError(t *testing.T) {
+	log.SetOutput(ioutil.Discard)
+
 	testCases := []struct {
 		err           error
 		isRecoverable bool
