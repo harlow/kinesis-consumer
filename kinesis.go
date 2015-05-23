@@ -1,7 +1,6 @@
 package connector
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/sendgridlabs/go-kinesis"
@@ -14,7 +13,7 @@ func CreateStream(k *kinesis.Kinesis, streamName string, shardCount int) {
 		err := k.CreateStream(streamName, shardCount)
 
 		if err != nil {
-			fmt.Printf("CreateStream ERROR: %v\n", err)
+			logger.Printf("CreateStream ERROR: %v", err)
 			return
 		}
 	}
@@ -27,7 +26,7 @@ func CreateStream(k *kinesis.Kinesis, streamName string, shardCount int) {
 		args.Add("StreamName", streamName)
 		resp, _ = k.DescribeStream(args)
 		streamStatus := resp.StreamDescription.StreamStatus
-		fmt.Printf("Stream [%v] is %v\n", streamName, streamStatus)
+		logger.Printf("Stream [%v] is %v", streamName, streamStatus)
 
 		if streamStatus != "ACTIVE" {
 			time.Sleep(4 * time.Second)
@@ -43,7 +42,7 @@ func StreamExists(k *kinesis.Kinesis, streamName string) bool {
 	args := kinesis.NewArgs()
 	resp, err := k.ListStreams(args)
 	if err != nil {
-		fmt.Printf("ListStream ERROR: %v\n", err)
+		logger.Printf("ListStream ERROR: %v", err)
 		return false
 	}
 	for _, s := range resp.StreamNames {

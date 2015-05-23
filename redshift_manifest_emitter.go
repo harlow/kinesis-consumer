@@ -118,7 +118,7 @@ func (e RedshiftManifestEmitter) writeManifestToS3(files []string, manifestFileN
 	content := e.generateManifestFile(files)
 	err := bucket.Put(manifestFileName, content, "text/plain", s3.Private, s3.Options{})
 	if err != nil {
-		fmt.Printf("Error occured while uploding to S3: %v\n", err)
+		logger.Printf("Error occured while uploding to S3: %v", err)
 	}
 }
 

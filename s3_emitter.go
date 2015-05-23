@@ -17,13 +17,18 @@ import (
 // dash. This struct requires the configuration of an S3 bucket and endpoint.
 type S3Emitter struct {
 	S3Bucket string
+	S3Prefix string
 }
 
 // S3FileName generates a file name based on the First and Last sequence numbers from the buffer. The current
 // UTC date (YYYY-MM-DD) is base of the path to logically group days of batches.
 func (e S3Emitter) S3FileName(firstSeq string, lastSeq string) string {
 	date := time.Now().UTC().Format("2006/01/02")
-	return fmt.Sprintf("%v/%v-%v", date, firstSeq, lastSeq)
+	if e.S3Prefix == "" {
+		return fmt.Sprintf("%v/%v-%v", date, firstSeq, lastSeq)
+	} else {
+		return fmt.Sprintf("%v/%v/%v-%v", e.S3Prefix, date, firstSeq, lastSeq)
+	}
 }
 
 // Emit is invoked when the buffer is full. This method emits the set of filtered records.
