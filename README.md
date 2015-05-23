@@ -24,7 +24,9 @@ A connector pipeline uses the following interfaces:
 
 ## Usage
 
-Install the library:
+### Installation
+
+Get the package source:
 
     $ go get github.com/harlow/kinesis-connectors
 
