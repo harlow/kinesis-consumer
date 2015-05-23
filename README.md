@@ -42,8 +42,6 @@ package main
 
 import (
 	"fmt"
-	"log"
-	"net/http"
 	"os"
 
 	"code.google.com/p/gcfg"
@@ -75,7 +73,7 @@ func newS3Pipeline(cfg Config) *connector.Pipeline {
 		AppName:    cfg.Pipeline.Name,
 		StreamName: cfg.Kinesis.StreamName,
 	}
-	e := &connector.S3ManifestEmitter{
+	e := &connector.S3Emitter{
 		S3Bucket: cfg.S3.BucketName,
 	}
 	return &connector.Pipeline{
@@ -83,7 +81,6 @@ func newS3Pipeline(cfg Config) *connector.Pipeline {
 		Checkpoint:  c,
 		Emitter:     e,
 		Filter:      f,
-		Logger:      log.New(os.Stdout, "KINESIS: ", log.Ldate|log.Ltime|log.Lshortfile),
 		StreamName:  cfg.Kinesis.StreamName,
 		Transformer: t,
 	}
@@ -94,19 +91,16 @@ func main() {
 	var cfg Config
 	err := gcfg.ReadFileInto(&cfg, "pipeline.cfg")
 
-	// Set up kinesis client
+	// Set up kinesis client and stream
 	accessKey := os.Getenv("AWS_ACCESS_KEY")
 	secretKey := os.Getenv("AWS_SECRET_KEY")
 	ksis := kinesis.New(accessKey, secretKey, kinesis.Region{})
-
-	// Create and wait for streams
 	connector.CreateStream(ksis, cfg.Kinesis.StreamName, cfg.Kinesis.ShardCount)
 
 	// Fetch stream info
 	args := kinesis.NewArgs()
 	args.Add("StreamName", cfg.Kinesis.StreamName)
 	streamInfo, err := ksis.DescribeStream(args)
-
 	if err != nil {
 		fmt.Printf("Unable to connect to %s stream. Aborting.", cfg.Kinesis.StreamName)
 		return
