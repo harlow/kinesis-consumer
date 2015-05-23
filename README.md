@@ -28,7 +28,13 @@ Get the package source:
 
     $ go get github.com/harlow/kinesis-connectors
 
-### Logging
+### Examples
+
+Examples pipelines are proviede in [examples directory][demo].
+
+[demo]: https://github.com/harlow/kinesis-connectors/tree/master/examples
+
+### Custom Logging
 
 Default logging is handled by Package log. An application can override the defualt package logging by
 changing it's `logger` variable:
@@ -41,15 +47,14 @@ The customer logger must implement the [Logger interface][log_interface].
 
 [log_interface]: https://github.com/harlow/kinesis-connectors/blob/master/logger.go
 
-
-## Contributing
+### Contributing
 
 Please see [CONTRIBUTING.md] for more information. Thank you, [contributors]!
 
 [LICENSE]: /MIT-LICENSE
 [CONTRIBUTING.md]: /CONTRIBUTING.md
 
-## License
+### License
 
 Copyright (c) 2015 Harlow Ward. It is free software, and may
 be redistributed under the terms specified in the [LICENSE] file.
