@@ -30,12 +30,25 @@ Install the library:
 
     $ go get github.com/harlow/kinesis-connectors
 
-### Example S3 Pipeline
+### Logging
 
-The S3 Pipeline performs the following steps:
+Default logging is handled by Package log. An application can override the defualt package logging by
+changing it's `logger` variable:
 
-1. Pull records from Kinesis and buffer them untill the desired threshold is reached.
-2. Upload the records to an S3 bucket.
+```go
+connector.SetLogger(NewCustomLogger())
+```
+
+The customer logger must implement the [Logger interface][log_interface].
+
+[log_interface]: https://github.com/harlow/kinesis-connectors/blob/master/logger.go
+
+### Example Pipeline
+
+The S3 Connector Pipeline performs the following steps:
+
+1. Pull records from Kinesis and buffer them untill the desired threshold is met.
+2. Upload the batch of records to an S3 bucket.
 3. Set the current Shard checkpoint in Redis.
 
 The config vars are loaded done with [gcfg].
