@@ -1,11 +1,14 @@
 # Golang Kinesis Connectors
 
-__Note:__ _This codebase is a under active development. Expect breaking changes until 1.0 version release._
+__Note:__ _This codebase is a under active development._
 
 ### Kinesis connector applications written in Go
 
 Inspired by the [Amazon Kinesis Connector Library][1]. These components are used for extracting streaming event data
 into S3, Redshift, DynamoDB, and more. See the [API Docs][2] for package documentation.
+
+[1]: https://github.com/awslabs/amazon-kinesis-connectors
+[2]: http://godoc.org/github.com/harlow/kinesis-connectors
 
 ## Overview
 
@@ -35,7 +38,9 @@ The S3 Pipeline performs the following steps:
 2. Upload the records to an S3 bucket.
 3. Set the current Shard checkpoint in Redis.
 
-The config vars are loaded done with [gcfg][3].
+The config vars are loaded done with [gcfg].
+
+[gcfg]: https://code.google.com/p/gcfg/
 
 ```go
 package main
@@ -118,6 +123,17 @@ func main() {
 }
 ```
 
-[1]: https://github.com/awslabs/amazon-kinesis-connectors
-[2]: http://godoc.org/github.com/harlow/kinesis-connectors
-[3]: https://code.google.com/p/gcfg/
+## Contributing
+
+Please see [CONTRIBUTING.md].
+Thank you, [contributors]!
+
+[LICENSE]: /MIT-LICENSE
+[CONTRIBUTING.md]: /CONTRIBUTING.md
+
+## License
+
+Copyright (c) 2015 Harlow Ward. It is free software, and may
+be redistributed under the terms specified in the [LICENSE] file.
+
+[contributors]: https://github.com/harlow/kinesis-connectors/graphs/contributors
