@@ -30,15 +30,14 @@ Get the package source:
 
 ### Example Pipelines
 
-Examples pipelines are proviede in [examples directory][example].
+Examples pipelines:
 
-[example]: https://github.com/harlow/kinesis-connectors/tree/master/examples
+* [S3 Pipeline](https://github.com/harlow/kinesis-connectors/tree/master/examples/s3-pipeline)
+* [Redshift Basic Pipeline](https://github.com/harlow/kinesis-connectors/tree/master/examples/redshift-pipeline)
 
 ### Logging
 
-Default logging is handled by [go-kit package log](https://github.com/go-kit/kit/tree/master/log).
-
-Applications can override the default loging behaviour by implementing the [Logger interface][log_interface].
+Default logging is handled by [go-kit package log](https://github.com/go-kit/kit/tree/master/log). Applications can override the default loging behaviour by implementing the [Logger interface][log_interface].
 
 ```go
 connector.SetLogger(NewCustomLogger())
