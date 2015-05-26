@@ -27,34 +27,22 @@ A connector pipeline uses the following interfaces:
 Get the package source:
 
     $ go get github.com/harlow/kinesis-connectors
-    
-Import the `go-kinesis` and `kinesis-connector` packages:
-
-```go
-package main
-
-import (
-	"github.com/harlow/kinesis-connectors"
-	"github.com/sendgridlabs/go-kinesis"
-)
-```
 
 ### Example Pipelines
 
-Examples pipelines are proviede in [examples directory][example]. 
+Examples pipelines are proviede in [examples directory][example].
 
 [example]: https://github.com/harlow/kinesis-connectors/tree/master/examples
 
-### Logger
+### Logging
 
-Default logging is handled by Package log. An application can override the defualt package logging by
-changing it's `logger` variable:
+Default logging is handled by [go-kit package log](https://github.com/go-kit/kit/tree/master/log).
+
+Applications can override the default loging behaviour by implementing the [Logger interface][log_interface].
 
 ```go
 connector.SetLogger(NewCustomLogger())
 ```
-
-The customer logger must implement the [Logger interface][log_interface].
 
 [log_interface]: https://github.com/harlow/kinesis-connectors/blob/master/logger.go
 
