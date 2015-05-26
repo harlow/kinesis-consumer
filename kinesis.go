@@ -13,7 +13,7 @@ func CreateStream(k *kinesis.Kinesis, streamName string, shardCount int) {
 		err := k.CreateStream(streamName, shardCount)
 
 		if err != nil {
-			logger.Printf("CreateStream ERROR: %v", err)
+			logger.Log("error", "CreateStream", "msg", err.Error())
 			return
 		}
 	}
@@ -26,7 +26,7 @@ func CreateStream(k *kinesis.Kinesis, streamName string, shardCount int) {
 		args.Add("StreamName", streamName)
 		resp, _ = k.DescribeStream(args)
 		streamStatus := resp.StreamDescription.StreamStatus
-		logger.Printf("Stream [%v] is %v", streamName, streamStatus)
+		logger.Log("info", "DescribeStream", "stream", streamName, "status", streamStatus)
 
 		if streamStatus != "ACTIVE" {
 			time.Sleep(4 * time.Second)
@@ -42,7 +42,7 @@ func StreamExists(k *kinesis.Kinesis, streamName string) bool {
 	args := kinesis.NewArgs()
 	resp, err := k.ListStreams(args)
 	if err != nil {
-		logger.Printf("ListStream ERROR: %v", err)
+		logger.Log("error", "ListStream", "stream", streamName, "status", err.Error())
 		return false
 	}
 	for _, s := range resp.StreamNames {

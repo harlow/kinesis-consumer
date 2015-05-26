@@ -1,6 +1,8 @@
 package connector
 
 import (
+	"os"
+
 	"github.com/sendgridlabs/go-kinesis"
 )
 
@@ -12,11 +14,11 @@ type S3ManifestEmitter struct {
 	Ksis         *kinesis.Kinesis
 }
 
-func (e S3ManifestEmitter) Emit(b Buffer, t Transformer) {
+func (e S3ManifestEmitter) Emit(b Buffer, t Transformer, shardID string) {
 
 	// Emit buffer contents to S3 Bucket
 	s3Emitter := S3Emitter{S3Bucket: e.S3Bucket}
-	s3Emitter.Emit(b, t)
+	s3Emitter.Emit(b, t, shardID)
 	s3File := s3Emitter.S3FileName(b.FirstSequenceNumber(), b.LastSequenceNumber())
 
 	// Emit the file path to Kinesis Output stream
@@ -28,8 +30,9 @@ func (e S3ManifestEmitter) Emit(b Buffer, t Transformer) {
 	_, err := e.Ksis.PutRecord(args)
 
 	if err != nil {
-		logger.Printf("PutRecord ERROR: %v", err)
+		logger.Log("error", "PutRecord", "msg", err)
+		os.Exit(1)
 	} else {
-		logger.Printf("[%s] emitted to [%s]", b.FirstSequenceNumber(), e.OutputStream)
+		logger.Log("info", "S3ManifestEmitter", "shard", shardID, "firstSequenceNumber", b.FirstSequenceNumber(), "stream", e.OutputStream)
 	}
 }

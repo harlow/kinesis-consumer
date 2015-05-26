@@ -6,6 +6,9 @@
 # Environment vars
 .env
 
+# Seed data
+users.txt
+
 # Folders
 _obj
 _test

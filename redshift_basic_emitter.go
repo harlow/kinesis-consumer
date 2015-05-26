@@ -25,28 +25,29 @@ type RedshiftBasicEmitter struct {
 
 // Emit is invoked when the buffer is full. This method leverages the S3Emitter and
 // then issues a copy command to Redshift data store.
-func (e RedshiftBasicEmitter) Emit(b Buffer, t Transformer) {
+func (e RedshiftBasicEmitter) Emit(b Buffer, t Transformer, shardID string) {
 	s3Emitter := S3Emitter{S3Bucket: e.S3Bucket}
-	s3Emitter.Emit(b, t)
+	s3Emitter.Emit(b, t, shardID)
 	s3File := s3Emitter.S3FileName(b.FirstSequenceNumber(), b.LastSequenceNumber())
-
-	stmt := e.copyStatement(s3File)
 
 	for i := 0; i < 10; i++ {
 		// execute copy statement
-		_, err := e.Db.Exec(stmt)
+		_, err := e.Db.Exec(e.copyStatement(s3File))
 
 		// if the request succeeded, or its an unrecoverable error, break out of loop
-		if err == nil || isRecoverableError(err) == false {
+		if err == nil {
+			logger.Log("info", "RedshiftBasicEmitter", "shard", shardID, "file", s3File)
 			break
 		}
 
-		// handle aws backoff, this may be necessary if, for example, the
-		// s3 file has not appeared to the database yet
-		handleAwsWaitTimeExp(i)
+		// handle recoverable errors
+		if isRecoverableError(err) {
+			handleAwsWaitTimeExp(i)
+		} else {
+			logger.Log("error", "RedshiftBasicEmitter", "shard", shardID, "msg", err.Error())
+			break
+		}
 	}
-
-	logger.Printf("Redshift load completed.\n")
 }
 
 // Creates the SQL copy statement issued to Redshift cluster.

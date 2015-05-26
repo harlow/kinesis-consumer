@@ -1,6 +1,7 @@
 package connector
 
 import (
+	"os"
 	"time"
 
 	"github.com/sendgridlabs/go-kinesis"
@@ -38,7 +39,8 @@ func (p Pipeline) ProcessShard(ksis *kinesis.Kinesis, shardID string) {
 	shardInfo, err := ksis.GetShardIterator(args)
 
 	if err != nil {
-		logger.Fatalf("GetShardIterator ERROR: %v\n", err)
+		logger.Log("error", "GetShardIterator", "msg", err.Error())
+		os.Exit(1)
 	}
 
 	shardIterator := shardInfo.ShardIterator
@@ -46,7 +48,8 @@ func (p Pipeline) ProcessShard(ksis *kinesis.Kinesis, shardID string) {
 
 	for {
 		if consecutiveErrorAttempts > 50 {
-			logger.Fatalf("Too many consecutive error attempts")
+			logger.Log("error", "errorAttempts", "msg", "Too many consecutive error attempts")
+			os.Exit(1)
 		}
 
 		args = kinesis.NewArgs()
@@ -55,12 +58,12 @@ func (p Pipeline) ProcessShard(ksis *kinesis.Kinesis, shardID string) {
 
 		if err != nil {
 			if isRecoverableError(err) {
-				logger.Printf("GetRecords RECOVERABLE_ERROR: %v\n", err)
 				consecutiveErrorAttempts++
 				handleAwsWaitTimeExp(consecutiveErrorAttempts)
 				continue
 			} else {
-				logger.Fatalf("GetRecords ERROR: %v\n", err)
+				logger.Log("error", "GetRecords", "msg", err.Error())
+				os.Exit(1)
 			}
 		} else {
 			consecutiveErrorAttempts = 0
@@ -71,7 +74,7 @@ func (p Pipeline) ProcessShard(ksis *kinesis.Kinesis, shardID string) {
 				data := v.GetData()
 
 				if err != nil {
-					logger.Printf("GetData ERROR: %v\n", err)
+					logger.Log("info", "GetData", "msg", err.Error())
 					continue
 				}
 
@@ -84,7 +87,7 @@ func (p Pipeline) ProcessShard(ksis *kinesis.Kinesis, shardID string) {
 				}
 			}
 		} else if recordSet.NextShardIterator == "" || shardIterator == recordSet.NextShardIterator || err != nil {
-			logger.Printf("NextShardIterator ERROR: %v\n", err)
+			logger.Log("error", "NextShardIterator", "msg", err.Error())
 			break
 		} else {
 			time.Sleep(5 * time.Second)
@@ -92,7 +95,7 @@ func (p Pipeline) ProcessShard(ksis *kinesis.Kinesis, shardID string) {
 
 		if p.Buffer.ShouldFlush() {
 			if p.Buffer.NumRecordsInBuffer() > 0 {
-				p.Emitter.Emit(p.Buffer, p.Transformer)
+				p.Emitter.Emit(p.Buffer, p.Transformer, shardID)
 			}
 			p.Checkpoint.SetCheckpoint(shardID, p.Buffer.LastSequenceNumber())
 			p.Buffer.Flush()

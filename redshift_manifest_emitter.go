@@ -30,11 +30,12 @@ type RedshiftManifestEmitter struct {
 
 // Invoked when the buffer is full.
 // Emits a Manifest file to S3 and then performs the Redshift copy command.
-func (e RedshiftManifestEmitter) Emit(b Buffer, t Transformer) {
+func (e RedshiftManifestEmitter) Emit(b Buffer, t Transformer, shardID string) {
 	db, err := sql.Open("postgres", os.Getenv("REDSHIFT_URL"))
 
 	if err != nil {
-		logger.Fatalf("sql.Open ERROR: %v\n", err)
+		logger.Log("error", "sql.Open", "msg", err.Error())
+		os.Exit(1)
 	}
 
 	// Aggregate file paths as strings
@@ -54,7 +55,8 @@ func (e RedshiftManifestEmitter) Emit(b Buffer, t Transformer) {
 	_, err = db.Exec(c)
 
 	if err != nil {
-		logger.Fatalf("db.Exec ERROR: %v\n", err)
+		logger.Log("error", "db.Exec", "msg", err.Error())
+		os.Exit(1)
 	}
 
 	// Insert file paths into File Names table
@@ -62,10 +64,11 @@ func (e RedshiftManifestEmitter) Emit(b Buffer, t Transformer) {
 	_, err = db.Exec(i)
 
 	if err != nil {
-		logger.Fatalf("db.Exec ERROR: %v\n", err)
+		logger.Log("error", "db.Exec", "shard", shardID, "msg", err.Error())
+		os.Exit(1)
 	}
 
-	logger.Printf("[%v] copied to Redshift", manifestFileName)
+	logger.Log("info", "Redshfit COPY", "shard", shardID, "manifest", manifestFileName)
 	db.Close()
 }
 
@@ -118,7 +121,7 @@ func (e RedshiftManifestEmitter) writeManifestToS3(files []string, manifestFileN
 	content := e.generateManifestFile(files)
 	err := bucket.Put(manifestFileName, content, "text/plain", s3.Private, s3.Options{})
 	if err != nil {
-		logger.Printf("Error occured while uploding to S3: %v", err)
+		logger.Log("error", "writeManifestToS3", "msg", err.Error())
 	}
 }
 

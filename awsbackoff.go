@@ -16,26 +16,24 @@ type isRecoverableErrorFunc func(error) bool
 
 func kinesisIsRecoverableError(err error) bool {
 	recoverableErrorCodes := map[string]bool{
-		"ProvisionedThroughputExceededException": true,
 		"InternalFailure":                        true,
-		"Throttling":                             true,
+		"ProvisionedThroughputExceededException": true,
 		"ServiceUnavailable":                     true,
+		"Throttling":                             true,
 	}
-	r := false
 	cErr, ok := err.(*kinesis.Error)
 	if ok && recoverableErrorCodes[cErr.Code] == true {
-		r = true
+		return true
 	}
-	return r
+	return false
 }
 
 func urlIsRecoverableError(err error) bool {
-	r := false
 	_, ok := err.(*url.Error)
 	if ok {
-		r = true
+		return true
 	}
-	return r
+	return false
 }
 
 func netIsRecoverableError(err error) bool {
@@ -54,36 +52,32 @@ var redshiftRecoverableErrors = []*regexp.Regexp{
 }
 
 func redshiftIsRecoverableError(err error) bool {
-	r := false
 	if cErr, ok := err.(pq.Error); ok {
 		for _, re := range redshiftRecoverableErrors {
 			if re.MatchString(cErr.Message) {
-				r = true
-				break
+				return true
 			}
 		}
 	}
-	return r
+	return false
 }
 
 var isRecoverableErrors = []isRecoverableErrorFunc{
-	kinesisIsRecoverableError, netIsRecoverableError, urlIsRecoverableError, redshiftIsRecoverableError,
+	kinesisIsRecoverableError,
+	netIsRecoverableError,
+	redshiftIsRecoverableError,
+	urlIsRecoverableError,
 }
 
 // this determines whether the error is recoverable
 func isRecoverableError(err error) bool {
-	r := false
-
-	logger.Printf("isRecoverableError, type %s, value (%#v)\n", reflect.TypeOf(err).String(), err)
-
+	logger.Log("info", "isRecoverableError", "type", reflect.TypeOf(err).String(), "msg", err.Error())
 	for _, errF := range isRecoverableErrors {
-		r = errF(err)
-		if r {
-			break
+		if errF(err) {
+			return true
 		}
 	}
-
-	return r
+	return false
 }
 
 // handle the aws exponential backoff
@@ -92,7 +86,7 @@ func isRecoverableError(err error) bool {
 func handleAwsWaitTimeExp(attempts int) {
 	if attempts > 0 {
 		waitTime := time.Duration(math.Min(100*math.Pow(2, float64(attempts)), 300000)) * time.Millisecond
-		logger.Printf("handleAwsWaitTimeExp: %s\n", waitTime.String())
+		logger.Log("info", "handleAwsWaitTimeExp", "attempts", attempts, "waitTime", waitTime.String())
 		time.Sleep(waitTime)
 	}
 }

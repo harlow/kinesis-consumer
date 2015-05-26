@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 
+	"code.google.com/p/gcfg"
 	"github.com/harlow/kinesis-connectors"
 	"github.com/sendgridlabs/go-kinesis"
 )
