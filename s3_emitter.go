@@ -21,19 +21,8 @@ type S3Emitter struct {
 	S3Prefix string
 }
 
-// S3FileName generates a file name based on the First and Last sequence numbers from the buffer. The current
-// UTC date (YYYY-MM-DD) is base of the path to logically group days of batches.
-func (e S3Emitter) S3FileName(firstSeq string, lastSeq string) string {
-	date := time.Now().UTC().Format("2006/01/02")
-	if e.S3Prefix == "" {
-		return fmt.Sprintf("%v/%v-%v", date, firstSeq, lastSeq)
-	} else {
-		return fmt.Sprintf("%v/%v/%v-%v", e.S3Prefix, date, firstSeq, lastSeq)
-	}
-}
-
 // Emit is invoked when the buffer is full. This method emits the set of filtered records.
-func (e S3Emitter) Emit(b Buffer, t Transformer, shardID string) {
+func (e S3Emitter) Emit(b Buffer, t Transformer) {
 	auth, _ := aws.EnvAuth()
 	s3Con := s3.New(auth, aws.USEast)
 	bucket := s3Con.Bucket(e.S3Bucket)
@@ -49,9 +38,20 @@ func (e S3Emitter) Emit(b Buffer, t Transformer, shardID string) {
 	err := bucket.Put(s3File, buffer.Bytes(), "text/plain", s3.Private, s3.Options{})
 
 	if err != nil {
-		logger.Log("error", "S3Put", "shard", shardID, "msg", err.Error())
+		logger.Log("error", "S3Put", "msg", err.Error())
 		os.Exit(1)
 	} else {
-		logger.Log("info", "S3Emitter", "shard", shardID, "bucket", e.S3Bucket, "numRecords", b.NumRecordsInBuffer())
+		logger.Log("info", "S3Put", "recordsEmitted", len(b.Records()))
+	}
+}
+
+// S3FileName generates a file name based on the First and Last sequence numbers from the buffer. The current
+// UTC date (YYYY-MM-DD) is base of the path to logically group days of batches.
+func (e S3Emitter) S3FileName(firstSeq string, lastSeq string) string {
+	date := time.Now().UTC().Format("2006/01/02")
+	if e.S3Prefix == "" {
+		return fmt.Sprintf("%v/%v-%v", date, firstSeq, lastSeq)
+	} else {
+		return fmt.Sprintf("%v/%v/%v-%v", e.S3Prefix, date, firstSeq, lastSeq)
 	}
 }

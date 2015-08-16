@@ -22,7 +22,8 @@ func main() {
 	connector.CreateStream(ksis, "userStream", 2)
 
 	// read file
-	file, _ := os.Open("users.txt")
+	// https://s3.amazonaws.com/kinesis.test/users.txt
+	file, _ := os.Open("tmp/users.txt")
 	defer file.Close()
 	scanner := bufio.NewScanner(file)
 

@@ -1,10 +1,11 @@
 package connector
 
 import (
-	"os"
 	"time"
 
-	"github.com/sendgridlabs/go-kinesis"
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
+	"github.com/aws/aws-sdk-go/service/kinesis"
 )
 
 // Pipeline is used as a record processor to configure a pipline.
@@ -13,94 +14,84 @@ import (
 // interface. It has a data type (Model) as Records come in as a byte[] and are transformed to a Model.
 // Then they are buffered in Model form and when the buffer is full, Models's are passed to the emitter.
 type Pipeline struct {
-	Buffer                    Buffer
-	Checkpoint                Checkpoint
-	Emitter                   Emitter
-	Filter                    Filter
-	StreamName                string
-	Transformer               Transformer
-	CheckpointFilteredRecords bool
+	Buffer      Buffer
+	Checkpoint  Checkpoint
+	Emitter     Emitter
+	Filter      Filter
+	Kinesis     *kinesis.Kinesis
+	StreamName  string
+	Transformer Transformer
+
+	checkpointSequenceNumber string
 }
 
-// ProcessShard kicks off the process of a Kinesis Shard.
-// It is a long running process that will continue to read from the shard.
-func (p Pipeline) ProcessShard(ksis *kinesis.Kinesis, shardID string) {
-	args := kinesis.NewArgs()
-	args.Add("ShardId", shardID)
-	args.Add("StreamName", p.StreamName)
+// ProcessShard is a long running process that handles reading records from a Kinesis shard.
+func (p Pipeline) ProcessShard(shardID string) {
+	svc := kinesis.New(&aws.Config{Region: "us-east-1"})
+
+	args := &kinesis.GetShardIteratorInput{
+		ShardID:    aws.String(shardID),
+		StreamName: aws.String(p.StreamName),
+	}
 
 	if p.Checkpoint.CheckpointExists(shardID) {
-		args.Add("ShardIteratorType", "AFTER_SEQUENCE_NUMBER")
-		args.Add("StartingSequenceNumber", p.Checkpoint.SequenceNumber())
+		args.ShardIteratorType = aws.String("AFTER_SEQUENCE_NUMBER")
+		args.StartingSequenceNumber = aws.String(p.Checkpoint.SequenceNumber())
 	} else {
-		args.Add("ShardIteratorType", "TRIM_HORIZON")
+		args.ShardIteratorType = aws.String("TRIM_HORIZON")
 	}
 
-	shardInfo, err := ksis.GetShardIterator(args)
+	resp, err := svc.GetShardIterator(args)
 
 	if err != nil {
-		logger.Log("error", "GetShardIterator", "msg", err.Error())
-		os.Exit(1)
+		if awsErr, ok := err.(awserr.Error); ok {
+			logger.Log("error", "GetShardIterator", "code", awsErr.Code(), "msg", awsErr.Message(), "origError", awsErr.OrigErr())
+			return
+		}
 	}
 
-	shardIterator := shardInfo.ShardIterator
-	consecutiveErrorAttempts := 0
+	shardIterator := resp.ShardIterator
 
 	for {
-		if consecutiveErrorAttempts > 50 {
-			logger.Log("error", "errorAttempts", "msg", "Too many consecutive error attempts")
-			os.Exit(1)
-		}
-
-		args = kinesis.NewArgs()
-		args.Add("ShardIterator", shardIterator)
-		recordSet, err := ksis.GetRecords(args)
+		args := &kinesis.GetRecordsInput{ShardIterator: shardIterator}
+		resp, err := svc.GetRecords(args)
 
 		if err != nil {
-			if isRecoverableError(err) {
-				consecutiveErrorAttempts++
-				handleAwsWaitTimeExp(consecutiveErrorAttempts)
-				continue
-			} else {
-				logger.Log("error", "GetRecords", "msg", err.Error())
-				os.Exit(1)
+			if awsErr, ok := err.(awserr.Error); ok {
+				if awsErr.Code() == "ProvisionedThroughputExceededException" {
+					logger.Log("info", "GetRecords", "shardId", shardID, "msg", "rateLimit")
+					time.Sleep(5 * time.Second)
+					continue
+				} else {
+					logger.Log("error", "GetRecords", "shardId", shardID, "code", awsErr.Code(), "msg", awsErr.Message())
+					break
+				}
 			}
-		} else {
-			consecutiveErrorAttempts = 0
 		}
 
-		if len(recordSet.Records) > 0 {
-			for _, v := range recordSet.Records {
-				data := v.GetData()
+		if len(resp.Records) > 0 {
+			for _, r := range resp.Records {
+				transformedRecord := p.Transformer.ToRecord(r.Data)
 
-				if err != nil {
-					logger.Log("info", "GetData", "msg", err.Error())
-					continue
+				if p.Filter.KeepRecord(transformedRecord) {
+					p.Buffer.ProcessRecord(transformedRecord, *r.SequenceNumber)
 				}
 
-				r := p.Transformer.ToRecord(data)
-
-				if p.Filter.KeepRecord(r) {
-					p.Buffer.ProcessRecord(r, v.SequenceNumber)
-				} else if p.CheckpointFilteredRecords {
-					p.Buffer.ProcessRecord(nil, v.SequenceNumber)
-				}
+				p.checkpointSequenceNumber = *r.SequenceNumber
 			}
-		} else if recordSet.NextShardIterator == "" || shardIterator == recordSet.NextShardIterator || err != nil {
+
+			if p.Buffer.ShouldFlush() {
+				p.Emitter.Emit(p.Buffer, p.Transformer)
+				p.Checkpoint.SetCheckpoint(shardID, p.checkpointSequenceNumber)
+				p.Buffer.Flush()
+			}
+		} else if resp.NextShardIterator == aws.String("") || shardIterator == resp.NextShardIterator {
 			logger.Log("error", "NextShardIterator", "msg", err.Error())
 			break
 		} else {
-			time.Sleep(5 * time.Second)
+			time.Sleep(1 * time.Second)
 		}
 
-		if p.Buffer.ShouldFlush() {
-			if p.Buffer.NumRecordsInBuffer() > 0 {
-				p.Emitter.Emit(p.Buffer, p.Transformer, shardID)
-			}
-			p.Checkpoint.SetCheckpoint(shardID, p.Buffer.LastSequenceNumber())
-			p.Buffer.Flush()
-		}
-
-		shardIterator = recordSet.NextShardIterator
+		shardIterator = resp.NextShardIterator
 	}
 }

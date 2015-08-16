@@ -28,30 +28,6 @@ func TestProcessRecord(t *testing.T) {
 	if b.NumRecordsInBuffer() != 2 {
 		t.Errorf("NumRecordsInBuffer() want %v", 2)
 	}
-
-	b.ProcessRecord(r2, s2)
-
-	if b.NumRecordsInBuffer() != 2 {
-		t.Errorf("NumRecordsInBuffer() want %v", 2)
-	}
-}
-
-func TestSequenceExists(t *testing.T) {
-	var r1, s1 = TestRecord{}, "Seq1"
-	var r2, s2 = TestRecord{}, "Seq2"
-
-	b := RecordBuffer{}
-	b.ProcessRecord(r1, s1)
-
-	if b.sequenceExists(s1) != true {
-		t.Errorf("sequenceExists() want %v", true)
-	}
-
-	b.ProcessRecord(r2, s2)
-
-	if b.sequenceExists(s2) != true {
-		t.Errorf("sequenceExists() want %v", true)
-	}
 }
 
 func TestFlush(t *testing.T) {

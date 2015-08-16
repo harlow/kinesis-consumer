@@ -75,7 +75,7 @@ func main() {
 	for _, shard := range streamInfo.StreamDescription.Shards {
 		fmt.Printf("Processing %s on %s\n", shard.ShardId, cfg.Kinesis.StreamName)
 		p := newS3Pipeline(cfg)
-		go p.ProcessShard(ksis, shard.ShardId)
+		go p.ProcessShard(shard.ShardId)
 	}
 
 	// Keep alive

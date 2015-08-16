@@ -8,23 +8,16 @@ type RecordBuffer struct {
 	firstSequenceNumber string
 	lastSequenceNumber  string
 	recordsInBuffer     []interface{}
-	sequencesInBuffer   []string
 }
 
 // ProcessRecord adds a message to the buffer.
 func (b *RecordBuffer) ProcessRecord(record interface{}, sequenceNumber string) {
-	if len(b.sequencesInBuffer) == 0 {
+	if b.NumRecordsInBuffer() == 0 {
 		b.firstSequenceNumber = sequenceNumber
 	}
 
 	b.lastSequenceNumber = sequenceNumber
-
-	if !b.sequenceExists(sequenceNumber) {
-		if record != nil {
-			b.recordsInBuffer = append(b.recordsInBuffer, record)
-		}
-		b.sequencesInBuffer = append(b.sequencesInBuffer, sequenceNumber)
-	}
+	b.recordsInBuffer = append(b.recordsInBuffer, record)
 }
 
 // Records returns the records in the buffer.
@@ -40,22 +33,11 @@ func (b RecordBuffer) NumRecordsInBuffer() int {
 // Flush empties the buffer and resets the sequence counter.
 func (b *RecordBuffer) Flush() {
 	b.recordsInBuffer = b.recordsInBuffer[:0]
-	b.sequencesInBuffer = b.sequencesInBuffer[:0]
-}
-
-// Checks if the sequence already exists in the buffer.
-func (b *RecordBuffer) sequenceExists(sequenceNumber string) bool {
-	for _, v := range b.sequencesInBuffer {
-		if v == sequenceNumber {
-			return true
-		}
-	}
-	return false
 }
 
 // ShouldFlush determines if the buffer has reached its target size.
 func (b *RecordBuffer) ShouldFlush() bool {
-	return len(b.sequencesInBuffer) >= b.NumRecordsToBuffer
+	return len(b.recordsInBuffer) >= b.NumRecordsToBuffer
 }
 
 // FirstSequenceNumber returns the sequence number of the first message in the buffer.
