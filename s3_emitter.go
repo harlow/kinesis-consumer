@@ -3,11 +3,12 @@ package connector
 import (
 	"bytes"
 	"fmt"
-	"os"
 	"time"
 
-	"github.com/crowdmob/goamz/aws"
-	"github.com/crowdmob/goamz/s3"
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
+	"github.com/aws/aws-sdk-go/service/s3"
+	"gopkg.in/matryer/try.v1"
 )
 
 // S3Emitter is an implementation of Emitter used to store files from a Kinesis stream in S3.
@@ -23,25 +24,32 @@ type S3Emitter struct {
 
 // Emit is invoked when the buffer is full. This method emits the set of filtered records.
 func (e S3Emitter) Emit(b Buffer, t Transformer) {
-	auth, _ := aws.EnvAuth()
-	s3Con := s3.New(auth, aws.USEast)
-	bucket := s3Con.Bucket(e.S3Bucket)
-	s3File := e.S3FileName(b.FirstSequenceNumber(), b.LastSequenceNumber())
-
 	var buffer bytes.Buffer
+	svc := s3.New(&aws.Config{Region: "us-east-1"})
+	key := e.S3FileName(b.FirstSequenceNumber(), b.LastSequenceNumber())
 
 	for _, r := range b.Records() {
 		var s = t.FromRecord(r)
 		buffer.Write(s)
 	}
 
-	err := bucket.Put(s3File, buffer.Bytes(), "text/plain", s3.Private, s3.Options{})
+	params := &s3.PutObjectInput{
+		Body:        bytes.NewReader(buffer.Bytes()),
+		Bucket:      aws.String(e.S3Bucket),
+		ContentType: aws.String("text/plain"),
+		Key:         aws.String(key),
+	}
+
+	err := try.Do(func(attempt int) (bool, error) {
+		var err error
+		_, err = svc.PutObject(params)
+		return attempt < 5, err
+	})
 
 	if err != nil {
-		logger.Log("error", "S3Put", "msg", err.Error())
-		os.Exit(1)
-	} else {
-		logger.Log("info", "S3Put", "recordsEmitted", len(b.Records()))
+		if awsErr, ok := err.(awserr.Error); ok {
+			logger.Log("error", "emit", "code", awsErr.Code())
+		}
 	}
 }
 

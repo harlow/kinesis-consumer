@@ -1,6 +1,7 @@
 package connector
 
 import (
+	"os"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -45,30 +46,43 @@ func (p Pipeline) ProcessShard(shardID string) {
 
 	if err != nil {
 		if awsErr, ok := err.(awserr.Error); ok {
-			logger.Log("error", "GetShardIterator", "code", awsErr.Code(), "msg", awsErr.Message(), "origError", awsErr.OrigErr())
-			return
+			logger.Log("fatal", "getShardIterator", "code", awsErr.Code(), "msg", awsErr.Message(), "origError", awsErr.OrigErr())
+			os.Exit(1)
 		}
 	}
 
+	errorCount := 0
 	shardIterator := resp.ShardIterator
 
 	for {
+		// exit program if error threshold is reached
+		if errorCount > 50 {
+			logger.Log("fatal", "getRecords", "msg", "Too many consecutive error attempts")
+			os.Exit(1)
+		}
+
+		// get records from stream
 		args := &kinesis.GetRecordsInput{ShardIterator: shardIterator}
 		resp, err := svc.GetRecords(args)
 
+		// handle recoverable errors, else exit program
 		if err != nil {
-			if awsErr, ok := err.(awserr.Error); ok {
-				if awsErr.Code() == "ProvisionedThroughputExceededException" {
-					logger.Log("info", "GetRecords", "shardId", shardID, "msg", "rateLimit")
-					time.Sleep(5 * time.Second)
-					continue
-				} else {
-					logger.Log("error", "GetRecords", "shardId", shardID, "code", awsErr.Code(), "msg", awsErr.Message())
-					break
-				}
+			awsErr, _ := err.(awserr.Error)
+			errorCount++
+
+			if isRecoverableError(err) {
+				logger.Log("warn", "getRecords", "errorCount", errorCount, "code", awsErr.Code())
+				handleAwsWaitTimeExp(errorCount)
+				continue
+			} else {
+				logger.Log("fatal", "getRecords", awsErr.Code())
+				os.Exit(1)
 			}
+		} else {
+			errorCount = 0
 		}
 
+		// process records
 		if len(resp.Records) > 0 {
 			for _, r := range resp.Records {
 				transformedRecord := p.Transformer.ToRecord(r.Data)
@@ -82,12 +96,13 @@ func (p Pipeline) ProcessShard(shardID string) {
 
 			if p.Buffer.ShouldFlush() {
 				p.Emitter.Emit(p.Buffer, p.Transformer)
+				logger.Log("info", "emit", "shardID", shardID, "recordsEmitted", len(p.Buffer.Records()))
 				p.Checkpoint.SetCheckpoint(shardID, p.checkpointSequenceNumber)
 				p.Buffer.Flush()
 			}
 		} else if resp.NextShardIterator == aws.String("") || shardIterator == resp.NextShardIterator {
-			logger.Log("error", "NextShardIterator", "msg", err.Error())
-			break
+			logger.Log("fatal", "nextShardIterator", "msg", err.Error())
+			os.Exit(1)
 		} else {
 			time.Sleep(1 * time.Second)
 		}

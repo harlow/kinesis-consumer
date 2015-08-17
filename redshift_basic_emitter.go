@@ -37,7 +37,7 @@ func (e RedshiftBasicEmitter) Emit(b Buffer, t Transformer) {
 
 		// db command succeeded, break from loop
 		if err == nil {
-			logger.Log("info", "RedshiftBasicEmitter", "shard", shardID, "file", s3File)
+			logger.Log("info", "RedshiftBasicEmitter", "file", s3File)
 			break
 		}
 

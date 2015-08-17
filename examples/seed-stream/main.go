@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"sync"
 
 	"github.com/harlow/kinesis-connectors"
 	"github.com/joho/godotenv"
@@ -30,7 +29,6 @@ func main() {
 	args := kinesis.NewArgs()
 	args.Add("StreamName", "userStream")
 	ctr := 0
-	var wg sync.WaitGroup
 
 	for scanner.Scan() {
 		l := scanner.Text()
@@ -40,16 +38,10 @@ func main() {
 		args := kinesis.NewArgs()
 		args.Add("StreamName", "userStream")
 		args.AddRecord([]byte(l), key)
-		wg.Add(1)
-
-		go func() {
-			ksis.PutRecords(args)
-			fmt.Print(".")
-			wg.Done()
-		}()
+		ksis.PutRecords(args)
+		fmt.Print(".")
 	}
 
-	wg.Wait()
 	fmt.Println(".")
 	fmt.Println("Finished populating userStream")
 }
