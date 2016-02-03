@@ -5,6 +5,7 @@ import (
 	"net"
 	"testing"
 
+	"github.com/bmizerany/assert"
 	"github.com/lib/pq"
 	"github.com/sendgridlabs/go-kinesis"
 )
@@ -25,11 +26,8 @@ func Test_isRecoverableError(t *testing.T) {
 		{err: pq.Error{Message: "Some other pq error"}, isRecoverable: false},
 	}
 
-	for idx, tc := range testCases {
+	for _, tc := range testCases {
 		isRecoverable := isRecoverableError(tc.err)
-
-		if isRecoverable != tc.isRecoverable {
-			t.Errorf("test case %d: isRecoverable expected %t, actual %t, for error %+v", idx, tc.isRecoverable, isRecoverable, tc.err)
-		}
+		assert.Equal(t, isRecoverable, tc.isRecoverable)
 	}
 }

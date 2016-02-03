@@ -22,4 +22,4 @@ export AWS_SECRET_KEY=
 
 ### Running the code
 
-    $ go run main.go
+    $ go run main.go -a appName -s streamName

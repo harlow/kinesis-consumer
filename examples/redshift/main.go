@@ -64,9 +64,6 @@ func main() {
 	auth := kinesis.NewAuth()
 	ksis := kinesis.New(&auth, kinesis.Region{})
 
-	// Create stream
-	connector.CreateStream(ksis, cfg.Kinesis.StreamName, cfg.Kinesis.ShardCount)
-
 	// Fetch stream info
 	args := kinesis.NewArgs()
 	args.Add("StreamName", cfg.Kinesis.StreamName)

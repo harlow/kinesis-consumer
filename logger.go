@@ -13,4 +13,4 @@ func SetLogger(l log.Logger) {
 }
 
 // specify a default logger so that we don't end up with panics.
-var logger log.Logger = log.NewPrefixLogger(os.Stderr)
+var logger log.Logger = log.NewLogfmtLogger(os.Stderr)

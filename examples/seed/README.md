@@ -16,5 +16,5 @@ export AWS_SECRET_KEY=
 
 ### Running the code
 
-    $ curl https://s3.amazonaws.com/kinesis.test/users.txt > users.txt
+    $ curl https://s3.amazonaws.com/kinesis.test/users.txt > /tmp/users.txt
     $ go run main.go

@@ -4,8 +4,8 @@ import (
 	"testing"
 )
 
-func TestCopyStatement(t *testing.T) {
-	e := RedshiftBasicEmitter{
+func Test_CopyStatement(t *testing.T) {
+	e := RedshiftEmitter{
 		Delimiter: ",",
 		S3Bucket:  "test_bucket",
 		TableName: "test_table",

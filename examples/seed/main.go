@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"flag"
+	"fmt"
 	"log"
 	"os"
 	"sync"
@@ -13,55 +15,56 @@ import (
 
 // Note: download file with test data
 // curl https://s3.amazonaws.com/kinesis.test/users.txt -o /tmp/users.txt
-func putToS3(svc *kinesis.Kinesis, data string) {
+var stream = flag.String("s", "", "Stream name")
+
+func putToS3(svc *kinesis.Kinesis, data string, partitionKey string) {
 	params := &kinesis.PutRecordInput{
 		Data:         []byte(data),
-		PartitionKey: aws.String("partitionKey"),
-		StreamName:   aws.String("hw-test-stream"),
+		PartitionKey: aws.String(partitionKey),
+		StreamName:   aws.String(*stream),
 	}
 
 	_, err := svc.PutRecord(params)
-
 	if err != nil {
-		log.Fatal(err.Error())
+		fmt.Println(err.Error())
 		return
 	} else {
-		log.Print(".")
+		fmt.Print(".")
 	}
 }
 
 func main() {
-	wg := &sync.WaitGroup{}
+	flag.Parse()
+
 	jobCh := make(chan string)
-
-	// read sample data
-	file, err := os.Open("/tmp/users.txt")
-
-	if err != nil {
-		log.Fatal("Cannot open users.txt file")
-	}
-
-	defer file.Close()
-	scanner := bufio.NewScanner(file)
-
-	// initialize kinesis client
 	svc := kinesis.New(session.New())
+	wg := &sync.WaitGroup{}
 
+	// boot the workers for processing data
 	for i := 0; i < 4; i++ {
 		wg.Add(1)
 		go func() {
 			for data := range jobCh {
-				putToS3(svc, data)
+				putToS3(svc, data, string(i))
 			}
 			wg.Done()
 		}()
 	}
 
-	for scanner.Scan() {
-		data := scanner.Text()
+	// open data file
+	f, err := os.Open("/tmp/users.txt")
+	if err != nil {
+		log.Fatal("Cannot open users.txt file")
+	}
+	defer f.Close()
+
+	// put sample data on channel
+	b := bufio.NewScanner(f)
+	for b.Scan() {
+		data := b.Text()
 		jobCh <- data
 	}
 
-	log.Println(".")
+	fmt.Println(".")
 	log.Println("Finished populating stream")
 }

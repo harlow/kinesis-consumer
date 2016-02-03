@@ -2,8 +2,9 @@
 
 __Kinesis connector applications written in Go__
 
-Inspired by the [Amazon Kinesis Connector Library][1]. These components are used for extracting streaming event data
-into S3, Redshift, DynamoDB, and more. See the [API Docs][2] for package documentation.
+_Note: Repo is going under refactoring to use a handler func to process batch data. The previous stable version of connectors exist at SHA `509f68de89efb74aa8d79a733749208edaf56b4d`_
+
+Inspired by the [Amazon Kinesis Connector Library][1]. This library is used for extracting streaming event data from Kinesis into S3, Redshift, DynamoDB, and more. See the [API Docs][2] for package documentation.
 
 [1]: https://github.com/awslabs/amazon-kinesis-connectors
 [2]: http://godoc.org/github.com/harlow/kinesis-connectors
@@ -12,15 +13,25 @@ into S3, Redshift, DynamoDB, and more. See the [API Docs][2] for package documen
 
 ## Overview
 
-Each Amazon Kinesis connector application is a pipeline that determines how records from an Amazon Kinesis stream will be handled. Records are retrieved from the stream, transformed according to a user-defined data model, buffered for batch processing, and then emitted to the appropriate AWS service.
+The consumer expects a handler func that will process a buffer of incoming records.
 
-A connector pipeline uses the following interfaces:
+```golang
+func main() {
+  var(
+    app = flag.String("app", "", "The app name")
+    stream = flag.String("stream", "", "The stream name")
+  )
+  flag.Parse()
 
-* __Pipeline:__ The pipeline implementation itself.
-* __Transformer:__ Defines the transformation of records from the Amazon Kinesis stream in order to suit the user-defined data model. Includes methods for custom serializer/deserializers.
-* __Filter:__ Defines a method for excluding irrelevant records from the processing.
-* __Buffer:__ Defines a system for batching the set of records to be processed. The application can specify three thresholds: number of records, total byte count, and time. When one of these thresholds is crossed, the buffer is flushed and the data is emitted to the destination.
-* __Emitter:__ Defines a method that makes client calls to other AWS services and persists the records stored in the buffer. The records can also be sent to another Amazon Kinesis stream.
+  c := connector.NewConsumer(*app, *stream)
+  c.Start(connector.HandlerFunc(func(b connector.Buffer) {
+    fmt.Println(b.GetRecords())
+    // process the records
+  }))
+
+  select {}
+}
+```
 
 ### Installation
 
@@ -32,8 +43,8 @@ Get the package source:
 
 Examples pipelines:
 
-* [S3 Pipeline](https://github.com/harlow/kinesis-connectors/tree/master/examples/s3-pipeline)
-* [Redshift Basic Pipeline](https://github.com/harlow/kinesis-connectors/tree/master/examples/redshift-pipeline)
+* [S3](https://github.com/harlow/kinesis-connectors/tree/master/examples/s3)
+* [Redshift](https://github.com/harlow/kinesis-connectors/tree/master/examples/redshift)
 
 ### Logging
 
