@@ -10,7 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/kinesis"
 )
 
-const maxBufferSize = 1000
+const maxBufferSize = 400
 
 func NewConsumer(appName, streamName string) *Consumer {
 	svc := kinesis.New(session.New())
@@ -99,12 +99,12 @@ func (c *Consumer) handlerLoop(shardID string, handler Handler) {
 		if len(resp.Records) > 0 {
 			for _, r := range resp.Records {
 				b.AddRecord(r)
-			}
 
-			if b.ShouldFlush() {
-				handler.HandleRecords(*b)
-				checkpoint.SetCheckpoint(shardID, b.LastSeq())
-				b.Flush()
+				if b.ShouldFlush() {
+					handler.HandleRecords(*b)
+					checkpoint.SetCheckpoint(shardID, b.LastSeq())
+					b.Flush()
+				}
 			}
 		} else if resp.NextShardIterator == aws.String("") || shardIterator == resp.NextShardIterator {
 			logger.Log("fatal", "nextShardIterator", "msg", err.Error())
