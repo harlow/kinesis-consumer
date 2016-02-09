@@ -12,7 +12,7 @@ Inspired by the [Amazon Kinesis Connector Library](https://github.com/awslabs/am
 
 The consumer expects a handler func that will process a buffer of incoming records.
 
-```golang
+```go
 func main() {
   var(
     app = flag.String("app", "", "The app name")
