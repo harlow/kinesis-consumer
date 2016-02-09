@@ -2,9 +2,9 @@
 
 __Kinesis connector applications written in Go__
 
-> With the release of Kinesis Firehose I'd recommend using [Lambda Streams to Firehose](https://github.com/awslabs/lambda-streams-to-firehose) for loading data to S3 and Redshift.
+> With the new release of Kinesis Firehose I'd recommend using the [Lambda Streams to Firehose](https://github.com/awslabs/lambda-streams-to-firehose) project for loading data directly into S3 and Redshift.
 
-Inspired by the [Amazon Kinesis Connector Library](https://github.com/awslabs/amazon-kinesis-connectors). This library is intended to be a lightweight wrapper around the Kinesis API to handle batching records, respecing ratelimits, setting checkpoints, and recovering gracefully from network errors.
+Inspired by the [Amazon Kinesis Connector Library](https://github.com/awslabs/amazon-kinesis-connectors). This library is intended to be a lightweight wrapper around the Kinesis API to handle batching records, setting checkpoints, respecting ratelimits,  and recovering from network errors.
 
 ![golang_kinesis_connector](https://cloud.githubusercontent.com/assets/739782/4262283/2ee2550e-3b97-11e4-8cd1-21a5d7ee0964.png)
 
