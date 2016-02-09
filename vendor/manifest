@@ -1,0 +1,104 @@
+{
+	"version": 0,
+	"dependencies": [
+		{
+			"importpath": "github.com/aws/aws-sdk-go/aws",
+			"repository": "https://github.com/aws/aws-sdk-go",
+			"revision": "38ff93f5aca911b494061bc6a8a69dae652057e8",
+			"branch": "master",
+			"path": "/aws"
+		},
+		{
+			"importpath": "github.com/aws/aws-sdk-go/private/endpoints",
+			"repository": "https://github.com/aws/aws-sdk-go",
+			"revision": "38ff93f5aca911b494061bc6a8a69dae652057e8",
+			"branch": "master",
+			"path": "/private/endpoints"
+		},
+		{
+			"importpath": "github.com/aws/aws-sdk-go/private/protocol",
+			"repository": "https://github.com/aws/aws-sdk-go",
+			"revision": "38ff93f5aca911b494061bc6a8a69dae652057e8",
+			"branch": "master",
+			"path": "/private/protocol"
+		},
+		{
+			"importpath": "github.com/aws/aws-sdk-go/private/protocol/query",
+			"repository": "https://github.com/aws/aws-sdk-go",
+			"revision": "38ff93f5aca911b494061bc6a8a69dae652057e8",
+			"branch": "master",
+			"path": "/private/protocol/query"
+		},
+		{
+			"importpath": "github.com/aws/aws-sdk-go/private/signer/v4",
+			"repository": "https://github.com/aws/aws-sdk-go",
+			"revision": "38ff93f5aca911b494061bc6a8a69dae652057e8",
+			"branch": "master",
+			"path": "/private/signer/v4"
+		},
+		{
+			"importpath": "github.com/aws/aws-sdk-go/private/waiter",
+			"repository": "https://github.com/aws/aws-sdk-go",
+			"revision": "38ff93f5aca911b494061bc6a8a69dae652057e8",
+			"branch": "master",
+			"path": "/private/waiter"
+		},
+		{
+			"importpath": "github.com/aws/aws-sdk-go/service/kinesis",
+			"repository": "https://github.com/aws/aws-sdk-go",
+			"revision": "38ff93f5aca911b494061bc6a8a69dae652057e8",
+			"branch": "master",
+			"path": "/service/kinesis"
+		},
+		{
+			"importpath": "github.com/aws/aws-sdk-go/service/sts",
+			"repository": "https://github.com/aws/aws-sdk-go",
+			"revision": "38ff93f5aca911b494061bc6a8a69dae652057e8",
+			"branch": "master",
+			"path": "/service/sts"
+		},
+		{
+			"importpath": "github.com/go-ini/ini",
+			"repository": "https://github.com/go-ini/ini",
+			"revision": "193d1ecb466bf97aae8b454a5cfc192941c64809",
+			"branch": "master"
+		},
+		{
+			"importpath": "github.com/go-kit/kit/log",
+			"repository": "https://github.com/go-kit/kit",
+			"revision": "5d9dfb4d8a5c4f7d67075af30be88f90b031f492",
+			"branch": "master",
+			"path": "/log"
+		},
+		{
+			"importpath": "github.com/hoisie/redis",
+			"repository": "https://github.com/hoisie/redis",
+			"revision": "788f01e396a99c96c8f56338383926f16841ebae",
+			"branch": "master"
+		},
+		{
+			"importpath": "github.com/jmespath/go-jmespath",
+			"repository": "https://github.com/jmespath/go-jmespath",
+			"revision": "0b12d6b521d83fc7f755e7cfc1b1fbdd35a01a74",
+			"branch": "master"
+		},
+		{
+			"importpath": "github.com/lib/pq",
+			"repository": "https://github.com/lib/pq",
+			"revision": "69552e54d2a9d4c6a2438926a774930f7bc398ec",
+			"branch": "master"
+		},
+		{
+			"importpath": "gopkg.in/logfmt.v0",
+			"repository": "https://gopkg.in/logfmt.v0",
+			"revision": "c50dc9aa845e681529d8e49d3dc11ec0195aacac",
+			"branch": "master"
+		},
+		{
+			"importpath": "gopkg.in/stack.v1",
+			"repository": "https://gopkg.in/stack.v1",
+			"revision": "0585967eab0016c8e4e2d55ac20585b469574cec",
+			"branch": "master"
+		}
+	]
+}

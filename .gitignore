@@ -35,3 +35,7 @@ _testmain.go
 # System files
 .DS_Store
 tags*
+
+# Vendored files
+vendor/**
+!vendor/manifest
