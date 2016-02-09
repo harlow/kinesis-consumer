@@ -1,11 +1,11 @@
-package connector
+package s3
 
 import (
 	"fmt"
 	"time"
 )
 
-func S3Key(prefix, firstSeq, lastSeq string) string {
+func Key(prefix, firstSeq, lastSeq string) string {
 	date := time.Now().UTC().Format("2006/01/02")
 
 	if prefix == "" {

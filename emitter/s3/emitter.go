@@ -1,29 +1,29 @@
-package connector
+package s3
 
 import (
 	"io"
 
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/s3"
+	awss3 "github.com/aws/aws-sdk-go/service/s3"
 	"gopkg.in/matryer/try.v1"
 )
 
-// S3Emitter stores data in S3 bucket.
+// Emitter stores data in S3 bucket.
 //
 // The use of  this struct requires the configuration of an S3 bucket/endpoint. When the buffer is full, this
 // struct's Emit method adds the contents of the buffer to S3 as one file. The filename is generated
 // from the first and last sequence numbers of the records contained in that file separated by a
 // dash. This struct requires the configuration of an S3 bucket and endpoint.
-type S3Emitter struct {
+type Emitter struct {
 	Bucket string
 }
 
 // Emit is invoked when the buffer is full. This method emits the set of filtered records.
-func (e S3Emitter) Emit(s3Key string, b io.ReadSeeker) {
-	svc := s3.New(session.New())
-	params := &s3.PutObjectInput{
+func (e Emitter) Emit(s3Key string, b io.ReadSeeker) error {
+	svc := awss3.New(session.New())
+
+	params := &awss3.PutObjectInput{
 		Body:        b,
 		Bucket:      aws.String(e.Bucket),
 		ContentType: aws.String("text/plain"),
@@ -37,10 +37,8 @@ func (e S3Emitter) Emit(s3Key string, b io.ReadSeeker) {
 	})
 
 	if err != nil {
-		if awsErr, ok := err.(awserr.Error); ok {
-			logger.Log("error", "s3.PutObject", "code", awsErr.Code())
-		}
+		return err
 	}
 
-	logger.Log("info", "S3Emitter", "msg", "success", "key", s3Key)
+	return nil
 }

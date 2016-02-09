@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"flag"
+	"fmt"
 
 	"github.com/harlow/kinesis-connectors"
+	"github.com/harlow/kinesis-connectors/emitter/s3"
 )
 
 var (
@@ -13,26 +15,27 @@ var (
 	stream = flag.String("s", "", "Stream name")
 )
 
-func handler(b connector.Buffer) {
-	body := new(bytes.Buffer)
-
-	// filter or transform data if needed
-	for _, r := range b.GetRecords() {
-		body.Write(r.Data)
-	}
-
-	s3 := &connector.S3Emitter{Bucket: *bucket}
-	s3.Emit(
-		connector.S3Key("", b.FirstSeq(), b.LastSeq()),
-		bytes.NewReader(body.Bytes()),
-	)
-}
-
 func main() {
 	flag.Parse()
+	emitter := &s3.Emitter{Bucket: *bucket}
 
 	c := connector.NewConsumer(*app, *stream)
-	c.Start(connector.HandlerFunc(handler))
+	c.Start(connector.HandlerFunc(func(b connector.Buffer) {
+		body := new(bytes.Buffer)
+
+		for _, r := range b.GetRecords() {
+			body.Write(r.Data)
+		}
+
+		err := emitter.Emit(
+			s3.Key("", b.FirstSeq(), b.LastSeq()),
+			bytes.NewReader(body.Bytes()),
+		)
+
+		if err != nil {
+			fmt.Printf("error %s", err)
+		}
+	}))
 
 	select {} // run forever
 }

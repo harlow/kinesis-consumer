@@ -2,12 +2,9 @@
 
 __Kinesis connector applications written in Go__
 
-_Note: Repo is going under refactoring to use a handler func to process batch data. The previous stable version of connectors exist at SHA `509f68de89efb74aa8d79a733749208edaf56b4d`_
+> With the release of Kinesis Firehose I'd recommend using [Lambda Streams to Firehose](https://github.com/awslabs/lambda-streams-to-firehose) for loading data to S3 and Redshift.
 
-Inspired by the [Amazon Kinesis Connector Library][1]. This library is used for extracting streaming event data from Kinesis into S3, Redshift, DynamoDB, and more. See the [API Docs][2] for package documentation.
-
-[1]: https://github.com/awslabs/amazon-kinesis-connectors
-[2]: http://godoc.org/github.com/harlow/kinesis-connectors
+Inspired by the [Amazon Kinesis Connector Library](https://github.com/awslabs/amazon-kinesis-connectors). This library is intended to be a lightweight wrapper around the Kinesis API to handle batching records, respecing ratelimits, setting checkpoints, and recovering gracefully from network errors.
 
 ![golang_kinesis_connector](https://cloud.githubusercontent.com/assets/739782/4262283/2ee2550e-3b97-11e4-8cd1-21a5d7ee0964.png)
 
@@ -39,12 +36,12 @@ Get the package source:
 
     $ go get github.com/harlow/kinesis-connectors
 
-### Example Pipelines
+### Examples
 
-Examples pipelines:
+Use the [seed stream](https://github.com/harlow/kinesis-connectors/tree/master/examples/seed) code to put sample data onto the stream.
 
+* [Firehose](https://github.com/harlow/kinesis-connectors/tree/master/examples/firehose)
 * [S3](https://github.com/harlow/kinesis-connectors/tree/master/examples/s3)
-* [Redshift](https://github.com/harlow/kinesis-connectors/tree/master/examples/redshift)
 
 ### Logging
 

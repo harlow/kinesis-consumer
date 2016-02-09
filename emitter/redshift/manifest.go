@@ -1,4 +1,4 @@
-package connector
+package redshift
 
 type Entry struct {
 	Url       string `json:"url"`

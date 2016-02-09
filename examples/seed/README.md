@@ -1,4 +1,4 @@
-# Seed the Stream
+# Populate the Stream with data
 
 A prepopulated file with JSON users is available on S3 for seeing the stream:
 
@@ -17,4 +17,4 @@ export AWS_SECRET_KEY=
 ### Running the code
 
     $ curl https://s3.amazonaws.com/kinesis.test/users.txt > /tmp/users.txt
-    $ go run main.go
+    $ go run main.go -s streamName

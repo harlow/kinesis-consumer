@@ -29,7 +29,7 @@ type RedshiftEmitter struct {
 // then issues a copy command to Redshift data store.
 func (e RedshiftEmitter) Emit(s3Key string, b io.ReadSeeker) {
 	// put contents to S3 Bucket
-	s3 := &S3Emitter{Bucket: e.S3Bucket}
+	s3 := &Emitter{Bucket: e.S3Bucket}
 	s3.Emit(s3Key, b)
 
 	for i := 0; i < 10; i++ {
