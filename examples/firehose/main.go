@@ -32,6 +32,8 @@ func main() {
 	svc := firehose.New(session.New())
 
 	c := connector.NewConsumer(*app, *stream)
+	c.Set("maxBatchCount", 400)
+	c.Set("pollInterval", "3s")
 	c.Start(connector.HandlerFunc(func(b connector.Buffer) {
 		params := &firehose.PutRecordBatchInput{
 			DeliveryStreamName: aws.String(*delivery),

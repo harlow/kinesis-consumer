@@ -20,7 +20,14 @@ func main() {
   )
   flag.Parse()
 
+  // create new consumer
   c := connector.NewConsumer(*app, *stream)
+
+  // override default values
+  c.Set("maxBatchCount", 200)
+  c.Set("pollInterval", "3s")
+
+  // start consuming records from the queues
   c.Start(connector.HandlerFunc(func(b connector.Buffer) {
     fmt.Println(b.GetRecords())
     // process the records

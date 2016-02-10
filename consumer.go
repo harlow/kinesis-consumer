@@ -10,8 +10,13 @@ import (
 	"github.com/aws/aws-sdk-go/service/kinesis"
 )
 
-const maxBufferSize = 400
+var (
+	pollInterval  = 1 * time.Second
+	maxBatchCount = 1000
+)
 
+// NewConsumer creates a new kinesis connection and returns a
+// new consumer initialized with app and stream name
 func NewConsumer(appName, streamName string) *Consumer {
 	svc := kinesis.New(session.New())
 
@@ -26,6 +31,25 @@ type Consumer struct {
 	appName    string
 	streamName string
 	svc        *kinesis.Kinesis
+}
+
+// Set `option` to `value`
+func (c *Consumer) Set(option string, value interface{}) {
+	var err error
+
+	switch option {
+	case "maxBatchCount":
+		maxBatchCount = value.(int)
+	case "pollInterval":
+		pollInterval, err = time.ParseDuration(value.(string))
+		if err != nil {
+			logger.Log("fatal", "ParseDuration", "msg", "unable to parse pollInterval value")
+			os.Exit(1)
+		}
+	default:
+		logger.Log("fatal", "Set", "msg", "unknown option")
+		os.Exit(1)
+	}
 }
 
 func (c *Consumer) Start(handler Handler) {
@@ -69,8 +93,8 @@ func (c *Consumer) handlerLoop(shardID string, handler Handler) {
 		}
 	}
 
+	b := &Buffer{MaxBatchCount: maxBatchCount}
 	shardIterator := resp.ShardIterator
-	b := &Buffer{MaxBufferSize: maxBufferSize}
 	errCount := 0
 
 	for {
@@ -110,7 +134,8 @@ func (c *Consumer) handlerLoop(shardID string, handler Handler) {
 			logger.Log("fatal", "nextShardIterator", "msg", err.Error())
 			os.Exit(1)
 		} else {
-			time.Sleep(1 * time.Second)
+			logger.Log("info", "sleeping", "msg", "no records to process")
+			time.Sleep(pollInterval)
 		}
 
 		shardIterator = resp.NextShardIterator

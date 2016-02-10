@@ -34,7 +34,7 @@ func Test_LastSeq(t *testing.T) {
 }
 
 func Test_ShouldFlush(t *testing.T) {
-	b := Buffer{MaxBufferSize: 2}
+	b := Buffer{MaxBatchCount: 2}
 	s1, s2 := "1", "2"
 	r1 := &kinesis.Record{SequenceNumber: &s1}
 	r2 := &kinesis.Record{SequenceNumber: &s2}
