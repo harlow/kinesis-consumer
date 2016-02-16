@@ -43,6 +43,17 @@ Get the package source:
 
     $ go get github.com/harlow/kinesis-connectors
 
+### Fetching Dependencies
+
+Install `gvt`:
+
+    $ export GO15VENDOREXPERIMENT=1
+    $ go get github.com/FiloSottile/gvt
+
+Install dependencies into `./vendor/`:
+
+    $ gvt restore
+
 ### Examples
 
 Use the [seed stream](https://github.com/harlow/kinesis-connectors/tree/master/examples/seed) code to put sample data onto the stream.
