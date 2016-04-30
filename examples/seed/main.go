@@ -17,7 +17,7 @@ import (
 // curl https://s3.amazonaws.com/kinesis.test/users.txt -o /tmp/users.txt
 var stream = flag.String("s", "", "Stream name")
 
-func putToS3(svc *kinesis.Kinesis, data string, partitionKey string) {
+func putToKinesis(svc *kinesis.Kinesis, data string, partitionKey string) {
 	params := &kinesis.PutRecordInput{
 		Data:         []byte(data),
 		PartitionKey: aws.String(partitionKey),
@@ -45,7 +45,7 @@ func main() {
 		wg.Add(1)
 		go func() {
 			for data := range jobCh {
-				putToS3(svc, data, string(i))
+				putToKinesis(svc, data, string(i))
 			}
 			wg.Done()
 		}()
