@@ -49,6 +49,7 @@ func urlIsRecoverableError(err error) bool {
 	if ok {
 		return true
 	}
+
 	return false
 }
 
@@ -56,9 +57,11 @@ func netIsRecoverableError(err error) bool {
 	recoverableErrors := map[string]bool{
 		"connection reset by peer": true,
 	}
+
 	cErr, ok := err.(*net.OpError)
 	if ok && recoverableErrors[cErr.Err.Error()] == true {
 		return true
 	}
+
 	return false
 }
