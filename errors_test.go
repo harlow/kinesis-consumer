@@ -5,9 +5,8 @@ import (
 	"net"
 	"testing"
 
+	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/bmizerany/assert"
-	"github.com/lib/pq"
-	"github.com/sendgridlabs/go-kinesis"
 )
 
 func Test_isRecoverableError(t *testing.T) {
@@ -15,15 +14,13 @@ func Test_isRecoverableError(t *testing.T) {
 		err           error
 		isRecoverable bool
 	}{
-		{err: &kinesis.Error{Code: "ProvisionedThroughputExceededException"}, isRecoverable: true},
-		{err: &kinesis.Error{Code: "Throttling"}, isRecoverable: true},
-		{err: &kinesis.Error{Code: "ServiceUnavailable"}, isRecoverable: true},
-		{err: &kinesis.Error{Code: "ExpiredIteratorException"}, isRecoverable: false},
+		{err: awserr.New("ProvisionedThroughputExceededException", "", nil), isRecoverable: true},
+		{err: awserr.New("Throttling", "", nil), isRecoverable: true},
+		{err: awserr.New("ServiceUnavailable", "", nil), isRecoverable: true},
+		{err: awserr.New("ExpiredIteratorException", "", nil), isRecoverable: false},
 		{err: &net.OpError{Err: fmt.Errorf("connection reset by peer")}, isRecoverable: true},
 		{err: &net.OpError{Err: fmt.Errorf("unexpected error")}, isRecoverable: false},
 		{err: fmt.Errorf("an arbitrary error"), isRecoverable: false},
-		{err: pq.Error{Message: "The specified S3 prefix 'somefilethatismissing' does not exist"}, isRecoverable: true},
-		{err: pq.Error{Message: "Some other pq error"}, isRecoverable: false},
 	}
 
 	for _, tc := range testCases {
