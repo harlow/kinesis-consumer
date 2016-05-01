@@ -11,7 +11,8 @@ import (
 )
 
 var (
-	maxBatchCount = 1000
+	maxRecordCount = 1000
+	maxBufferTime  = "30s"
 )
 
 // NewConsumer creates a new kinesis connection and returns a
@@ -41,8 +42,8 @@ type Consumer struct {
 // Set `option` to `value`
 func (c *Consumer) Set(option string, value interface{}) {
 	switch option {
-	case "maxBatchCount":
-		maxBatchCount = value.(int)
+	case "maxRecordCount":
+		maxRecordCount = value.(int)
 	default:
 		log.Error("invalid option")
 		os.Exit(1)
@@ -81,7 +82,7 @@ func (c *Consumer) handlerLoop(shardID string, handler Handler) {
 	})
 
 	buf := &Buffer{
-		MaxBatchCount: maxBatchCount,
+		MaxRecordCount: maxRecordCount,
 	}
 
 	checkpoint := &Checkpoint{
@@ -108,7 +109,7 @@ func (c *Consumer) handlerLoop(shardID string, handler Handler) {
 	}
 
 	shardIterator := resp.ShardIterator
-	ctx.Info("started")
+	ctx.Info("processing")
 
 	for {
 		resp, err := c.svc.GetRecords(
@@ -128,6 +129,7 @@ func (c *Consumer) handlerLoop(shardID string, handler Handler) {
 
 				if buf.ShouldFlush() {
 					handler.HandleRecords(*buf)
+					ctx.WithField("count", buf.RecordCount()).Info("emitted")
 					checkpoint.SetCheckpoint(shardID, buf.LastSeq())
 					buf.Flush()
 				}

@@ -24,7 +24,7 @@ func main() {
   c := connector.NewConsumer(*app, *stream)
 
   // override default values
-  c.Set("maxBatchCount", 200)
+  c.Set("maxRecordCount", 200)
 
   // start consuming records from the queues
   c.Start(connector.HandlerFunc(func(b connector.Buffer) {

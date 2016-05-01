@@ -7,11 +7,11 @@ import (
 )
 
 func Test_Set(t *testing.T) {
-	defaultMaxBatchCount := 1000
-	assert.Equal(t, maxBatchCount, defaultMaxBatchCount)
+	defaultMaxRecordCount := 1000
+	assert.Equal(t, maxRecordCount, defaultMaxRecordCount)
 
 	c := NewConsumer("app", "stream")
-	c.Set("maxBatchCount", 100)
+	c.Set("maxRecordCount", 100)
 
-	assert.Equal(t, maxBatchCount, 100)
+	assert.Equal(t, maxRecordCount, 100)
 }
