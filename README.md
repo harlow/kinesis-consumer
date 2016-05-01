@@ -26,9 +26,6 @@ func main() {
   // override default values
   c.Set("maxBatchCount", 200)
 
-  // override default text logging
-  c.SetLogType("json")
-
   // start consuming records from the queues
   c.Start(connector.HandlerFunc(func(b connector.Buffer) {
     fmt.Println(b.GetRecords())
@@ -62,6 +59,25 @@ Use the [seed stream](https://github.com/harlow/kinesis-connectors/tree/master/e
 
 * [Firehose](https://github.com/harlow/kinesis-connectors/tree/master/examples/firehose)
 * [S3](https://github.com/harlow/kinesis-connectors/tree/master/examples/s3)
+
+### Logging
+
+Default logging is handled by [go-kit package log](https://github.com/go-kit/kit/tree/master/log). Applications can override the default loging behaviour by implementing the [Logger interface][log_interface].
+
+```go
+import(
+  "os"
+
+  "github.com/apex/log"
+  "github.com/apex/log/handlers/json"
+)
+
+func main() {
+  c := connector.NewConsumer("signupAgg", "signups")
+  c.SetLogHandler(json.New(os.Stderr))
+  // ...
+}
+```
 
 ## Contributing
 
