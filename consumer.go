@@ -1,10 +1,10 @@
 package connector
 
 import (
-	"os"
+	"log"
 
-	"github.com/apex/log"
-	"github.com/apex/log/handlers/text"
+	apexlog "github.com/apex/log"
+	"github.com/apex/log/handlers/discard"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/kinesis"
@@ -17,7 +17,7 @@ const (
 // NewConsumer creates a new consumer with initialied kinesis connection
 func NewConsumer(appName, streamName string, cfg Config) *Consumer {
 	if cfg.LogHandler == nil {
-		cfg.LogHandler = text.New(os.Stderr)
+		cfg.LogHandler = discard.New()
 	}
 
 	if cfg.MaxBatchCount == 0 {
@@ -48,7 +48,7 @@ type Consumer struct {
 // Start takes a handler and then loops over each of the shards
 // processing each one with the handler.
 func (c *Consumer) Start(handler Handler) {
-	log.SetHandler(c.cfg.LogHandler)
+	apexlog.SetHandler(c.cfg.LogHandler)
 
 	resp, err := c.svc.DescribeStream(
 		&kinesis.DescribeStreamInput{
@@ -57,8 +57,7 @@ func (c *Consumer) Start(handler Handler) {
 	)
 
 	if err != nil {
-		log.WithError(err).Error("DescribeStream")
-		os.Exit(1)
+		log.Fatalf("Error DescribeStream %v", err)
 	}
 
 	for _, shard := range resp.StreamDescription.Shards {
@@ -67,7 +66,7 @@ func (c *Consumer) Start(handler Handler) {
 }
 
 func (c *Consumer) handlerLoop(shardID string, handler Handler) {
-	ctx := log.WithFields(log.Fields{
+	ctx := apexlog.WithFields(apexlog.Fields{
 		"app":    c.appName,
 		"stream": c.streamName,
 		"shard":  shardID,
@@ -96,8 +95,7 @@ func (c *Consumer) handlerLoop(shardID string, handler Handler) {
 
 	resp, err := c.svc.GetShardIterator(params)
 	if err != nil {
-		ctx.WithError(err).Error("getShardIterator")
-		os.Exit(1)
+		log.Fatalf("Error GetShardIterator %v", err)
 	}
 
 	shardIterator := resp.ShardIterator
@@ -111,8 +109,7 @@ func (c *Consumer) handlerLoop(shardID string, handler Handler) {
 		)
 
 		if err != nil {
-			ctx.WithError(err).Error("getRecords")
-			os.Exit(1)
+			log.Fatalf("Error GetRecords %v", err)
 		}
 
 		if len(resp.Records) > 0 {
@@ -127,8 +124,7 @@ func (c *Consumer) handlerLoop(shardID string, handler Handler) {
 				}
 			}
 		} else if resp.NextShardIterator == aws.String("") || shardIterator == resp.NextShardIterator {
-			ctx.Error("nextShardIterator")
-			os.Exit(1)
+			log.Fatalf("Error NextShardIterator")
 		}
 
 		shardIterator = resp.NextShardIterator

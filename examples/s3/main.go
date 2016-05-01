@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/apex/log/handlers/text"
 	"github.com/harlow/kinesis-connectors"
 	"github.com/harlow/kinesis-connectors/emitter/s3"
 )
@@ -26,6 +27,7 @@ func main() {
 
 	cfg := connector.Config{
 		MaxBatchCount: 500,
+		LogHandler:    text.New(os.Stderr),
 	}
 
 	c := connector.NewConsumer(*app, *stream, cfg)

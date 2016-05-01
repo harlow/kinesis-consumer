@@ -39,21 +39,30 @@ func main() {
 
 ### Logging
 
-[Apex Log](https://medium.com/@tjholowaychuk/apex-log-e8d9627f4a9a#.5x1uo1767) is used to log Info and Errors from within the libarary. The default handler is "text" and can be overrideen with other [LogHandlers](https://github.com/apex/log/tree/master/_examples) from the the Config struct:
+[Apex Log](https://medium.com/@tjholowaychuk/apex-log-e8d9627f4a9a#.5x1uo1767) is used for logging Info. The default handler is "discard" which is a no-op logging handler (i.e. no logs produced).
+
+If you'd like to have the libaray produce logs the default can be overridden with other [Log Handlers](https://github.com/apex/log/tree/master/_examples). For example using the "text" log handler:
 
 ```go
 import(
-  "github.com/apex/log"
-  "github.com/apex/log/handlers/json"
+  "github.com/apex/log/handlers/text"
 )
 
 func main() {
   // ...
 
   cfg := connector.Config{
-    LogHandler: json.New(os.Stderr),
+    LogHandler: text.New(os.Stderr),
   }
 }
+```
+
+Which will producde the following logs:
+
+```
+  INFO[0000] processing                app=test shard=shardId-000000000000 stream=test
+  INFO[0008] emitted                   app=test count=500 shard=shardId-000000000000 stream=test
+  INFO[0012] emitted                   app=test count=500 shard=shardId-000000000000 stream=test
 ```
 
 ### Installation
