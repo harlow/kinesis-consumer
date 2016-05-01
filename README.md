@@ -60,16 +60,6 @@ Use the [seed stream](https://github.com/harlow/kinesis-connectors/tree/master/e
 * [Firehose](https://github.com/harlow/kinesis-connectors/tree/master/examples/firehose)
 * [S3](https://github.com/harlow/kinesis-connectors/tree/master/examples/s3)
 
-### Logging
-
-Default logging is handled by [go-kit package log](https://github.com/go-kit/kit/tree/master/log). Applications can override the default loging behaviour by implementing the [Logger interface][log_interface].
-
-```go
-connector.SetLogger(NewCustomLogger())
-```
-
-[log_interface]: https://github.com/harlow/kinesis-connectors/blob/master/logger.go
-
 ## Contributing
 
 Please see [CONTRIBUTING.md] for more information. Thank you, [contributors]!
