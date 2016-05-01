@@ -3,8 +3,9 @@ package connector
 import (
 	"os"
 
+	"github.com/apex/log"
+	"github.com/apex/log/handlers/text"
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/kinesis"
 )
@@ -16,10 +17,13 @@ var (
 // NewConsumer creates a new kinesis connection and returns a
 // new consumer initialized with app and stream name
 func NewConsumer(appName, streamName string) *Consumer {
-	sess := session.New(
-		aws.NewConfig().WithMaxRetries(10),
+	log.SetHandler(text.New(os.Stderr))
+
+	svc := kinesis.New(
+		session.New(
+			aws.NewConfig().WithMaxRetries(10),
+		),
 	)
-	svc := kinesis.New(sess)
 
 	return &Consumer{
 		appName:    appName,
@@ -40,9 +44,14 @@ func (c *Consumer) Set(option string, value interface{}) {
 	case "maxBatchCount":
 		maxBatchCount = value.(int)
 	default:
-		logger.Log("fatal", "Set", "msg", "unknown option")
+		log.Error("invalid option")
 		os.Exit(1)
 	}
+}
+
+// SetLogHandler allows users override logger
+func (c *Consumer) SetLogHandler(handler log.Handler) {
+	log.SetHandler(handler)
 }
 
 // Start takes a handler and then loops over each of the shards
@@ -55,17 +64,22 @@ func (c *Consumer) Start(handler Handler) {
 	)
 
 	if err != nil {
-		logger.Log("fatal", "DescribeStream", "msg", err.Error())
+		log.WithError(err).Error("DescribeStream")
 		os.Exit(1)
 	}
 
 	for _, shard := range resp.StreamDescription.Shards {
-		logger.Log("info", "processing", "stream", c.streamName, "shard", shard.ShardId)
 		go c.handlerLoop(*shard.ShardId, handler)
 	}
 }
 
 func (c *Consumer) handlerLoop(shardID string, handler Handler) {
+	ctx := log.WithFields(log.Fields{
+		"app":    c.appName,
+		"stream": c.streamName,
+		"shard":  shardID,
+	})
+
 	buf := &Buffer{
 		MaxBatchCount: maxBatchCount,
 	}
@@ -89,13 +103,12 @@ func (c *Consumer) handlerLoop(shardID string, handler Handler) {
 
 	resp, err := c.svc.GetShardIterator(params)
 	if err != nil {
-		if awsErr, ok := err.(awserr.Error); ok {
-			logger.Log("fatal", "getShardIterator", "code", awsErr.Code(), "msg", awsErr.Message(), "origError", awsErr.OrigErr())
-			os.Exit(1)
-		}
+		ctx.WithError(err).Error("getShardIterator")
+		os.Exit(1)
 	}
 
 	shardIterator := resp.ShardIterator
+	ctx.Info("started")
 
 	for {
 		resp, err := c.svc.GetRecords(
@@ -105,8 +118,7 @@ func (c *Consumer) handlerLoop(shardID string, handler Handler) {
 		)
 
 		if err != nil {
-			awsErr, _ := err.(awserr.Error)
-			logger.Log("fatal", "getRecords", awsErr.Code())
+			ctx.WithError(err).Error("getRecords")
 			os.Exit(1)
 		}
 
@@ -121,7 +133,7 @@ func (c *Consumer) handlerLoop(shardID string, handler Handler) {
 				}
 			}
 		} else if resp.NextShardIterator == aws.String("") || shardIterator == resp.NextShardIterator {
-			logger.Log("fatal", "nextShardIterator", "msg", err.Error())
+			ctx.Error("nextShardIterator")
 			os.Exit(1)
 		}
 

@@ -65,10 +65,19 @@ Use the [seed stream](https://github.com/harlow/kinesis-connectors/tree/master/e
 Default logging is handled by [go-kit package log](https://github.com/go-kit/kit/tree/master/log). Applications can override the default loging behaviour by implementing the [Logger interface][log_interface].
 
 ```go
-connector.SetLogger(NewCustomLogger())
-```
+import(
+  "os"
 
-[log_interface]: https://github.com/harlow/kinesis-connectors/blob/master/logger.go
+  "github.com/apex/log"
+  "github.com/apex/log/handlers/json"
+)
+
+func main() {
+  c := connector.NewConsumer("signupAgg", "signups")
+  c.SetLogHandler(json.New(os.Stderr))
+  // ...
+}
+```
 
 ## Contributing
 
