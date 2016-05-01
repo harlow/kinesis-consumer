@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
+	"os"
 
 	"github.com/harlow/kinesis-connectors"
 	"github.com/harlow/kinesis-connectors/emitter/s3"
@@ -17,9 +18,14 @@ var (
 
 func main() {
 	flag.Parse()
-	emitter := &s3.Emitter{Bucket: *bucket}
+
+	emitter := &s3.Emitter{
+		Bucket: *bucket,
+		Region: "us-west-1",
+	}
 
 	c := connector.NewConsumer(*app, *stream)
+
 	c.Start(connector.HandlerFunc(func(b connector.Buffer) {
 		body := new(bytes.Buffer)
 
@@ -33,7 +39,8 @@ func main() {
 		)
 
 		if err != nil {
-			fmt.Printf("error %s", err)
+			fmt.Printf("error %s\n", err)
+			os.Exit(1)
 		}
 	}))
 
