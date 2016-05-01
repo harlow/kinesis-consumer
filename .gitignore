@@ -39,3 +39,7 @@ tags*
 # Vendored files
 vendor/**
 !vendor/manifest
+
+# Benchmark files
+prof.cpu
+prof.mem
