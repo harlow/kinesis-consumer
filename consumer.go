@@ -18,7 +18,10 @@ var (
 // NewConsumer creates a new kinesis connection and returns a
 // new consumer initialized with app and stream name
 func NewConsumer(appName, streamName string) *Consumer {
-	svc := kinesis.New(session.New())
+	sess := session.New(
+		aws.NewConfig().WithMaxRetries(10),
+	)
+	svc := kinesis.New(sess)
 
 	return &Consumer{
 		appName:    appName,
@@ -52,19 +55,20 @@ func (c *Consumer) Set(option string, value interface{}) {
 	}
 }
 
+// Start takes a handler and then loops over each of the shards
+// processing each one with the handler.
 func (c *Consumer) Start(handler Handler) {
-	params := &kinesis.DescribeStreamInput{
-		StreamName: aws.String(c.streamName),
-	}
+	resp, err := c.svc.DescribeStream(
+		&kinesis.DescribeStreamInput{
+			StreamName: aws.String(c.streamName),
+		},
+	)
 
-	// describe stream
-	resp, err := c.svc.DescribeStream(params)
 	if err != nil {
 		logger.Log("fatal", "DescribeStream", "msg", err.Error())
 		os.Exit(1)
 	}
 
-	// handle shards
 	for _, shard := range resp.StreamDescription.Shards {
 		logger.Log("info", "processing", "stream", c.streamName, "shard", shard.ShardId)
 		go c.handlerLoop(*shard.ShardId, handler)
@@ -95,31 +99,18 @@ func (c *Consumer) handlerLoop(shardID string, handler Handler) {
 
 	b := &Buffer{MaxBatchCount: maxBatchCount}
 	shardIterator := resp.ShardIterator
-	errCount := 0
 
 	for {
-		// get records from stream
 		resp, err := c.svc.GetRecords(&kinesis.GetRecordsInput{
 			ShardIterator: shardIterator,
 		})
 
-		// handle recoverable errors, else exit program
 		if err != nil {
 			awsErr, _ := err.(awserr.Error)
-
-			if isRecoverableError(err) {
-				logger.Log("warn", "getRecords", "errorCount", errCount, "code", awsErr.Code())
-				handleAwsWaitTimeExp(errCount)
-				errCount++
-			} else {
-				logger.Log("fatal", "getRecords", awsErr.Code())
-				os.Exit(1)
-			}
-		} else {
-			errCount = 0
+			logger.Log("fatal", "getRecords", awsErr.Code())
+			os.Exit(1)
 		}
 
-		// process records
 		if len(resp.Records) > 0 {
 			for _, r := range resp.Records {
 				b.AddRecord(r)
