@@ -20,19 +20,39 @@ func main() {
   )
   flag.Parse()
 
+  // override library defaults
+  cfg := connector.Config{
+    MaxBatchCount: 400,
+  }
+
   // create new consumer
-  c := connector.NewConsumer(*app, *stream)
+  c := connector.NewConsumer(*app, *stream, cfg)
 
-  // override default values
-  c.Set("maxRecordCount", 200)
-
-  // start consuming records from the queues
+  // process records from the stream
   c.Start(connector.HandlerFunc(func(b connector.Buffer) {
     fmt.Println(b.GetRecords())
-    // process the records
   }))
 
   select {}
+}
+```
+
+### Logging
+
+[Apex Log](https://medium.com/@tjholowaychuk/apex-log-e8d9627f4a9a#.5x1uo1767) is used to log Info and Errors from within the libarary. The default handler is "text" and can be overrideen with other [LogHandlers](https://github.com/apex/log/tree/master/_examples) from the the Config struct:
+
+```go
+import(
+  "github.com/apex/log"
+  "github.com/apex/log/handlers/json"
+)
+
+func main() {
+  // ...
+
+  cfg := connector.Config{
+    LogHandler: json.New(os.Stderr),
+  }
 }
 ```
 
@@ -60,24 +80,6 @@ Use the [seed stream](https://github.com/harlow/kinesis-connectors/tree/master/e
 * [Firehose](https://github.com/harlow/kinesis-connectors/tree/master/examples/firehose)
 * [S3](https://github.com/harlow/kinesis-connectors/tree/master/examples/s3)
 
-### Logging
-
-Default logging is handled by [go-kit package log](https://github.com/go-kit/kit/tree/master/log). Applications can override the default loging behaviour by implementing the [Logger interface][log_interface].
-
-```go
-import(
-  "os"
-
-  "github.com/apex/log"
-  "github.com/apex/log/handlers/json"
-)
-
-func main() {
-  c := connector.NewConsumer("signupAgg", "signups")
-  c.SetLogHandler(json.New(os.Stderr))
-  // ...
-}
-```
 
 ## Contributing
 

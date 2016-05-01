@@ -31,8 +31,12 @@ func main() {
 	flag.Parse()
 	svc := firehose.New(session.New())
 
-	c := connector.NewConsumer(*app, *stream)
-	c.Set("maxRecordCount", 400)
+	cfg := connector.Config{
+		MaxBatchCount: 400,
+	}
+
+	c := connector.NewConsumer(*app, *stream, cfg)
+
 	c.Start(connector.HandlerFunc(func(b connector.Buffer) {
 		params := &firehose.PutRecordBatchInput{
 			DeliveryStreamName: aws.String(*delivery),

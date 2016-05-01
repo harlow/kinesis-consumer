@@ -24,7 +24,11 @@ func main() {
 		Region: "us-west-1",
 	}
 
-	c := connector.NewConsumer(*app, *stream)
+	cfg := connector.Config{
+		MaxBatchCount: 500,
+	}
+
+	c := connector.NewConsumer(*app, *stream, cfg)
 
 	c.Start(connector.HandlerFunc(func(b connector.Buffer) {
 		body := new(bytes.Buffer)

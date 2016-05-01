@@ -10,15 +10,19 @@ import (
 	"github.com/aws/aws-sdk-go/service/kinesis"
 )
 
-var (
-	maxRecordCount = 1000
-	maxBufferTime  = "30s"
+const (
+	defaultMaxBatchCount = 1000
 )
 
-// NewConsumer creates a new kinesis connection and returns a
-// new consumer initialized with app and stream name
-func NewConsumer(appName, streamName string) *Consumer {
-	log.SetHandler(text.New(os.Stderr))
+// NewConsumer creates a new consumer with initialied kinesis connection
+func NewConsumer(appName, streamName string, cfg Config) *Consumer {
+	if cfg.LogHandler == nil {
+		cfg.LogHandler = text.New(os.Stderr)
+	}
+
+	if cfg.MaxBatchCount == 0 {
+		cfg.MaxBatchCount = defaultMaxBatchCount
+	}
 
 	svc := kinesis.New(
 		session.New(
@@ -30,6 +34,7 @@ func NewConsumer(appName, streamName string) *Consumer {
 		appName:    appName,
 		streamName: streamName,
 		svc:        svc,
+		cfg:        cfg,
 	}
 }
 
@@ -37,27 +42,14 @@ type Consumer struct {
 	appName    string
 	streamName string
 	svc        *kinesis.Kinesis
-}
-
-// Set `option` to `value`
-func (c *Consumer) Set(option string, value interface{}) {
-	switch option {
-	case "maxRecordCount":
-		maxRecordCount = value.(int)
-	default:
-		log.Error("invalid option")
-		os.Exit(1)
-	}
-}
-
-// SetLogHandler allows users override logger
-func (c *Consumer) SetLogHandler(handler log.Handler) {
-	log.SetHandler(handler)
+	cfg        Config
 }
 
 // Start takes a handler and then loops over each of the shards
 // processing each one with the handler.
 func (c *Consumer) Start(handler Handler) {
+	log.SetHandler(c.cfg.LogHandler)
+
 	resp, err := c.svc.DescribeStream(
 		&kinesis.DescribeStreamInput{
 			StreamName: aws.String(c.streamName),
@@ -82,7 +74,7 @@ func (c *Consumer) handlerLoop(shardID string, handler Handler) {
 	})
 
 	buf := &Buffer{
-		MaxRecordCount: maxRecordCount,
+		MaxBatchCount: c.cfg.MaxBatchCount,
 	}
 
 	checkpoint := &Checkpoint{
