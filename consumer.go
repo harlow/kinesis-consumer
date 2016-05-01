@@ -44,9 +44,14 @@ func (c *Consumer) Set(option string, value interface{}) {
 	case "maxBatchCount":
 		maxBatchCount = value.(int)
 	default:
-		log.Error("unknown option")
+		log.Error("invalid option")
 		os.Exit(1)
 	}
+}
+
+// SetLogHandler allows users override logger
+func (c *Consumer) SetLogHandler(handler log.Handler) {
+	log.SetHandler(handler)
 }
 
 // Start takes a handler and then loops over each of the shards
@@ -59,7 +64,7 @@ func (c *Consumer) Start(handler Handler) {
 	)
 
 	if err != nil {
-		log.WithError(err).Error("unknown option")
+		log.WithError(err).Error("DescribeStream")
 		os.Exit(1)
 	}
 
@@ -103,7 +108,7 @@ func (c *Consumer) handlerLoop(shardID string, handler Handler) {
 	}
 
 	shardIterator := resp.ShardIterator
-	ctx.Info("processing shard")
+	ctx.Info("started")
 
 	for {
 		resp, err := c.svc.GetRecords(

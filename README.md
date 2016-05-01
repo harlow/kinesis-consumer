@@ -26,6 +26,9 @@ func main() {
   // override default values
   c.Set("maxBatchCount", 200)
 
+  // override default text logging
+  c.SetLogType("json")
+
   // start consuming records from the queues
   c.Start(connector.HandlerFunc(func(b connector.Buffer) {
     fmt.Println(b.GetRecords())
