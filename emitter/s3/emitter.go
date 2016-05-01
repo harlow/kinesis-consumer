@@ -23,9 +23,7 @@ type Emitter struct {
 func (e Emitter) Emit(s3Key string, b io.ReadSeeker) error {
 	svc := s3.New(
 		session.New(aws.NewConfig().WithMaxRetries(10)),
-		&aws.Config{
-			Region: aws.String(e.Region),
-		},
+		aws.NewConfig().WithRegion(e.Region),
 	)
 
 	params := &s3.PutObjectInput{
