@@ -25,7 +25,6 @@ func main() {
 
   // override default values
   c.Set("maxBatchCount", 200)
-  c.Set("pollInterval", "3s")
 
   // start consuming records from the queues
   c.Start(connector.HandlerFunc(func(b connector.Buffer) {
