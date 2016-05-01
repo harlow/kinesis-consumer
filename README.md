@@ -103,3 +103,9 @@ Copyright (c) 2015 Harlow Ward. It is free software, and may
 be redistributed under the terms specified in the [LICENSE] file.
 
 [contributors]: https://github.com/harlow/kinesis-connectors/graphs/contributors
+
+---
+
+> [www.hward.com](http://www.hward.com) &nbsp;&middot;&nbsp;
+> GitHub [@harlow](https://github.com/harlow) &nbsp;&middot;&nbsp;
+> Twitter [@harlow_ward](https://twitter.com/harlow_ward)
