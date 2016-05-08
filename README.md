@@ -15,18 +15,17 @@ The consumer expects a handler func that will process a buffer of incoming recor
 ```go
 func main() {
   var(
-    app = flag.String("app", "", "The app name")
+    app    = flag.String("app", "", "The app name")
     stream = flag.String("stream", "", "The stream name")
   )
   flag.Parse()
 
-  // override library defaults
-  cfg := connector.Config{
-    MaxRecordCount: 400,
-  }
-
   // create new consumer
-  c := connector.NewConsumer(*app, *stream, cfg)
+  c := connector.NewConsumer(connector.Config{
+    AppName:        *app,
+    MaxRecordCount: 400,
+    Streamname:     *stream,
+  })
 
   // process records from the stream
   c.Start(connector.HandlerFunc(func(b connector.Buffer) {
@@ -39,21 +38,19 @@ func main() {
 
 ### Logging
 
-[Apex Log](https://medium.com/@tjholowaychuk/apex-log-e8d9627f4a9a#.5x1uo1767) is used for logging Info. The default handler is "discard" which is a no-op logging handler (i.e. no logs produced).
-
-If you'd like to have the libaray produce logs the default can be overridden with other [Log Handlers](https://github.com/apex/log/tree/master/_examples). For example using the "text" log handler:
+[Apex Log](https://medium.com/@tjholowaychuk/apex-log-e8d9627f4a9a#.5x1uo1767) is used for logging Info. Override the logs format with other [Log Handlers](https://github.com/apex/log/tree/master/_examples). For example using the "json" log handler:
 
 ```go
 import(
-  "github.com/apex/log/handlers/text"
+  "github.com/apex/log"
+  "github.com/apex/log/handlers/json"
 )
 
 func main() {
   // ...
 
-  cfg := connector.Config{
-    LogHandler: text.New(os.Stderr),
-  }
+  log.SetHandler(json.New(os.Stderr))
+  log.SetLevel(log.DebugLevel)
 }
 ```
 
