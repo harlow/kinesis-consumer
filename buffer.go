@@ -9,7 +9,7 @@ type Buffer struct {
 	firstSequenceNumber string
 	lastSequenceNumber  string
 
-	MaxBatchCount int
+	MaxRecordCount int
 }
 
 // AddRecord adds a record to the buffer.
@@ -24,7 +24,7 @@ func (b *Buffer) AddRecord(r *kinesis.Record) {
 
 // ShouldFlush determines if the buffer has reached its target size.
 func (b *Buffer) ShouldFlush() bool {
-	return b.RecordCount() >= b.MaxBatchCount
+	return b.RecordCount() >= b.MaxRecordCount
 }
 
 // Flush empties the buffer and resets the sequence counter.

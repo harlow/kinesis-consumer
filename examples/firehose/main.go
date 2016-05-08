@@ -32,7 +32,7 @@ func main() {
 	svc := firehose.New(session.New())
 
 	cfg := connector.Config{
-		MaxBatchCount: 400,
+		MaxRecordCount: 400,
 	}
 
 	c := connector.NewConsumer(*app, *stream, cfg)

@@ -9,7 +9,7 @@ import (
 	"github.com/apex/log/handlers/text"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/kinesis"
-	prdcr "github.com/tj/go-kinesis"
+	producer "github.com/tj/go-kinesis"
 )
 
 // Note: download file with test data
@@ -19,15 +19,16 @@ var stream = flag.String("s", "", "Stream name")
 func main() {
 	flag.Parse()
 	log.SetHandler(text.New(os.Stderr))
+	log.SetLevel(log.DebugLevel)
 
 	// set up producer
 	svc := kinesis.New(session.New())
-	producer := prdcr.New(prdcr.Config{
+	p := producer.New(producer.Config{
 		StreamName:  *stream,
 		BacklogSize: 500,
 		Client:      svc,
 	})
-	producer.Start()
+	p.Start()
 
 	// open data file
 	f, err := os.Open("/tmp/users.txt")
@@ -39,12 +40,12 @@ func main() {
 	// loop over file data
 	b := bufio.NewScanner(f)
 	for b.Scan() {
-		err := producer.Put(b.Bytes(), "site")
+		err := p.Put(b.Bytes(), "site")
 
 		if err != nil {
 			log.WithError(err).Fatal("error producing")
 		}
 	}
 
-	producer.Stop()
+	p.Stop()
 }

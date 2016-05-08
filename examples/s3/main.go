@@ -6,31 +6,32 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/apex/log"
 	"github.com/apex/log/handlers/text"
 	"github.com/harlow/kinesis-connectors"
 	"github.com/harlow/kinesis-connectors/emitter/s3"
 )
 
-var (
-	app    = flag.String("a", "", "App name")
-	bucket = flag.String("b", "", "Bucket name")
-	stream = flag.String("s", "", "Stream name")
-)
-
 func main() {
+	log.SetHandler(text.New(os.Stderr))
+	log.SetLevel(log.DebugLevel)
+
+	var (
+		app    = flag.String("a", "", "App name")
+		bucket = flag.String("b", "", "Bucket name")
+		stream = flag.String("s", "", "Stream name")
+	)
 	flag.Parse()
 
-	emitter := &s3.Emitter{
+	e := &s3.Emitter{
 		Bucket: *bucket,
 		Region: "us-west-1",
 	}
 
-	cfg := connector.Config{
-		MaxBatchCount: 500,
-		LogHandler:    text.New(os.Stderr),
-	}
-
-	c := connector.NewConsumer(*app, *stream, cfg)
+	c := connector.NewConsumer(connector.Config{
+		AppName:    *app,
+		StreamName: *stream,
+	})
 
 	c.Start(connector.HandlerFunc(func(b connector.Buffer) {
 		body := new(bytes.Buffer)
@@ -39,7 +40,7 @@ func main() {
 			body.Write(r.Data)
 		}
 
-		err := emitter.Emit(
+		err := e.Emit(
 			s3.Key("", b.FirstSeq(), b.LastSeq()),
 			bytes.NewReader(body.Bytes()),
 		)

@@ -22,7 +22,7 @@ func main() {
 
   // override library defaults
   cfg := connector.Config{
-    MaxBatchCount: 400,
+    MaxRecordCount: 400,
   }
 
   // create new consumer

@@ -8,7 +8,7 @@ import (
 )
 
 func BenchmarkBufferLifecycle(b *testing.B) {
-	buf := Buffer{MaxBatchCount: 1000}
+	buf := Buffer{MaxRecordCount: 1000}
 	seq := "1"
 	rec := &kinesis.Record{SequenceNumber: &seq}
 
@@ -48,7 +48,7 @@ func Test_LastSeq(t *testing.T) {
 }
 
 func Test_ShouldFlush(t *testing.T) {
-	b := Buffer{MaxBatchCount: 2}
+	b := Buffer{MaxRecordCount: 2}
 	s1, s2 := "1", "2"
 	r1 := &kinesis.Record{SequenceNumber: &s1}
 	r2 := &kinesis.Record{SequenceNumber: &s2}

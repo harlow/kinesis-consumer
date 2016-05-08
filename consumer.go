@@ -1,28 +1,17 @@
 package connector
 
 import (
-	"log"
+	"os"
 
-	apexlog "github.com/apex/log"
-	"github.com/apex/log/handlers/discard"
+	"github.com/apex/log"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/kinesis"
 )
 
-const (
-	defaultMaxBatchCount = 1000
-)
-
 // NewConsumer creates a new consumer with initialied kinesis connection
-func NewConsumer(appName, streamName string, cfg Config) *Consumer {
-	if cfg.LogHandler == nil {
-		cfg.LogHandler = discard.New()
-	}
-
-	if cfg.MaxBatchCount == 0 {
-		cfg.MaxBatchCount = defaultMaxBatchCount
-	}
+func NewConsumer(config Config) *Consumer {
+	config.setDefaults()
 
 	svc := kinesis.New(
 		session.New(
@@ -31,33 +20,28 @@ func NewConsumer(appName, streamName string, cfg Config) *Consumer {
 	)
 
 	return &Consumer{
-		appName:    appName,
-		streamName: streamName,
-		svc:        svc,
-		cfg:        cfg,
+		svc:    svc,
+		Config: config,
 	}
 }
 
 type Consumer struct {
-	appName    string
-	streamName string
-	svc        *kinesis.Kinesis
-	cfg        Config
+	svc *kinesis.Kinesis
+	Config
 }
 
 // Start takes a handler and then loops over each of the shards
 // processing each one with the handler.
 func (c *Consumer) Start(handler Handler) {
-	apexlog.SetHandler(c.cfg.LogHandler)
-
 	resp, err := c.svc.DescribeStream(
 		&kinesis.DescribeStreamInput{
-			StreamName: aws.String(c.streamName),
+			StreamName: aws.String(c.StreamName),
 		},
 	)
 
 	if err != nil {
-		log.Fatalf("Error DescribeStream %v", err)
+		c.Logger.WithError(err).Error("DescribeStream")
+		os.Exit(1)
 	}
 
 	for _, shard := range resp.StreamDescription.Shards {
@@ -66,24 +50,18 @@ func (c *Consumer) Start(handler Handler) {
 }
 
 func (c *Consumer) handlerLoop(shardID string, handler Handler) {
-	ctx := apexlog.WithFields(apexlog.Fields{
-		"app":    c.appName,
-		"stream": c.streamName,
-		"shard":  shardID,
-	})
-
 	buf := &Buffer{
-		MaxBatchCount: c.cfg.MaxBatchCount,
+		MaxRecordCount: c.BufferSize,
 	}
 
 	checkpoint := &Checkpoint{
-		AppName:    c.appName,
-		StreamName: c.streamName,
+		AppName:    c.AppName,
+		StreamName: c.StreamName,
 	}
 
 	params := &kinesis.GetShardIteratorInput{
 		ShardId:    aws.String(shardID),
-		StreamName: aws.String(c.streamName),
+		StreamName: aws.String(c.StreamName),
 	}
 
 	if checkpoint.CheckpointExists(shardID) {
@@ -95,10 +73,16 @@ func (c *Consumer) handlerLoop(shardID string, handler Handler) {
 
 	resp, err := c.svc.GetShardIterator(params)
 	if err != nil {
-		log.Fatalf("Error GetShardIterator %v", err)
+		c.Logger.WithError(err).Error("GetShardIterator")
+		os.Exit(1)
 	}
 
 	shardIterator := resp.ShardIterator
+
+	ctx := c.Logger.WithFields(log.Fields{
+		"shard": shardID,
+	})
+
 	ctx.Info("processing")
 
 	for {
@@ -118,13 +102,14 @@ func (c *Consumer) handlerLoop(shardID string, handler Handler) {
 
 				if buf.ShouldFlush() {
 					handler.HandleRecords(*buf)
-					ctx.WithField("count", buf.RecordCount()).Info("emitted")
+					ctx.WithField("count", buf.RecordCount()).Info("flushed")
 					checkpoint.SetCheckpoint(shardID, buf.LastSeq())
 					buf.Flush()
 				}
 			}
 		} else if resp.NextShardIterator == aws.String("") || shardIterator == resp.NextShardIterator {
-			log.Fatalf("Error NextShardIterator")
+			c.Logger.Error("NextShardIterator")
+			os.Exit(1)
 		}
 
 		shardIterator = resp.NextShardIterator
