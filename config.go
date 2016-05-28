@@ -44,7 +44,7 @@ func (c *Config) setDefaults() {
 	}
 
 	if c.StreamName == "" {
-		c.Logger.WithField("type", "config").Error("AppName required")
+		c.Logger.WithField("type", "config").Error("StreamName required")
 		os.Exit(1)
 	}
 
