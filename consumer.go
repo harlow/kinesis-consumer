@@ -54,19 +54,14 @@ func (c *Consumer) handlerLoop(shardID string, handler Handler) {
 		MaxRecordCount: c.BufferSize,
 	}
 
-	checkpoint := &Checkpoint{
-		AppName:    c.AppName,
-		StreamName: c.StreamName,
-	}
-
 	params := &kinesis.GetShardIteratorInput{
 		ShardId:    aws.String(shardID),
 		StreamName: aws.String(c.StreamName),
 	}
 
-	if checkpoint.CheckpointExists(shardID) {
+	if c.Checkpoint.CheckpointExists(shardID) {
 		params.ShardIteratorType = aws.String("AFTER_SEQUENCE_NUMBER")
-		params.StartingSequenceNumber = aws.String(checkpoint.SequenceNumber())
+		params.StartingSequenceNumber = aws.String(c.Checkpoint.SequenceNumber())
 	} else {
 		params.ShardIteratorType = aws.String("TRIM_HORIZON")
 	}
@@ -103,7 +98,7 @@ func (c *Consumer) handlerLoop(shardID string, handler Handler) {
 				if buf.ShouldFlush() {
 					handler.HandleRecords(*buf)
 					ctx.WithField("count", buf.RecordCount()).Info("flushed")
-					checkpoint.SetCheckpoint(shardID, buf.LastSeq())
+					c.Checkpoint.SetCheckpoint(shardID, buf.LastSeq())
 					buf.Flush()
 				}
 			}
