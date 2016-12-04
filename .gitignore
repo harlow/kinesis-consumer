@@ -38,7 +38,7 @@ tags*
 
 # Vendored files
 vendor/**
-!vendor/manifest
+!vendor/vendor.json
 
 # Benchmark files
 prof.cpu

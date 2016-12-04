@@ -78,14 +78,14 @@ Get the package source:
 
 ### Fetching Dependencies
 
-Install `gvt`:
+Install `govendor`:
 
     $ export GO15VENDOREXPERIMENT=1
-    $ go get github.com/FiloSottile/gvt
+    $ go get -u github.com/kardianos/govendor
 
 Install dependencies into `./vendor/`:
 
-    $ gvt restore
+    $ govendor sync
 
 ### Examples
 
