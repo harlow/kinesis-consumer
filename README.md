@@ -36,6 +36,14 @@ func main() {
 }
 ```
 
+### Config
+
+The default behavior for checkpointing uses Redis on localhost. To set a custom Redis URL use ENV vars:
+
+```
+REDIS_URL=my-custom-redis-server.com:6379
+```
+
 ### Logging
 
 [Apex Log](https://medium.com/@tjholowaychuk/apex-log-e8d9627f4a9a#.5x1uo1767) is used for logging Info. Override the logs format with other [Log Handlers](https://github.com/apex/log/tree/master/_examples). For example using the "json" log handler:
@@ -70,14 +78,14 @@ Get the package source:
 
 ### Fetching Dependencies
 
-Install `gvt`:
+Install `govendor`:
 
     $ export GO15VENDOREXPERIMENT=1
-    $ go get github.com/FiloSottile/gvt
+    $ go get -u github.com/kardianos/govendor
 
 Install dependencies into `./vendor/`:
 
-    $ gvt restore
+    $ govendor sync
 
 ### Examples
 
@@ -85,7 +93,6 @@ Use the [seed stream](https://github.com/harlow/kinesis-connectors/tree/master/e
 
 * [Firehose](https://github.com/harlow/kinesis-connectors/tree/master/examples/firehose)
 * [S3](https://github.com/harlow/kinesis-connectors/tree/master/examples/s3)
-
 
 ## Contributing
 
