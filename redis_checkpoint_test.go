@@ -22,7 +22,7 @@ func Test_CheckpointLifecycle(t *testing.T) {
 
 	// checkpoint exists
 	if val := c.CheckpointExists("shard_id"); val != true {
-		t.Fatalf("checkpoint exists expected true, got %s", val)
+		t.Fatalf("checkpoint exists expected true, got %t", val)
 	}
 
 	// get checkpoint
