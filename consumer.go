@@ -52,6 +52,7 @@ func (c *Consumer) Start(handler Handler) {
 func (c *Consumer) handlerLoop(shardID string, handler Handler) {
 	buf := &Buffer{
 		MaxRecordCount: c.BufferSize,
+		shardID:        shardID,
 	}
 
 	params := &kinesis.GetShardIteratorInput{
