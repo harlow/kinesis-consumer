@@ -8,6 +8,7 @@ type Buffer struct {
 	records             []*kinesis.Record
 	firstSequenceNumber string
 	lastSequenceNumber  string
+	shardID             string
 
 	MaxRecordCount int
 }
@@ -50,4 +51,9 @@ func (b *Buffer) FirstSeq() string {
 // LastSeq returns the sequence number of the last record in the buffer.
 func (b *Buffer) LastSeq() string {
 	return b.lastSequenceNumber
+}
+
+// ShardID returns the shard ID watched by the consumer
+func (b *Buffer) ShardID() string {
+	return b.shardID
 }
