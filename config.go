@@ -33,6 +33,9 @@ type Config struct {
 
 	// Checkpoint for tracking progress of consumer.
 	Checkpoint Checkpoint
+
+	// Shard Iterator if not checkpoint
+	ShardIteratorType string
 }
 
 // defaults for configuration.
@@ -78,6 +81,17 @@ func (c *Config) setDefaults() {
 			AppName:    c.AppName,
 			StreamName: c.StreamName,
 			client:     client,
+		}
+	}
+
+	if c.ShardIteratorType == "" {
+		switch c.ShardIteratorType {
+		case ShardIteratorAfterSequenceNumber:
+			c.ShardIteratorType = ShardIteratorAfterSequenceNumber
+		case ShardIteratorLatest:
+			c.ShardIteratorType = ShardIteratorLatest
+		default:
+			c.ShardIteratorType = ShardIteratorTrimHorizon
 		}
 	}
 }

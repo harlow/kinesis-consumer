@@ -9,6 +9,14 @@ import (
 	"github.com/aws/aws-sdk-go/service/kinesis"
 )
 
+const (
+	ShardIteratorAfterSequenceNumber = "AFTER_SEQUENCE_NUMBER"
+	ShardIteratorAtSequenceNumber    = "AT_SEQUENCE_NUMBER"
+	ShardIteratorAtTimestamp         = "AT_TIMESTAMP"
+	ShardIteratorLatest              = "LATEST"
+	ShardIteratorTrimHorizon         = "TRIM_HORIZON"
+)
+
 // NewConsumer creates a new consumer with initialied kinesis connection
 func NewConsumer(config Config) *Consumer {
 	config.setDefaults()
@@ -61,10 +69,10 @@ func (c *Consumer) handlerLoop(shardID string, handler Handler) {
 	}
 
 	if c.Checkpoint.CheckpointExists(shardID) {
-		params.ShardIteratorType = aws.String("AFTER_SEQUENCE_NUMBER")
+		params.ShardIteratorType = aws.String(string(ShardIteratorAfterSequenceNumber))
 		params.StartingSequenceNumber = aws.String(c.Checkpoint.SequenceNumber())
 	} else {
-		params.ShardIteratorType = aws.String("TRIM_HORIZON")
+		params.ShardIteratorType = aws.String(string(c.ShardIteratorType))
 	}
 
 	resp, err := c.svc.GetShardIterator(params)
