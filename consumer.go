@@ -117,3 +117,25 @@ func (c *Consumer) getShardIterator(shardID string) *string {
 
 	return resp.ShardIterator
 }
+
+func (c *Consumer) getShardIterator(shardID string) *string {
+	params := &kinesis.GetShardIteratorInput{
+		ShardId:    aws.String(shardID),
+		StreamName: aws.String(c.StreamName),
+	}
+
+	if c.Checkpoint.CheckpointExists(shardID) {
+		params.ShardIteratorType = aws.String(string(ShardIteratorAfterSequenceNumber))
+		params.StartingSequenceNumber = aws.String(c.Checkpoint.SequenceNumber())
+	} else {
+		params.ShardIteratorType = aws.String(string(c.ShardIteratorType))
+	}
+
+	resp, err := c.svc.GetShardIterator(params)
+	if err != nil {
+		c.Logger.WithError(err).Error("GetShardIterator")
+		os.Exit(1)
+	}
+
+	return resp.ShardIterator
+}
