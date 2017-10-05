@@ -6,7 +6,7 @@ import (
 
 	redis "gopkg.in/redis.v5"
 
-	"github.com/apex/log"
+	log "github.com/sirupsen/logrus"
 )
 
 const (
@@ -29,7 +29,7 @@ type Config struct {
 	BufferSize int
 
 	// Logger is the logger used. Defaults to log.Log.
-	Logger log.Interface
+	Logger *log.Logger
 
 	// Checkpoint for tracking progress of consumer.
 	Checkpoint Checkpoint
@@ -38,10 +38,10 @@ type Config struct {
 // defaults for configuration.
 func (c *Config) setDefaults() {
 	if c.Logger == nil {
-		c.Logger = log.Log
+		c.Logger = log.New()
 	}
 
-	c.Logger = c.Logger.WithFields(log.Fields{
+	c.Logger.WithFields(log.Fields{
 		"package": "kinesis-connectors",
 	})
 
@@ -55,7 +55,7 @@ func (c *Config) setDefaults() {
 		os.Exit(1)
 	}
 
-	c.Logger = c.Logger.WithFields(log.Fields{
+	c.Logger.WithFields(log.Fields{
 		"app":    c.AppName,
 		"stream": c.StreamName,
 	})
