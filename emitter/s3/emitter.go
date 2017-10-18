@@ -20,13 +20,14 @@ type Emitter struct {
 }
 
 // Emit is invoked when the buffer is full. This method emits the set of filtered records.
-func (e Emitter) Emit(s3Key string, b io.ReadSeeker) error {
+func (e Emitter) Emit(s3Key string, b io.ReadSeeker, ACL string) error {
 	svc := s3.New(
 		session.New(aws.NewConfig().WithMaxRetries(10)),
 		aws.NewConfig().WithRegion(e.Region),
 	)
 
 	params := &s3.PutObjectInput{
+		ACL:         &ACL,
 		Body:        b,
 		Bucket:      aws.String(e.Bucket),
 		ContentType: aws.String("text/plain"),
