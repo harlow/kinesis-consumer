@@ -1,19 +1,22 @@
-package connector
+package consumer
 
 import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 
 	"github.com/apex/log"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/kinesis"
+	"github.com/harlow/kinesis-consumer/checkpoint"
+	"github.com/harlow/kinesis-consumer/checkpoint/redis"
 )
 
-// NewConsumer creates a new consumer with default settings. Use Option to override
+// New creates a kinesis consumer with default settings. Use Option to override
 // any of the optional attributes.
-func NewConsumer(appName, streamName string, opts ...Option) (*Consumer, error) {
+func New(appName, streamName string, opts ...Option) (*Consumer, error) {
 	if appName == "" {
 		return nil, fmt.Errorf("must provide app name to consumer")
 	}
@@ -37,7 +40,7 @@ func NewConsumer(appName, streamName string, opts ...Option) (*Consumer, error) 
 	// provide default logger
 	if c.logger == nil {
 		c.logger = log.Log.WithFields(log.Fields{
-			"package": "kinesis-connectors",
+			"package": "kinesis-consumer",
 			"app":     appName,
 			"stream":  streamName,
 		})
@@ -48,17 +51,13 @@ func NewConsumer(appName, streamName string, opts ...Option) (*Consumer, error) 
 		c.svc = kinesis.New(session.New(aws.NewConfig()))
 	}
 
-	// provide default checkpoint client
+	// provide default checkpoint
 	if c.checkpoint == nil {
-		rc, err := redisClient()
+		ck, err := redis.NewCheckpoint(appName, streamName)
 		if err != nil {
-			return nil, fmt.Errorf("redis client error: %v", err)
+			return nil, err
 		}
-		c.checkpoint = &RedisCheckpoint{
-			AppName:    appName,
-			StreamName: streamName,
-			client:     rc,
-		}
+		c.checkpoint = ck
 	}
 
 	return c, nil
@@ -75,6 +74,14 @@ func WithClient(client *kinesis.Kinesis) Option {
 	}
 }
 
+// WithCheckpoint overrides the default checkpoint
+func WithCheckpoint(checkpoint checkpoint.Checkpoint) Option {
+	return func(c *Consumer) error {
+		c.checkpoint = checkpoint
+		return nil
+	}
+}
+
 // WithLogger overrides the default logger
 func WithLogger(logger log.Interface) Option {
 	return func(c *Consumer) error {
@@ -85,16 +92,16 @@ func WithLogger(logger log.Interface) Option {
 
 // Consumer wraps the interaction with the Kinesis stream
 type Consumer struct {
-	svc        *kinesis.Kinesis
 	appName    string
 	streamName string
+	svc        *kinesis.Kinesis
 	logger     log.Interface
-	checkpoint Checkpoint
+	checkpoint checkpoint.Checkpoint
 }
 
-// Start takes a handler and then loops over each of the shards
-// processing each one with the handler.
-func (c *Consumer) Start(ctx context.Context, fn func(*kinesis.Record)) {
+// Scan scans each of the shards of the stream, calls the callback
+// func with each of the kinesis records
+func (c *Consumer) Scan(ctx context.Context, fn func(*kinesis.Record)) {
 	resp, err := c.svc.DescribeStream(
 		&kinesis.DescribeStreamInput{
 			StreamName: aws.String(c.streamName),
@@ -106,12 +113,22 @@ func (c *Consumer) Start(ctx context.Context, fn func(*kinesis.Record)) {
 		os.Exit(1)
 	}
 
+	var wg sync.WaitGroup
+	wg.Add(len(resp.StreamDescription.Shards))
+
 	for _, shard := range resp.StreamDescription.Shards {
-		go c.loop(ctx, *shard.ShardId, fn)
+		go func(shardID string) {
+			defer wg.Done()
+			c.ScanShard(ctx, shardID, fn)
+		}(*shard.ShardId)
 	}
+
+	wg.Wait()
 }
 
-func (c *Consumer) loop(ctx context.Context, shardID string, fn func(*kinesis.Record)) {
+// ScanShard loops over records on a kinesis shard, call the callback func
+// for each record and checkpoints after each page is processed
+func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn func(*kinesis.Record)) {
 	logger := c.logger.WithFields(log.Fields{"shard": shardID})
 	shardIterator := c.getShardIterator(shardID)
 
@@ -131,12 +148,13 @@ func (c *Consumer) loop(ctx context.Context, shardID string, fn func(*kinesis.Re
 		}
 
 		if len(resp.Records) > 0 {
+			var lastEvaluatedKey string
 			for _, r := range resp.Records {
+				lastEvaluatedKey = *r.SequenceNumber
 				fn(r)
 			}
-
-			logger.WithField("records", len(resp.Records)).Info("checkpointing")
-			c.checkpoint.SetCheckpoint(shardID, *resp.NextShardIterator)
+			logger.Info("checkpoint")
+			c.checkpoint.SetCheckpoint(shardID, lastEvaluatedKey)
 		}
 
 		if resp.NextShardIterator == nil || shardIterator == resp.NextShardIterator {

@@ -1,16 +1,41 @@
-package connector
+package redis
 
 import (
 	"fmt"
 	"log"
+	"os"
 
-	"gopkg.in/redis.v5"
+	redis "gopkg.in/redis.v5"
 )
 
-// RedisCheckpoint implements the Checkpont interface.
+const localhost = "127.0.0.1:6379"
+
+// NewCheckpoint returns a checkpoint that uses Redis for underlying storage
+func NewCheckpoint(appName, streamName string) (*Checkpoint, error) {
+	addr := os.Getenv("REDIS_URL")
+	if addr == "" {
+		addr = localhost
+	}
+
+	client := redis.NewClient(&redis.Options{Addr: addr})
+
+	// verify we can ping server
+	_, err := client.Ping().Result()
+	if err != nil {
+		return nil, err
+	}
+
+	return &Checkpoint{
+		AppName:    appName,
+		StreamName: streamName,
+		client:     client,
+	}, nil
+}
+
+// Checkpoint implements the Checkpont interface.
 // Used to enable the Pipeline.ProcessShard to checkpoint it's progress
 // while reading records from Kinesis stream.
-type RedisCheckpoint struct {
+type Checkpoint struct {
 	AppName    string
 	StreamName string
 
@@ -21,7 +46,7 @@ type RedisCheckpoint struct {
 // CheckpointExists determines if a checkpoint for a particular Shard exists.
 // Typically used to determine whether we should start processing the shard with
 // TRIM_HORIZON or AFTER_SEQUENCE_NUMBER (if checkpoint exists).
-func (c *RedisCheckpoint) CheckpointExists(shardID string) bool {
+func (c *Checkpoint) CheckpointExists(shardID string) bool {
 	val, _ := c.client.Get(c.key(shardID)).Result()
 
 	if val != "" {
@@ -33,13 +58,13 @@ func (c *RedisCheckpoint) CheckpointExists(shardID string) bool {
 }
 
 // SequenceNumber returns the current checkpoint stored for the specified shard.
-func (c *RedisCheckpoint) SequenceNumber() string {
+func (c *Checkpoint) SequenceNumber() string {
 	return c.sequenceNumber
 }
 
 // SetCheckpoint stores a checkpoint for a shard (e.g. sequence number of last record processed by application).
 // Upon failover, record processing is resumed from this point.
-func (c *RedisCheckpoint) SetCheckpoint(shardID string, sequenceNumber string) {
+func (c *Checkpoint) SetCheckpoint(shardID string, sequenceNumber string) {
 	err := c.client.Set(c.key(shardID), sequenceNumber, 0).Err()
 	if err != nil {
 		log.Printf("redis checkpoint set error: %v", err)
@@ -48,6 +73,6 @@ func (c *RedisCheckpoint) SetCheckpoint(shardID string, sequenceNumber string) {
 }
 
 // key generates a unique Redis key for storage of Checkpoint.
-func (c *RedisCheckpoint) key(shardID string) string {
+func (c *Checkpoint) key(shardID string) string {
 	return fmt.Sprintf("%v:checkpoint:%v:%v", c.AppName, c.StreamName, shardID)
 }

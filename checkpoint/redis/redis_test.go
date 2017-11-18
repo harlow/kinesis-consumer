@@ -1,4 +1,4 @@
-package connector
+package redis
 
 import (
 	"testing"
@@ -11,7 +11,7 @@ var defaultAddr = "127.0.0.1:6379"
 func Test_CheckpointLifecycle(t *testing.T) {
 	client := redis.NewClient(&redis.Options{Addr: defaultAddr})
 
-	c := RedisCheckpoint{
+	c := &Checkpoint{
 		AppName:    "app",
 		StreamName: "stream",
 		client:     client,
@@ -36,7 +36,7 @@ func Test_CheckpointLifecycle(t *testing.T) {
 func Test_key(t *testing.T) {
 	client := redis.NewClient(&redis.Options{Addr: defaultAddr})
 
-	c := &RedisCheckpoint{
+	c := &Checkpoint{
 		AppName:    "app",
 		StreamName: "stream",
 		client:     client,
