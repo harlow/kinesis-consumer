@@ -14,6 +14,33 @@ import (
 	"github.com/harlow/kinesis-consumer/checkpoint/redis"
 )
 
+// Option is used to override defaults when creating a new Consumer
+type Option func(*Consumer) error
+
+// WithClient the Kinesis client
+func WithClient(client *kinesis.Kinesis) Option {
+	return func(c *Consumer) error {
+		c.svc = client
+		return nil
+	}
+}
+
+// WithCheckpoint overrides the default checkpoint
+func WithCheckpoint(checkpoint checkpoint.Checkpoint) Option {
+	return func(c *Consumer) error {
+		c.checkpoint = checkpoint
+		return nil
+	}
+}
+
+// WithLogger overrides the default logger
+func WithLogger(logger log.Interface) Option {
+	return func(c *Consumer) error {
+		c.logger = logger
+		return nil
+	}
+}
+
 // New creates a kinesis consumer with default settings. Use Option to override
 // any of the optional attributes.
 func New(appName, streamName string, opts ...Option) (*Consumer, error) {
@@ -63,33 +90,6 @@ func New(appName, streamName string, opts ...Option) (*Consumer, error) {
 	return c, nil
 }
 
-// Option is used to override defaults when creating a new Consumer
-type Option func(*Consumer) error
-
-// WithClient the Kinesis client
-func WithClient(client *kinesis.Kinesis) Option {
-	return func(c *Consumer) error {
-		c.svc = client
-		return nil
-	}
-}
-
-// WithCheckpoint overrides the default checkpoint
-func WithCheckpoint(checkpoint checkpoint.Checkpoint) Option {
-	return func(c *Consumer) error {
-		c.checkpoint = checkpoint
-		return nil
-	}
-}
-
-// WithLogger overrides the default logger
-func WithLogger(logger log.Interface) Option {
-	return func(c *Consumer) error {
-		c.logger = logger
-		return nil
-	}
-}
-
 // Consumer wraps the interaction with the Kinesis stream
 type Consumer struct {
 	appName    string
@@ -101,7 +101,7 @@ type Consumer struct {
 
 // Scan scans each of the shards of the stream, calls the callback
 // func with each of the kinesis records
-func (c *Consumer) Scan(ctx context.Context, fn func(*kinesis.Record)) {
+func (c *Consumer) Scan(ctx context.Context, fn func(*kinesis.Record) bool) {
 	resp, err := c.svc.DescribeStream(
 		&kinesis.DescribeStreamInput{
 			StreamName: aws.String(c.streamName),
@@ -116,6 +116,7 @@ func (c *Consumer) Scan(ctx context.Context, fn func(*kinesis.Record)) {
 	var wg sync.WaitGroup
 	wg.Add(len(resp.StreamDescription.Shards))
 
+	// loop over shards and begin scanning each one
 	for _, shard := range resp.StreamDescription.Shards {
 		go func(shardID string) {
 			defer wg.Done()
@@ -128,12 +129,16 @@ func (c *Consumer) Scan(ctx context.Context, fn func(*kinesis.Record)) {
 
 // ScanShard loops over records on a kinesis shard, call the callback func
 // for each record and checkpoints after each page is processed
-func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn func(*kinesis.Record)) {
-	logger := c.logger.WithFields(log.Fields{"shard": shardID})
-	shardIterator := c.getShardIterator(shardID)
+func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn func(*kinesis.Record) bool) {
+	var (
+		logger           = c.logger.WithFields(log.Fields{"shard": shardID})
+		shardIterator    = c.getShardIterator(shardID)
+		lastEvaluatedKey string
+	)
 
 	logger.Info("processing")
 
+loop:
 	for {
 		resp, err := c.svc.GetRecords(
 			&kinesis.GetRecordsInput{
@@ -148,12 +153,13 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn func(*kines
 		}
 
 		if len(resp.Records) > 0 {
-			var lastEvaluatedKey string
 			for _, r := range resp.Records {
 				lastEvaluatedKey = *r.SequenceNumber
-				fn(r)
+				if ok := fn(r); !ok {
+					break loop
+				}
 			}
-			logger.Info("checkpoint")
+			logger.WithField("lastEvaluatedKey", lastEvaluatedKey).Info("checkpoint")
 			c.checkpoint.SetCheckpoint(shardID, lastEvaluatedKey)
 		}
 
@@ -163,6 +169,12 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn func(*kines
 			shardIterator = resp.NextShardIterator
 		}
 	}
+
+	// store final value of last evaluated key
+	logger.WithField("lastEvaluatedKey", lastEvaluatedKey).Info("checkpoint")
+	c.checkpoint.SetCheckpoint(shardID, lastEvaluatedKey)
+
+	logger.Info("stopping consumer")
 }
 
 func (c *Consumer) getShardIterator(shardID string) *string {

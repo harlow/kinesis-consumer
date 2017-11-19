@@ -27,7 +27,9 @@ func main() {
 		log.Fatalf("new consumer error: %v", err)
 	}
 
-	c.Scan(context.TODO(), func(r *kinesis.Record) {
+	c.Scan(context.TODO(), func(r *kinesis.Record) bool {
 		fmt.Println(string(r.Data))
+
+		return false // continue scanning
 	})
 }

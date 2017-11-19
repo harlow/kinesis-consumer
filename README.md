@@ -12,6 +12,9 @@ The consumer expects a handler func that accepts the Kinesis record.
 import consumer "github.com/harlow/kinesis-consumer"
 
 func main() {
+	log.SetHandler(text.New(os.Stderr))
+	log.SetLevel(log.DebugLevel)
+
 	var (
 		app    = flag.String("app", "", "App name")
 		stream = flag.String("stream", "", "Stream name")
@@ -23,8 +26,10 @@ func main() {
 		log.Fatalf("new consumer error: %v", err)
 	}
 
-	c.Scan(context.TODO(), func(r *kinesis.Record) {
+	c.Scan(context.TODO(), func(r *kinesis.Record) bool {
 		fmt.Println(string(r.Data))
+
+		return true // continue scanning
 	})
 }
 ```
