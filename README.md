@@ -4,9 +4,17 @@ __Kinesis consumer applications written in Go__
 
 > With the new release of Kinesis Firehose I'd recommend using the [kinesis to firehose](http://docs.aws.amazon.com/firehose/latest/dev/writing-with-kinesis-streams.html) functionality for writing data directly to S3, Redshift, or Elasticsearch.
 
+## Installation
+
+Get the package source:
+
+    $ go get github.com/harlow/kinesis-consumer
+
 ## Overview
 
-The consumer expects a handler func that accepts the Kinesis record.
+The consumer leverages a handler func that accepts a Kinesis record. 
+
+The `Scan` method will consume all shards and call the callback func concurrently as it receives records from the stream. If you need to aggregate or make decisions based on a specific shard the `ScanShard` method should be leverged instead.
 
 ```go
 import consumer "github.com/harlow/kinesis-consumer"
@@ -16,7 +24,7 @@ func main() {
 	log.SetLevel(log.DebugLevel)
 
 	var (
-		app    = flag.String("app", "", "App name")
+		app    = flag.String("app", "", "App name") // name of consumer group
 		stream = flag.String("stream", "", "Stream name")
 	)
 	flag.Parse()
@@ -34,13 +42,38 @@ func main() {
 }
 ```
 
+### Configuration
+
+The consumer requires the following config:
+
+* App Name (used for checkpoints)
+* Stream Name (kinesis stream name)
+
+It also accepts the following optional overrides:
+
+* Kinesis Client
+* Logger
+* Checkpoint
+
+```go
+svc := kinesis.New(session.New(aws.NewConfig()))
+
+c, err := consumer.New(
+	appName, 
+	streamName,
+	consumer.WithClient(svc),
+)
+```
+
 ### Checkpoint
 
-The default behavior for checkpointing uses Redis on localhost. To set a custom Redis URL use ENV vars:
+The default checkpoint uses Redis on localhost; to set a custom Redis URL use ENV vars:
 
 ```
 REDIS_URL=redis.example.com:6379
 ```
+
+* [Add DDB as a checkpoint option](https://github.com/harlow/kinesis-consumer/issues/26)
 
 ### Logging
 
@@ -67,12 +100,6 @@ Which will producde the following logs:
   INFO[0008] checkpoint                app=test shard=shardId-000000000000 stream=test
   INFO[0012] checkpoint                app=test shard=shardId-000000000000 stream=test
 ```
-
-### Installation
-
-Get the package source:
-
-    $ go get github.com/harlow/kinesis-connectors
 
 ## Contributing
 

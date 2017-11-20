@@ -102,6 +102,9 @@ type Consumer struct {
 // Scan scans each of the shards of the stream, calls the callback
 // func with each of the kinesis records
 func (c *Consumer) Scan(ctx context.Context, fn func(*kinesis.Record) bool) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	resp, err := c.svc.DescribeStream(
 		&kinesis.DescribeStreamInput{
 			StreamName: aws.String(c.streamName),
@@ -116,11 +119,12 @@ func (c *Consumer) Scan(ctx context.Context, fn func(*kinesis.Record) bool) {
 	var wg sync.WaitGroup
 	wg.Add(len(resp.StreamDescription.Shards))
 
-	// loop over shards and begin scanning each one
+	// scan each of the shards
 	for _, shard := range resp.StreamDescription.Shards {
 		go func(shardID string) {
 			defer wg.Done()
 			c.ScanShard(ctx, shardID, fn)
+			cancel()
 		}(*shard.ShardId)
 	}
 
@@ -131,53 +135,73 @@ func (c *Consumer) Scan(ctx context.Context, fn func(*kinesis.Record) bool) {
 // for each record and checkpoints after each page is processed
 func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn func(*kinesis.Record) bool) {
 	var (
-		logger           = c.logger.WithFields(log.Fields{"shard": shardID})
-		shardIterator    = c.getShardIterator(shardID)
-		lastEvaluatedKey string
+		logger         = c.logger.WithFields(log.Fields{"shard": shardID})
+		sequenceNumber string
 	)
 
-	logger.Info("processing")
+	shardIterator, err := c.getShardIterator(shardID)
+	if err != nil {
+		logger.WithError(err).Error("getShardIterator")
+		return
+	}
+
+	logger.Info("scanning shard")
 
 loop:
 	for {
-		resp, err := c.svc.GetRecords(
-			&kinesis.GetRecordsInput{
-				ShardIterator: shardIterator,
-			},
-		)
+		select {
+		case <-ctx.Done():
+			break loop
+		default:
+			resp, err := c.svc.GetRecords(
+				&kinesis.GetRecordsInput{
+					ShardIterator: shardIterator,
+				},
+			)
 
-		if err != nil {
-			logger.WithError(err).Error("GetRecords")
-			shardIterator = c.getShardIterator(shardID)
-			continue
-		}
-
-		if len(resp.Records) > 0 {
-			for _, r := range resp.Records {
-				lastEvaluatedKey = *r.SequenceNumber
-				if ok := fn(r); !ok {
+			if err != nil {
+				shardIterator, err = c.getShardIterator(shardID)
+				if err != nil {
+					logger.WithError(err).Error("getShardIterator")
 					break loop
 				}
+				continue
 			}
-			logger.WithField("lastEvaluatedKey", lastEvaluatedKey).Info("checkpoint")
-			c.checkpoint.SetCheckpoint(shardID, lastEvaluatedKey)
-		}
 
-		if resp.NextShardIterator == nil || shardIterator == resp.NextShardIterator {
-			shardIterator = c.getShardIterator(shardID)
-		} else {
-			shardIterator = resp.NextShardIterator
+			if len(resp.Records) > 0 {
+				for _, r := range resp.Records {
+					select {
+					case <-ctx.Done():
+						break loop
+					default:
+						sequenceNumber = *r.SequenceNumber
+						if ok := fn(r); !ok {
+							break loop
+						}
+					}
+				}
+
+				logger.WithField("records", len(resp.Records)).Info("checkpoint")
+				c.checkpoint.SetCheckpoint(shardID, sequenceNumber)
+			}
+
+			if resp.NextShardIterator == nil || shardIterator == resp.NextShardIterator {
+				shardIterator, err = c.getShardIterator(shardID)
+				if err != nil {
+					break loop
+				}
+			} else {
+				shardIterator = resp.NextShardIterator
+			}
 		}
 	}
 
-	// store final value of last evaluated key
-	logger.WithField("lastEvaluatedKey", lastEvaluatedKey).Info("checkpoint")
-	c.checkpoint.SetCheckpoint(shardID, lastEvaluatedKey)
-
-	logger.Info("stopping consumer")
+	if sequenceNumber != "" {
+		c.checkpoint.SetCheckpoint(shardID, sequenceNumber)
+	}
 }
 
-func (c *Consumer) getShardIterator(shardID string) *string {
+func (c *Consumer) getShardIterator(shardID string) (*string, error) {
 	params := &kinesis.GetShardIteratorInput{
 		ShardId:    aws.String(shardID),
 		StreamName: aws.String(c.streamName),
@@ -193,8 +217,8 @@ func (c *Consumer) getShardIterator(shardID string) *string {
 	resp, err := c.svc.GetShardIterator(params)
 	if err != nil {
 		c.logger.WithError(err).Error("GetShardIterator")
-		os.Exit(1)
+		return nil, err
 	}
 
-	return resp.ShardIterator
+	return resp.ShardIterator, nil
 }
