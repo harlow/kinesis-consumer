@@ -71,6 +71,11 @@ c, err := consumer.New(
 
 ### Checkpoint
 
+To record the progress of the consumer in the stream we store the last sequence number the consumer has read from a particular shard. This will allow consumers to re-launch and pick up at the position in the stream where they left off.
+
+<img width="694" alt="kinesis-checkpoints" src="https://user-images.githubusercontent.com/739782/33036220-95649ce8-cde2-11e7-99dc-725c38d3d902.png">
+
+
 The default checkpoint uses Redis on localhost; to set a custom Redis URL use ENV vars:
 
 ```
