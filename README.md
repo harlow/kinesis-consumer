@@ -12,9 +12,7 @@ Get the package source:
 
 ## Overview
 
-The consumer leverages a handler func that accepts a Kinesis record. 
-
-The `Scan` method will consume all shards and call the callback func concurrently as it receives records from the stream. If you need to aggregate or make decisions based on a specific shard the `ScanShard` method should be leverged instead.
+The consumer leverages a handler func that accepts a Kinesis record. The `Scan` method will consume all shards concurrently and call the callback func as it receives records from the stream.
 
 ```go
 import consumer "github.com/harlow/kinesis-consumer"
@@ -41,6 +39,8 @@ func main() {
 	})
 }
 ```
+
+Note: If you need to aggregate based on a specific shard the `ScanShard` method should be leverged instead.
 
 ### Configuration
 
