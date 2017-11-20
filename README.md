@@ -31,18 +31,22 @@ func main() {
 
 	c, err := consumer.New(*app, *stream)
 	if err != nil {
-		log.Fatalf("new consumer error: %v", err)
+		log.Fatalf("consumer error: %v", err)
 	}
 
-	c.Scan(context.TODO(), func(r *kinesis.Record) bool {
+	err = c.Scan(context.TODO(), func(r *kinesis.Record) bool {
 		fmt.Println(string(r.Data))
 
 		return true // continue scanning
 	})
+	if err != nil {
+		log.Fatalf("scan error: %v", err)
+	}
+
+	// Note: If you need to aggregate based on a specific shard the `ScanShard` 
+	// method should be leverged instead.
 }
 ```
-
-Note: If you need to aggregate based on a specific shard the `ScanShard` method should be leverged instead.
 
 ### Configuration
 

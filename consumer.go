@@ -3,7 +3,6 @@ package consumer
 import (
 	"context"
 	"fmt"
-	"os"
 	"sync"
 
 	"github.com/apex/log"
@@ -100,26 +99,25 @@ type Consumer struct {
 }
 
 // Scan scans each of the shards of the stream, calls the callback
-// func with each of the kinesis records
-func (c *Consumer) Scan(ctx context.Context, fn func(*kinesis.Record) bool) {
+// func with each of the kinesis records.
+func (c *Consumer) Scan(ctx context.Context, fn func(*kinesis.Record) bool) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	// grab the stream details
 	resp, err := c.svc.DescribeStream(
 		&kinesis.DescribeStreamInput{
 			StreamName: aws.String(c.streamName),
 		},
 	)
-
 	if err != nil {
-		c.logger.WithError(err).Error("DescribeStream")
-		os.Exit(1)
+		return err
 	}
 
 	var wg sync.WaitGroup
 	wg.Add(len(resp.StreamDescription.Shards))
 
-	// scan each of the shards
+	// launch goroutine to process each of the shards
 	for _, shard := range resp.StreamDescription.Shards {
 		go func(shardID string) {
 			defer wg.Done()
@@ -129,10 +127,12 @@ func (c *Consumer) Scan(ctx context.Context, fn func(*kinesis.Record) bool) {
 	}
 
 	wg.Wait()
+	return nil
 }
 
-// ScanShard loops over records on a kinesis shard, call the callback func
-// for each record and checkpoints after each page is processed
+// ScanShard loops over records on a specific shard, calls the callback func
+// for each record and checkpoints after each page is processed.
+// Note: returning `false` from the callback func will end the scan.
 func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn func(*kinesis.Record) bool) {
 	var (
 		logger         = c.logger.WithFields(log.Fields{"shard": shardID})
