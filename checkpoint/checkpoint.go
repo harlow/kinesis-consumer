@@ -1,9 +1,8 @@
 package checkpoint
 
-// Checkpoint interface for functions that checkpoints need to
-// implement in order to track consumer progress.
+// Checkpoint interface used to allow swappable backends for checkpoining
+// consumer progress in the stream.
 type Checkpoint interface {
-	CheckpointExists(shardID string) bool
-	SequenceNumber() string
-	SetCheckpoint(shardID string, sequenceNumber string)
+	Get(shardID string) (string, error)
+	Set(shardID string, sequenceNumber string) error
 }

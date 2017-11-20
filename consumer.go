@@ -78,9 +78,9 @@ func New(appName, streamName string, opts ...Option) (*Consumer, error) {
 		c.svc = kinesis.New(session.New(aws.NewConfig()))
 	}
 
-	// provide default checkpoint
+	// provide default Redis checkpoint
 	if c.checkpoint == nil {
-		ck, err := redis.NewCheckpoint(appName, streamName)
+		ck, err := redis.New(appName, streamName)
 		if err != nil {
 			return nil, err
 		}
@@ -182,12 +182,15 @@ loop:
 				}
 
 				logger.WithField("records", len(resp.Records)).Info("checkpoint")
-				c.checkpoint.SetCheckpoint(shardID, sequenceNumber)
+				if err := c.checkpoint.Set(shardID, sequenceNumber); err != nil {
+					c.logger.WithError(err).Error("set checkpoint error")
+				}
 			}
 
 			if resp.NextShardIterator == nil || shardIterator == resp.NextShardIterator {
 				shardIterator, err = c.getShardIterator(shardID)
 				if err != nil {
+					logger.WithError(err).Error("getShardIterator")
 					break loop
 				}
 			} else {
@@ -197,7 +200,9 @@ loop:
 	}
 
 	if sequenceNumber != "" {
-		c.checkpoint.SetCheckpoint(shardID, sequenceNumber)
+		if err := c.checkpoint.Set(shardID, sequenceNumber); err != nil {
+			c.logger.WithError(err).Error("set checkpoint error")
+		}
 	}
 }
 
@@ -207,9 +212,14 @@ func (c *Consumer) getShardIterator(shardID string) (*string, error) {
 		StreamName: aws.String(c.streamName),
 	}
 
-	if c.checkpoint.CheckpointExists(shardID) {
+	seqNum, err := c.checkpoint.Get(shardID)
+	if err != nil {
+		return nil, err
+	}
+
+	if seqNum != "" {
 		params.ShardIteratorType = aws.String("AFTER_SEQUENCE_NUMBER")
-		params.StartingSequenceNumber = aws.String(c.checkpoint.SequenceNumber())
+		params.StartingSequenceNumber = aws.String(seqNum)
 	} else {
 		params.ShardIteratorType = aws.String("TRIM_HORIZON")
 	}
