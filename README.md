@@ -1,48 +1,79 @@
-# Golang Kinesis Connectors
+# Golang Kinesis Consumer
 
-__Kinesis connector applications written in Go__
+__Kinesis consumer applications written in Go__
 
-> With the new release of Kinesis Firehose I'd recommend using the [Lambda Streams to Firehose](https://github.com/awslabs/lambda-streams-to-firehose) project for loading data directly into S3 and Redshift.
+> With the new release of Kinesis Firehose I'd recommend using the [kinesis to firehose](http://docs.aws.amazon.com/firehose/latest/dev/writing-with-kinesis-streams.html) functionality for writing data directly to S3, Redshift, or Elasticsearch.
 
-Inspired by the [Amazon Kinesis Connector Library](https://github.com/awslabs/amazon-kinesis-connectors). This library is intended to be a lightweight wrapper around the Kinesis API to handle batching records, setting checkpoints, respecting ratelimits,  and recovering from network errors.
+## Installation
 
-![golang_kinesis_connector](https://cloud.githubusercontent.com/assets/739782/4262283/2ee2550e-3b97-11e4-8cd1-21a5d7ee0964.png)
+Get the package source:
+
+    $ go get github.com/harlow/kinesis-consumer
 
 ## Overview
 
-The consumer expects a handler func that will process a buffer of incoming records.
+The consumer leverages a handler func that accepts a Kinesis record. The `Scan` method will consume all shards concurrently and call the callback func as it receives records from the stream.
 
 ```go
+import consumer "github.com/harlow/kinesis-consumer"
+
 func main() {
-  var(
-    app    = flag.String("app", "", "The app name")
-    stream = flag.String("stream", "", "The stream name")
-  )
-  flag.Parse()
+	log.SetHandler(text.New(os.Stderr))
+	log.SetLevel(log.DebugLevel)
 
-  // create new consumer
-  c := connector.NewConsumer(connector.Config{
-    AppName:        *app,
-    MaxRecordCount: 400,
-    Streamname:     *stream,
-  })
+	var (
+		app    = flag.String("app", "", "App name") // name of consumer group
+		stream = flag.String("stream", "", "Stream name")
+	)
+	flag.Parse()
 
-  // process records from the stream
-  c.Start(connector.HandlerFunc(func(b connector.Buffer) {
-    fmt.Println(b.GetRecords())
-  }))
+	c, err := consumer.New(*app, *stream)
+	if err != nil {
+		log.Fatalf("new consumer error: %v", err)
+	}
 
-  select {}
+	c.Scan(context.TODO(), func(r *kinesis.Record) bool {
+		fmt.Println(string(r.Data))
+
+		return true // continue scanning
+	})
 }
 ```
 
-### Config
+Note: If you need to aggregate based on a specific shard the `ScanShard` method should be leverged instead.
 
-The default behavior for checkpointing uses Redis on localhost. To set a custom Redis URL use ENV vars:
+### Configuration
+
+The consumer requires the following config:
+
+* App Name (used for checkpoints)
+* Stream Name (kinesis stream name)
+
+It also accepts the following optional overrides:
+
+* Kinesis Client
+* Logger
+* Checkpoint
+
+```go
+svc := kinesis.New(session.New(aws.NewConfig()))
+
+c, err := consumer.New(
+	appName, 
+	streamName,
+	consumer.WithClient(svc),
+)
+```
+
+### Checkpoint
+
+The default checkpoint uses Redis on localhost; to set a custom Redis URL use ENV vars:
 
 ```
-REDIS_URL=my-custom-redis-server.com:6379
+REDIS_URL=redis.example.com:6379
 ```
+
+* [Add DDB as a checkpoint option](https://github.com/harlow/kinesis-consumer/issues/26)
 
 ### Logging
 
@@ -66,33 +97,9 @@ Which will producde the following logs:
 
 ```
   INFO[0000] processing                app=test shard=shardId-000000000000 stream=test
-  INFO[0008] emitted                   app=test count=500 shard=shardId-000000000000 stream=test
-  INFO[0012] emitted                   app=test count=500 shard=shardId-000000000000 stream=test
+  INFO[0008] checkpoint                app=test shard=shardId-000000000000 stream=test
+  INFO[0012] checkpoint                app=test shard=shardId-000000000000 stream=test
 ```
-
-### Installation
-
-Get the package source:
-
-    $ go get github.com/harlow/kinesis-connectors
-
-### Fetching Dependencies
-
-Install `govendor`:
-
-    $ export GO15VENDOREXPERIMENT=1
-    $ go get -u github.com/kardianos/govendor
-
-Install dependencies into `./vendor/`:
-
-    $ govendor sync
-
-### Examples
-
-Use the [seed stream](https://github.com/harlow/kinesis-connectors/tree/master/examples/seed) code to put sample data onto the stream.
-
-* [Firehose](https://github.com/harlow/kinesis-connectors/tree/master/examples/firehose)
-* [S3](https://github.com/harlow/kinesis-connectors/tree/master/examples/s3)
 
 ## Contributing
 

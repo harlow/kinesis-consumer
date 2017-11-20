@@ -1,4 +1,4 @@
-# Populate the Stream with data
+# Producer
 
 A prepopulated file with JSON users is available on S3 for seeing the stream:
 
