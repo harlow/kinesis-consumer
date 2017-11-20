@@ -4,6 +4,8 @@ Kinesis consumer applications written in Go. This library is intended to be a li
 
 _NOTE: With the release of [Kinesis to Firehose](http://docs.aws.amazon.com/firehose/latest/dev/writing-with-kinesis-streams.html) it's possible to archive data directly to S3, Redshift, or Elasticsearch without running a consumer application._ 
 
+_UPDATE: To avoid managing checkpoints and running any infrastructure it's also possible to [Process Kinensis Streams with Golang and Lambda](https://medium.com/@harlow/processing-kinesis-streams-w-aws-lambda-and-golang-264efc8f979a)._
+
 ## Installation
 
 Get the package source:
