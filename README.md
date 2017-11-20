@@ -1,6 +1,8 @@
 # Golang Kinesis Consumer
 
-__Kinesis consumer applications written in Go__
+Kinesis consumer applications written in Go
+
+## Note:
 
 > With the new release of Kinesis Firehose I'd recommend using the [kinesis to firehose](http://docs.aws.amazon.com/firehose/latest/dev/writing-with-kinesis-streams.html) functionality for writing data directly to S3, Redshift, or Elasticsearch.
 
@@ -56,8 +58,10 @@ It also accepts the following optional overrides:
 * Checkpoint
 
 ```go
+// new kinesis client
 svc := kinesis.New(session.New(aws.NewConfig()))
 
+// new consumer with custom client
 c, err := consumer.New(
 	appName, 
 	streamName,
@@ -73,7 +77,24 @@ The default checkpoint uses Redis on localhost; to set a custom Redis URL use EN
 REDIS_URL=redis.example.com:6379
 ```
 
-* [Add DDB as a checkpoint option](https://github.com/harlow/kinesis-consumer/issues/26)
+To leverage DynamoDB as the backend for checkpoint we'll need a new table:
+
+Then override the checkpoint config option:
+
+```go
+// new ddb checkpoint
+ck, err := checkpoint.New(*table, *app, *stream)
+if err != nil {
+	log.Fatalf("new checkpoint error: %v", err)
+}
+
+// new consumer with checkpoint
+c, err := consumer.New(
+	appName,
+	streamName,
+	consumer.WithCheckpoint(ck),
+)
+```
 
 ### Logging
 
