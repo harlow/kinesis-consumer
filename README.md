@@ -72,21 +72,23 @@ c, err := consumer.New(
 The default checkpoint uses Redis on localhost; to set a custom Redis URL use ENV vars:
 
 ```
-REDIS_URL=redis.example.com:6379
+REDIS_URL=redis.yoursite.com:6379
 ```
 
 To leverage DynamoDB as the backend for checkpoint we'll need a new table:
 
+<img width="659" alt="screen shot 2017-11-20 at 9 16 14 am" src="https://user-images.githubusercontent.com/739782/33033316-db85f848-cdd8-11e7-941a-0a87d8ace479.png">
+
 Then override the checkpoint config option:
 
 ```go
-// new ddb checkpoint
-ck, err := checkpoint.New(*table, *app, *stream)
+// ddb checkpoint
+ck, err := checkpoint.New(tableName, appName, streamName)
 if err != nil {
 	log.Fatalf("new checkpoint error: %v", err)
 }
 
-// new consumer with checkpoint
+// consumer with checkpoint
 c, err := consumer.New(
 	appName,
 	streamName,
