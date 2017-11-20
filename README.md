@@ -1,6 +1,6 @@
 # Golang Kinesis Consumer
 
-Kinesis consumer applications written in Go. This library is intended to be a lightweight wrapper around the Kinesis API to scan records, set checkpoints, and gracefully recover from network errors.
+Kinesis consumer applications written in Go. This library is intended to be a lightweight wrapper around the Kinesis API to read records, save checkpoints (with swappable backends), and gracefully recover from network errors.
 
 _NOTE: With the release of [Kinesis to Firehose](http://docs.aws.amazon.com/firehose/latest/dev/writing-with-kinesis-streams.html) it's possible to archive data directly to S3, Redshift, or Elasticsearch without running a consumer application._ 
 
@@ -54,8 +54,8 @@ The consumer requires the following config:
 It also accepts the following optional overrides:
 
 * Kinesis Client
+* Checkpoint Storage
 * Logger
-* Checkpoint
 
 ```go
 // new kinesis client
@@ -69,11 +69,11 @@ c, err := consumer.New(
 )
 ```
 
-### Checkpoint
+### Checkpoint Storage
 
 To record the progress of the consumer in the stream we store the last sequence number the consumer has read from a particular shard. This will allow consumers to re-launch and pick up at the position in the stream where they left off.
 
-<img width="694" alt="kinesis-checkpoints" src="https://user-images.githubusercontent.com/739782/33036220-95649ce8-cde2-11e7-99dc-725c38d3d902.png">
+<img width="687" alt="kinesis-checkpoints" src="https://user-images.githubusercontent.com/739782/33036582-b6f3c4b4-cde3-11e7-9334-c4bfbe34d984.png">
 
 
 The default checkpoint uses Redis on localhost; to set a custom Redis URL use ENV vars:
