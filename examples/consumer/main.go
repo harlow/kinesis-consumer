@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
 	"os"
 
 	"github.com/apex/log"
@@ -28,8 +27,8 @@ func main() {
 	}
 
 	c.Scan(context.TODO(), func(r *kinesis.Record) bool {
-		fmt.Println(string(r.Data))
+		// fmt.Println(string(r.Data))
 
-		return false // continue scanning
+		return true // continue scanning
 	})
 }

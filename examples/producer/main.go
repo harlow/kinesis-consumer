@@ -29,20 +29,30 @@ func main() {
 	}
 	defer f.Close()
 
-	// set up client
-	svc := kinesis.New(session.New())
+	var (
+		svc     = kinesis.New(session.New())
+		records []*kinesis.PutRecordsRequestEntry
+	)
 
 	// loop over file data
 	b := bufio.NewScanner(f)
 	for b.Scan() {
-		_, err := svc.PutRecord(&kinesis.PutRecordInput{
+		records = append(records, &kinesis.PutRecordsRequestEntry{
 			Data:         b.Bytes(),
-			StreamName:   streamName,
 			PartitionKey: aws.String(time.Now().Format(time.RFC3339Nano)),
 		})
-		if err != nil {
-			log.WithError(err).Fatal("error producing")
+
+		if len(records) > 50 {
+			_, err = svc.PutRecords(&kinesis.PutRecordsInput{
+				StreamName: streamName,
+				Records:    records,
+			})
+			if err != nil {
+				log.WithError(err).Fatal("error producing")
+			}
+			records = nil
 		}
+
 		fmt.Print(".")
 	}
 }
