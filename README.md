@@ -2,7 +2,7 @@
 
 Kinesis consumer applications written in Go. This library is intended to be a lightweight wrapper around the Kinesis API to scan records, set checkpoints, and gracefully recover from network errors.
 
-** NOTE ** With the release of [Kinesis to Firehose](http://docs.aws.amazon.com/firehose/latest/dev/writing-with-kinesis-streams.html) it's possible to archive data directly to S3, Redshift, or Elasticsearch without running a consumer application. 
+_NOTE: With the release of [Kinesis to Firehose](http://docs.aws.amazon.com/firehose/latest/dev/writing-with-kinesis-streams.html) it's possible to archive data directly to S3, Redshift, or Elasticsearch without running a consumer application._ 
 
 ## Installation
 
