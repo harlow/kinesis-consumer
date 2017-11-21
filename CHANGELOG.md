@@ -18,7 +18,9 @@ Minor changes:
 
 * remove unused buffer and emitter code
 
-## [0.1.0] - 2017-11-20
+[unreleased]: https://github.com/harlow/kinesis-consumer/compare/v0.1.0...HEAD
+
+## v0.1.0 - 2017-11-20
 
 This is the last stable release of the consumer which aggregated records in `batch` before calling the callback func. 
 
