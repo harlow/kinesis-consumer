@@ -78,6 +78,10 @@ func (c *Checkpoint) Get(shardID string) (string, error) {
 // Set stores a checkpoint for a shard (e.g. sequence number of last record processed by application).
 // Upon failover, record processing is resumed from this point.
 func (c *Checkpoint) Set(shardID string, sequenceNumber string) error {
+	if sequenceNumber == "" {
+		return fmt.Errorf("sequence number should not be empty")
+	}
+
 	item, err := dynamodbattribute.MarshalMap(item{
 		ConsumerGroup:  c.consumerGroupName(),
 		ShardID:        shardID,

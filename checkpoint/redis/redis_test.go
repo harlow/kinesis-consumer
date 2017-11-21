@@ -12,33 +12,33 @@ func Test_CheckpointLifecycle(t *testing.T) {
 	client := redis.NewClient(&redis.Options{Addr: defaultAddr})
 
 	c := &Checkpoint{
-		AppName:    "app",
-		StreamName: "stream",
+		appName:    "app",
+		streamName: "stream",
 		client:     client,
 	}
 
 	// set checkpoint
-	c.SetCheckpoint("shard_id", "testSeqNum")
-
-	// checkpoint exists
-	if val := c.CheckpointExists("shard_id"); val != true {
-		t.Fatalf("checkpoint exists expected true, got %t", val)
-	}
+	c.Set("shard_id", "testSeqNum")
 
 	// get checkpoint
-	if val := c.SequenceNumber(); val != "testSeqNum" {
+	val, err := c.Get("shard_id")
+	if err != nil {
+		t.Fatalf("get checkpoint error: %v", err)
+	}
+
+	if val != "testSeqNum" {
 		t.Fatalf("checkpoint exists expected %s, got %s", "testSeqNum", val)
 	}
 
-	client.Del("app:checkpoint:stream:shard_id")
+	client.Del(c.key("shard_id"))
 }
 
 func Test_key(t *testing.T) {
 	client := redis.NewClient(&redis.Options{Addr: defaultAddr})
 
 	c := &Checkpoint{
-		AppName:    "app",
-		StreamName: "stream",
+		appName:    "app",
+		streamName: "stream",
 		client:     client,
 	}
 

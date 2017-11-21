@@ -18,7 +18,7 @@ func main() {
 	log.SetHandler(text.New(os.Stderr))
 	log.SetLevel(log.DebugLevel)
 
-	var streamName = flag.String("s", "", "Stream name")
+	var streamName = flag.String("stream", "", "Stream name")
 	flag.Parse()
 
 	// download file with test data

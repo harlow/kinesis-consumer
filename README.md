@@ -17,26 +17,37 @@ Get the package source:
 The consumer leverages a handler func that accepts a Kinesis record. The `Scan` method will consume all shards concurrently and call the callback func as it receives records from the stream.
 
 ```go
-import consumer "github.com/harlow/kinesis-consumer"
+import(
+	// ...
+	consumer "github.com/harlow/kinesis-consumer"
+	checkpoint "github.com/harlow/kinesis-consumer/checkpoint/redis"
+)
 
 func main() {
 	log.SetHandler(text.New(os.Stderr))
 	log.SetLevel(log.DebugLevel)
 
 	var (
-		app    = flag.String("app", "", "App name") // name of consumer group
+		app    = flag.String("app", "", "App name")
 		stream = flag.String("stream", "", "Stream name")
 	)
 	flag.Parse()
 
-	c, err := consumer.New(*app, *stream)
+	// new checkpoint
+	ck, err := checkpoint.New(*app, *stream)
+	if err != nil {
+		log.Fatalf("checkpoint error: %v", err)
+	}
+
+	// new consumer
+	c, err := consumer.New(ck, *app, *stream)
 	if err != nil {
 		log.Fatalf("consumer error: %v", err)
 	}
 
-	err = c.Scan(context.TODO(), func(r *kinesis.Record) bool {
+	// scan stream
+	err = c.Scan(context.TODO(), func(r *consumer.Record) bool {
 		fmt.Println(string(r.Data))
-
 		return true // continue scanning
 	})
 	if err != nil {
@@ -48,17 +59,55 @@ func main() {
 }
 ```
 
-### Configuration
+### Checkpoint
 
-The consumer requires the following config:
+To record the progress of the consumer in the stream we use a checkpoint to store the last sequence number the consumer has read from a particular shard. 
 
-* App Name (used for checkpoints)
-* Stream Name (kinesis stream name)
+This will allow consumers to re-launch and pick up at the position in the stream where they left off.
 
-It also accepts the following optional overrides:
+The uniq identifier for a consumer is `[appName, streamName, shardID]`
+
+<img width="687" alt="kinesis-checkpoints" src="https://user-images.githubusercontent.com/739782/33036582-b6f3c4b4-cde3-11e7-9334-c4bfbe34d984.png">
+
+There are two types of checkpoints:
+
+### Redis
+
+The Redis checkpoint requries App Name, and Stream Name:
+
+```go
+import checkpoint "github.com/harlow/kinesis-consumer/checkpoint/redis"
+
+// redis checkpoint
+ck, err := checkpoint.New(appName, streamName)
+if err != nil {
+	log.Fatalf("new checkpoint error: %v", err)
+}
+```
+
+### DynamoDB
+
+The DynamoDB checkpoint requires Table Name, App Name, and Stream Name:
+
+```go
+import checkpoint "github.com/harlow/kinesis-consumer/checkpoint/ddb"
+
+// ddb checkpoint
+ck, err := checkpoint.New(tableName, appName, streamName)
+if err != nil {
+	log.Fatalf("new checkpoint error: %v", err)
+}
+```
+
+To leverage the DDB checkpoint we'll also need to create a table:
+
+<img width="659" alt="screen shot 2017-11-20 at 9 16 14 am" src="https://user-images.githubusercontent.com/739782/33033316-db85f848-cdd8-11e7-941a-0a87d8ace479.png">
+
+### Options
+
+The consumer allows the following optional overrides:
 
 * Kinesis Client
-* Checkpoint Storage
 * Logger
 
 ```go
@@ -67,43 +116,9 @@ svc := kinesis.New(session.New(aws.NewConfig()))
 
 // new consumer with custom client
 c, err := consumer.New(
-	appName, 
+	consumer,
 	streamName,
 	consumer.WithClient(svc),
-)
-```
-
-### Checkpoint Storage
-
-To record the progress of the consumer in the stream we store the last sequence number the consumer has read from a particular shard. This will allow consumers to re-launch and pick up at the position in the stream where they left off.
-
-<img width="687" alt="kinesis-checkpoints" src="https://user-images.githubusercontent.com/739782/33036582-b6f3c4b4-cde3-11e7-9334-c4bfbe34d984.png">
-
-
-The default checkpoint uses Redis on localhost; to set a custom Redis URL use ENV vars:
-
-```
-REDIS_URL=redis.yoursite.com:6379
-```
-
-To leverage DynamoDB as the backend for checkpoint we'll need a new table:
-
-<img width="659" alt="screen shot 2017-11-20 at 9 16 14 am" src="https://user-images.githubusercontent.com/739782/33033316-db85f848-cdd8-11e7-941a-0a87d8ace479.png">
-
-Then override the checkpoint config option:
-
-```go
-// ddb checkpoint
-ck, err := checkpoint.New(tableName, appName, streamName)
-if err != nil {
-	log.Fatalf("new checkpoint error: %v", err)
-}
-
-// consumer with checkpoint
-c, err := consumer.New(
-	appName,
-	streamName,
-	consumer.WithCheckpoint(ck),
 )
 ```
 

@@ -25,38 +25,39 @@ func New(appName, streamName string) (*Checkpoint, error) {
 	}
 
 	return &Checkpoint{
-		AppName:    appName,
-		StreamName: streamName,
+		appName:    appName,
+		streamName: streamName,
 		client:     client,
 	}, nil
 }
 
 // Checkpoint stores and retreives the last evaluated key from a DDB scan
 type Checkpoint struct {
-	AppName    string
-	StreamName string
-
-	client *redis.Client
+	appName    string
+	streamName string
+	client     *redis.Client
 }
 
-// Get determines if a checkpoint for a particular Shard exists.
-// Typically used to determine whether we should start processing the shard with
-// TRIM_HORIZON or AFTER_SEQUENCE_NUMBER (if checkpoint exists).
+// Get fetches the checkpoint for a particular Shard.
 func (c *Checkpoint) Get(shardID string) (string, error) {
-	return c.client.Get(c.key(shardID)).Result()
+	val, _ := c.client.Get(c.key(shardID)).Result()
+	return val, nil
 }
 
 // Set stores a checkpoint for a shard (e.g. sequence number of last record processed by application).
 // Upon failover, record processing is resumed from this point.
 func (c *Checkpoint) Set(shardID string, sequenceNumber string) error {
+	if sequenceNumber == "" {
+		return fmt.Errorf("sequence number should not be empty")
+	}
 	err := c.client.Set(c.key(shardID), sequenceNumber, 0).Err()
 	if err != nil {
-		return fmt.Errorf("redis checkpoint error: %v", err)
+		return err
 	}
 	return nil
 }
 
 // key generates a unique Redis key for storage of Checkpoint.
 func (c *Checkpoint) key(shardID string) string {
-	return fmt.Sprintf("%v:checkpoint:%v:%v", c.AppName, c.StreamName, shardID)
+	return fmt.Sprintf("%v:checkpoint:%v:%v", c.appName, c.streamName, shardID)
 }
