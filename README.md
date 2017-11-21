@@ -67,9 +67,9 @@ This will allow consumers to re-launch and pick up at the position in the stream
 
 The uniq identifier for a consumer is `[appName, streamName, shardID]`
 
-<img width="687" alt="kinesis-checkpoints" src="https://user-images.githubusercontent.com/739782/33036582-b6f3c4b4-cde3-11e7-9334-c4bfbe34d984.png">
+<img width="722" alt="kinesis-checkpoints" src="https://user-images.githubusercontent.com/739782/33085867-d8336122-ce9a-11e7-8c8a-a8afeb09dff1.png">
 
-There are two types of checkpoints:
+There are currently two storage types for checkpoints:
 
 ### Redis
 
