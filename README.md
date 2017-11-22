@@ -2,9 +2,9 @@
 
 Kinesis consumer applications written in Go. This library is intended to be a lightweight wrapper around the Kinesis API to read records, save checkpoints (with swappable backends), and gracefully recover from network errors.
 
-_NOTE: With the release of [Kinesis to Firehose](http://docs.aws.amazon.com/firehose/latest/dev/writing-with-kinesis-streams.html) it's possible to archive data directly to S3, Redshift, or Elasticsearch without running a consumer application._ 
+__NOTE(1):__ With the release of [Kinesis to Firehose](http://docs.aws.amazon.com/firehose/latest/dev/writing-with-kinesis-streams.html) it's possible to archive data directly to S3, Redshift, or Elasticsearch without running a consumer application. 
 
-_UPDATE: To avoid managing checkpoints and running any infrastructure it's also possible to [Process Kinensis Streams with Golang and Lambda](https://medium.com/@harlow/processing-kinesis-streams-w-aws-lambda-and-golang-264efc8f979a)._
+__NOTE(2):__ To avoid managing checkpoints and running any infrastructure it's also possible to [Process Kinensis Streams with Golang and AWS Lambda](https://medium.com/@harlow/processing-kinesis-streams-w-aws-lambda-and-golang-264efc8f979a)._
 
 ## Installation
 
@@ -121,7 +121,7 @@ c, err := consumer.New(
 
 ## Logging
 
-The package defaults to `ioutil.Discard` so swallow all logs. This can be customized with the preferred logging strategy:
+The package defaults to `ioutil.Discard` which will silence log output. This can be overridden with the preferred logging strategy:
 
 ```go
 func main() {
