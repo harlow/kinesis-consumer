@@ -1,10 +1,12 @@
 # Golang Kinesis Consumer
 
-Kinesis consumer applications written in Go. This library is intended to be a lightweight wrapper around the Kinesis API to read records, save checkpoints (with swappable backends), and gracefully recover from network errors.
+Kinesis consumer applications written in Go. This library is intended to be a lightweight wrapper around the Kinesis API to read records, save checkpoints (with swappable backends), and gracefully recover from service timeouts/errors.
 
-__NOTE(1):__ With the release of [Kinesis to Firehose](http://docs.aws.amazon.com/firehose/latest/dev/writing-with-kinesis-streams.html) it's possible to archive data directly to S3, Redshift, or Elasticsearch without running a consumer application. 
+Some alterative options:
 
-__NOTE(2):__ To avoid managing checkpoints and running any infrastructure it's also possible to [Process Kinensis Streams with Golang and AWS Lambda](https://medium.com/@harlow/processing-kinesis-streams-w-aws-lambda-and-golang-264efc8f979a)._
+* [Kinesis to Firehose](http://docs.aws.amazon.com/firehose/latest/dev/writing-with-kinesis-streams.html) can be used to archive data directly to S3, Redshift, or Elasticsearch without running a consumer application. 
+
+* [Process Kinensis Streams with Golang and AWS Lambda](https://medium.com/@harlow/processing-kinesis-streams-w-aws-lambda-and-golang-264efc8f979a) for serverless processing and checkpoint management.
 
 ## Installation
 
