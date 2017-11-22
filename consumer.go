@@ -185,18 +185,17 @@ loop:
 						break loop
 					default:
 						lastSeqNum = *r.SequenceNumber
+						c.counter.Add("records", 1)
 						if ok := fn(r); !ok {
 							break loop
 						}
 					}
 				}
 
-				c.counter.Add("records", int64(len(resp.Records)))
-				c.counter.Add("checkpoints", 1)
-
 				if err := c.checkpoint.Set(shardID, lastSeqNum); err != nil {
 					c.logger.Printf("set checkpoint error: %v", err)
 				}
+				c.counter.Add("checkpoints", 1)
 			}
 
 			if resp.NextShardIterator == nil || shardIterator == resp.NextShardIterator {
