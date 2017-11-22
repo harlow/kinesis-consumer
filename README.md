@@ -4,7 +4,7 @@ Kinesis consumer applications written in Go. This library is intended to be a li
 
 __Alternate serverless options:__
 
-* [Kinesis to Firehose](http://docs.aws.amazon.com/firehose/latest/dev/writing-with-kinesis-streams.html) can be used to archive data directly to S3, Redshift, or Elasticsearch without running a consumer application. 
+* [Kinesis to Firehose](http://docs.aws.amazon.com/firehose/latest/dev/writing-with-kinesis-streams.html) can be used to archive data directly to S3, Redshift, or Elasticsearch without running a consumer application.
 
 * [Process Kinensis Streams with Golang and AWS Lambda](https://medium.com/@harlow/processing-kinesis-streams-w-aws-lambda-and-golang-264efc8f979a) for serverless processing and checkpoint management.
 
@@ -53,14 +53,14 @@ func main() {
 		log.Fatalf("scan error: %v", err)
 	}
 
-	// Note: If you need to aggregate based on a specific shard the `ScanShard` 
+	// Note: If you need to aggregate based on a specific shard the `ScanShard`
 	// method should be leverged instead.
 }
 ```
 
 ## Checkpoint
 
-To record the progress of the consumer in the stream we use a checkpoint to store the last sequence number the consumer has read from a particular shard. 
+To record the progress of the consumer in the stream we use a checkpoint to store the last sequence number the consumer has read from a particular shard.
 
 This will allow consumers to re-launch and pick up at the position in the stream where they left off.
 
@@ -104,37 +104,59 @@ To leverage the DDB checkpoint we'll also need to create a table:
 
 ## Options
 
-The consumer allows the following optional overrides:
+The consumer allows the following optional overrides.
 
-* Kinesis Client
-* Logger
+### Client
+
+Override the Kinesis client if there is any special config needed:
 
 ```go
-// new kinesis client
-svc := kinesis.New(session.New(aws.NewConfig()))
+// client
+client := kinesis.New(session.New(aws.NewConfig()))
 
-// new consumer with custom client
+// consumer
 c, err := consumer.New(
 	consumer,
 	streamName,
-	consumer.WithClient(svc),
+	consumer.WithClient(client),
 )
 ```
 
-## Logging
+### Metrics
 
-The package defaults to `ioutil.Discard` which will silence log output. This can be overridden with the preferred logging strategy:
+Add optional counter for exposing counts for checkpoints and records processed:
 
 ```go
-func main() {
-	// ...
+// counter
+counter := expvar.NewMap("counters")
 
-	// logger
-	logger := log.New(os.Stdout, "consumer-example: ", log.LstdFlags)
+// consumer
+c, err := consumer.New(checkpoint, appName, streamName,
+	consumer.WithCounter(counter),
+)
+```
 
-	// consumer
-	c, err := consumer.New(checkpoint, appName, streamName, consumer.WithLogger(logger))
-}
+The [expvar package](https://golang.org/pkg/expvar/) will display consumer counts:
+
+```
+"counters": {
+    "checkpoints": 3,
+    "records": 13005
+},
+```
+
+### Logging
+
+The package defaults to `ioutil.Discard` so swallow all logs. This can be customized with the preferred logging strategy:
+
+```go
+// logger
+logger := log.New(os.Stdout, "consumer-example: ", log.LstdFlags)
+
+// consumer
+c, err := consumer.New(checkpoint, appName, streamName,
+	consumer.WithLogger(logger),
+)
 ```
 
 ## Contributing

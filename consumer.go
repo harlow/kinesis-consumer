@@ -15,6 +15,15 @@ import (
 
 type Record = kinesis.Record
 
+// Counter is used for exposing basic metrics from the scanner
+type Counter interface {
+	Add(string, int64)
+}
+
+type noopCounter struct{}
+
+func (n noopCounter) Add(string, int64) {}
+
 // Option is used to override defaults when creating a new Consumer
 type Option func(*Consumer) error
 
@@ -30,6 +39,14 @@ func WithCheckpoint(checkpoint checkpoint.Checkpoint) Option {
 func WithLogger(logger *log.Logger) Option {
 	return func(c *Consumer) error {
 		c.logger = logger
+		return nil
+	}
+}
+
+// WithCounter overrides the default counter
+func WithCounter(counter Counter) Option {
+	return func(c *Consumer) error {
+		c.counter = counter
 		return nil
 	}
 }
@@ -64,12 +81,17 @@ func New(checkpoint checkpoint.Checkpoint, app, stream string, opts ...Option) (
 
 	// provide default logger
 	if c.logger == nil {
-		c.logger = log.New(ioutil.Discard, "kinesis-consumer: ", log.LstdFlags)
+		c.logger = log.New(ioutil.Discard, "", log.LstdFlags)
 	}
 
 	// provide a default kinesis client
 	if c.client == nil {
 		c.client = kinesis.New(session.New(aws.NewConfig()))
+	}
+
+	// provide default no-op counter
+	if c.counter == nil {
+		c.counter = &noopCounter{}
 	}
 
 	return c, nil
@@ -82,6 +104,7 @@ type Consumer struct {
 	client     *kinesis.Kinesis
 	logger     *log.Logger
 	checkpoint checkpoint.Checkpoint
+	counter    Counter
 }
 
 // Scan scans each of the shards of the stream, calls the callback
@@ -168,7 +191,9 @@ loop:
 					}
 				}
 
-				c.logger.Println("checkpointing", shardID, len(resp.Records))
+				c.counter.Add("records", int64(len(resp.Records)))
+				c.counter.Add("checkpoints", 1)
+
 				if err := c.checkpoint.Set(shardID, lastSeqNum); err != nil {
 					c.logger.Printf("set checkpoint error: %v", err)
 				}
