@@ -3,9 +3,10 @@ package consumer
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
+	"log"
 	"sync"
 
-	"github.com/apex/log"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/kinesis"
@@ -26,7 +27,7 @@ func WithCheckpoint(checkpoint checkpoint.Checkpoint) Option {
 }
 
 // WithLogger overrides the default logger
-func WithLogger(logger log.Interface) Option {
+func WithLogger(logger *log.Logger) Option {
 	return func(c *Consumer) error {
 		c.logger = logger
 		return nil
@@ -50,7 +51,7 @@ func New(checkpoint checkpoint.Checkpoint, app, stream string, opts ...Option) (
 
 	c := &Consumer{
 		checkpoint: checkpoint,
-		appName: app,
+		appName:    app,
 		streamName: stream,
 	}
 
@@ -63,11 +64,7 @@ func New(checkpoint checkpoint.Checkpoint, app, stream string, opts ...Option) (
 
 	// provide default logger
 	if c.logger == nil {
-		c.logger = log.Log.WithFields(log.Fields{
-			"package": "kinesis-consumer",
-			"app": app,
-			"stream":  stream,
-		})
+		c.logger = log.New(ioutil.Discard, "kinesis-consumer: ", log.LstdFlags)
 	}
 
 	// provide a default kinesis client
@@ -80,10 +77,10 @@ func New(checkpoint checkpoint.Checkpoint, app, stream string, opts ...Option) (
 
 // Consumer wraps the interaction with the Kinesis stream
 type Consumer struct {
-	appName string
+	appName    string
 	streamName string
 	client     *kinesis.Kinesis
-	logger     log.Interface
+	logger     *log.Logger
 	checkpoint checkpoint.Checkpoint
 }
 
@@ -123,21 +120,19 @@ func (c *Consumer) Scan(ctx context.Context, fn func(*kinesis.Record) bool) erro
 // for each record and checkpoints after each page is processed.
 // Note: returning `false` from the callback func will end the scan.
 func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn func(*kinesis.Record) bool) {
-	var logger = c.logger.WithFields(log.Fields{"shard": shardID})
-
 	lastSeqNum, err := c.checkpoint.Get(shardID)
 	if err != nil {
-		logger.WithError(err).Error("get checkpoint")
+		c.logger.Printf("get checkpoint error: %v", err)
 		return
 	}
 
 	shardIterator, err := c.getShardIterator(shardID, lastSeqNum)
 	if err != nil {
-		logger.WithError(err).Error("getShardIterator")
+		c.logger.Printf("get shard iterator error: %v", err)
 		return
 	}
 
-	logger.Info("scanning shard")
+	c.logger.Println("scanning", shardID)
 
 loop:
 	for {
@@ -154,7 +149,7 @@ loop:
 			if err != nil {
 				shardIterator, err = c.getShardIterator(shardID, lastSeqNum)
 				if err != nil {
-					logger.WithError(err).Error("getShardIterator")
+					c.logger.Printf("get shard iterator error: %v", err)
 					break loop
 				}
 				continue
@@ -173,16 +168,16 @@ loop:
 					}
 				}
 
-				logger.WithField("count", len(resp.Records)).Info("checkpoint")
+				c.logger.Println("checkpointing", shardID, len(resp.Records))
 				if err := c.checkpoint.Set(shardID, lastSeqNum); err != nil {
-					c.logger.WithError(err).Error("set checkpoint error")
+					c.logger.Printf("set checkpoint error: %v", err)
 				}
 			}
 
 			if resp.NextShardIterator == nil || shardIterator == resp.NextShardIterator {
 				shardIterator, err = c.getShardIterator(shardID, lastSeqNum)
 				if err != nil {
-					logger.WithError(err).Error("getShardIterator")
+					c.logger.Printf("get shard iterator error: %v", err)
 					break loop
 				}
 			} else {
@@ -195,8 +190,9 @@ loop:
 		return
 	}
 
+	c.logger.Println("checkpointing", shardID)
 	if err := c.checkpoint.Set(shardID, lastSeqNum); err != nil {
-		c.logger.WithError(err).Error("set checkpoint error")
+		c.logger.Printf("set checkpoint error: %v", err)
 	}
 }
 
@@ -215,7 +211,6 @@ func (c *Consumer) getShardIterator(shardID, lastSeqNum string) (*string, error)
 
 	resp, err := c.client.GetShardIterator(params)
 	if err != nil {
-		c.logger.WithError(err).Error("GetShardIterator")
 		return nil, err
 	}
 

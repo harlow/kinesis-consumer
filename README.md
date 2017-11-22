@@ -24,9 +24,6 @@ import(
 )
 
 func main() {
-	log.SetHandler(text.New(os.Stderr))
-	log.SetLevel(log.DebugLevel)
-
 	var (
 		app    = flag.String("app", "", "App name")
 		stream = flag.String("stream", "", "Stream name")
@@ -59,7 +56,7 @@ func main() {
 }
 ```
 
-### Checkpoint
+## Checkpoint
 
 To record the progress of the consumer in the stream we use a checkpoint to store the last sequence number the consumer has read from a particular shard. 
 
@@ -71,7 +68,7 @@ The uniq identifier for a consumer is `[appName, streamName, shardID]`
 
 There are currently two storage types for checkpoints:
 
-### Redis
+### Redis Checkpoint
 
 The Redis checkpoint requries App Name, and Stream Name:
 
@@ -85,7 +82,7 @@ if err != nil {
 }
 ```
 
-### DynamoDB
+### DynamoDB Checkpoint
 
 The DynamoDB checkpoint requires Table Name, App Name, and Stream Name:
 
@@ -103,7 +100,7 @@ To leverage the DDB checkpoint we'll also need to create a table:
 
 <img width="659" alt="screen shot 2017-11-20 at 9 16 14 am" src="https://user-images.githubusercontent.com/739782/33033316-db85f848-cdd8-11e7-941a-0a87d8ace479.png">
 
-### Options
+## Options
 
 The consumer allows the following optional overrides:
 
@@ -122,30 +119,20 @@ c, err := consumer.New(
 )
 ```
 
-### Logging
+## Logging
 
-[Apex Log](https://medium.com/@tjholowaychuk/apex-log-e8d9627f4a9a#.5x1uo1767) is used for logging Info. Override the logs format with other [Log Handlers](https://github.com/apex/log/tree/master/_examples). For example using the "json" log handler:
+The package defaults to `ioutil.Discard` so swallow all logs. This can be customized with the preferred logging strategy:
 
 ```go
-import(
-  "github.com/apex/log"
-  "github.com/apex/log/handlers/json"
-)
-
 func main() {
-  // ...
+	// ...
 
-  log.SetHandler(json.New(os.Stderr))
-  log.SetLevel(log.DebugLevel)
+	// logger
+	logger := log.New(os.Stdout, "consumer-example: ", log.LstdFlags)
+
+	// consumer
+	c, err := consumer.New(checkpoint, appName, streamName, consumer.WithLogger(logger))
 }
-```
-
-Which will producde the following logs:
-
-```
-  INFO[0000] processing                app=test shard=shardId-000000000000 stream=test
-  INFO[0008] checkpoint                app=test shard=shardId-000000000000 stream=test
-  INFO[0012] checkpoint                app=test shard=shardId-000000000000 stream=test
 ```
 
 ## Contributing

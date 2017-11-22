@@ -4,32 +4,31 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 
-	"github.com/apex/log"
-	"github.com/apex/log/handlers/text"
 	consumer "github.com/harlow/kinesis-consumer"
 	checkpoint "github.com/harlow/kinesis-consumer/checkpoint/redis"
 )
 
 func main() {
-	log.SetHandler(text.New(os.Stderr))
-	log.SetLevel(log.DebugLevel)
-
 	var (
 		app    = flag.String("app", "", "App name")
 		stream = flag.String("stream", "", "Stream name")
 	)
 	flag.Parse()
 
-	// new checkpoint
+	// logger
+	logger := log.New(os.Stdout, "consumer-example: ", log.LstdFlags)
+
+	// checkpoint
 	ck, err := checkpoint.New(*app, *stream)
 	if err != nil {
 		log.Fatalf("checkpoint error: %v", err)
 	}
 
-	// new consumer
-	c, err := consumer.New(ck, *app, *stream)
+	// consumer
+	c, err := consumer.New(ck, *app, *stream, consumer.WithLogger(logger))
 	if err != nil {
 		log.Fatalf("consumer error: %v", err)
 	}
