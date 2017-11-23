@@ -14,7 +14,7 @@ import (
 	checkpoint "github.com/harlow/kinesis-consumer/checkpoint/redis"
 )
 
-// kick off a server for exposing metrics
+// kick off a server for exposing scan metrics
 func init() {
 	sock, err := net.Listen("tcp", "localhost:8080")
 	if err != nil {
@@ -45,7 +45,8 @@ func main() {
 	}
 
 	// consumer
-	c, err := consumer.New(*stream,
+	c, err := consumer.New(
+		*stream,
 		consumer.WithCheckpoint(ck),
 		consumer.WithLogger(logger),
 		consumer.WithCounter(counter),
