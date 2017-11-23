@@ -25,14 +25,14 @@ func (n noopCounter) Add(string, int64) {}
 
 // Checkpoint interface used track consumer progress in the stream
 type Checkpoint interface {
-	Get(shardID string) (string, error)
-	Set(shardID string, sequenceNumber string) error
+	Get(streamName, shardID string) (string, error)
+	Set(streamName, shardID, sequenceNumber string) error
 }
 
 type noopCheckpoint struct{}
 
-func (n noopCheckpoint) Set(string, string) error   { return nil }
-func (n noopCheckpoint) Get(string) (string, error) { return "", nil }
+func (n noopCheckpoint) Set(string, string, string) error   { return nil }
+func (n noopCheckpoint) Get(string, string) (string, error) { return "", nil }
 
 // Option is used to override defaults when creating a new Consumer
 type Option func(*Consumer) error
@@ -63,17 +63,12 @@ func WithCounter(counter Counter) Option {
 
 // New creates a kinesis consumer with default settings. Use Option to override
 // any of the optional attributes.
-func New(app, stream string, opts ...Option) (*Consumer, error) {
-	if app == "" {
-		return nil, fmt.Errorf("must provide app name")
-	}
-
+func New(stream string, opts ...Option) (*Consumer, error) {
 	if stream == "" {
 		return nil, fmt.Errorf("must provide stream name")
 	}
 
 	c := &Consumer{
-		appName:    app,
 		streamName: stream,
 		checkpoint: &noopCheckpoint{},
 		counter:    &noopCounter{},
@@ -97,7 +92,6 @@ func New(app, stream string, opts ...Option) (*Consumer, error) {
 
 // Consumer wraps the interaction with the Kinesis stream
 type Consumer struct {
-	appName    string
 	streamName string
 	client     *kinesis.Kinesis
 	logger     *log.Logger
@@ -141,7 +135,7 @@ func (c *Consumer) Scan(ctx context.Context, fn func(*kinesis.Record) bool) erro
 // for each record and checkpoints after each page is processed.
 // Note: returning `false` from the callback func will end the scan.
 func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn func(*kinesis.Record) bool) {
-	lastSeqNum, err := c.checkpoint.Get(shardID)
+	lastSeqNum, err := c.checkpoint.Get(c.streamName, shardID)
 	if err != nil {
 		c.logger.Printf("get checkpoint error: %v", err)
 		return
@@ -190,7 +184,7 @@ loop:
 					}
 				}
 
-				if err := c.checkpoint.Set(shardID, lastSeqNum); err != nil {
+				if err := c.checkpoint.Set(c.streamName, shardID, lastSeqNum); err != nil {
 					c.logger.Printf("set checkpoint error: %v", err)
 				}
 
@@ -215,7 +209,7 @@ loop:
 	}
 
 	c.logger.Println("checkpointing", shardID)
-	if err := c.checkpoint.Set(shardID, lastSeqNum); err != nil {
+	if err := c.checkpoint.Set(c.streamName, shardID, lastSeqNum); err != nil {
 		c.logger.Printf("set checkpoint error: %v", err)
 	}
 }

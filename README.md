@@ -28,19 +28,16 @@ import(
 )
 
 func main() {
-	var (
-		app    = flag.String("app", "", "App name")
-		stream = flag.String("stream", "", "Stream name")
-	)
+	var stream = flag.String("stream", "", "Stream name")
 	flag.Parse()
 
 	// consumer
-	c, err := consumer.New(*app, *stream)
+	c, err := consumer.New(*stream)
 	if err != nil {
 		log.Fatalf("consumer error: %v", err)
 	}
 
-	// scan stream
+	// start
 	err = c.Scan(context.TODO(), func(r *consumer.Record) bool {
 		fmt.Println(string(r.Data))
 		return true // continue scanning
@@ -76,7 +73,7 @@ The Redis checkpoint requries App Name, and Stream Name:
 import checkpoint "github.com/harlow/kinesis-consumer/checkpoint/redis"
 
 // redis checkpoint
-ck, err := checkpoint.New(appName, streamName)
+ck, err := checkpoint.New(appName)
 if err != nil {
 	log.Fatalf("new checkpoint error: %v", err)
 }
@@ -90,7 +87,7 @@ The DynamoDB checkpoint requires Table Name, App Name, and Stream Name:
 import checkpoint "github.com/harlow/kinesis-consumer/checkpoint/ddb"
 
 // ddb checkpoint
-ck, err := checkpoint.New(tableName, appName, streamName)
+ck, err := checkpoint.New(tableName, appName)
 if err != nil {
 	log.Fatalf("new checkpoint error: %v", err)
 }
@@ -98,7 +95,12 @@ if err != nil {
 
 To leverage the DDB checkpoint we'll also need to create a table:
 
-<img width="659" alt="screen shot 2017-11-20 at 9 16 14 am" src="https://user-images.githubusercontent.com/739782/33033316-db85f848-cdd8-11e7-941a-0a87d8ace479.png">
+```
+Partition key: namespace
+Sort key: shard_id
+```
+
+<img width="727" alt="screen shot 2017-11-22 at 7 59 36 pm" src="https://user-images.githubusercontent.com/739782/33158557-b90e4228-cfbf-11e7-9a99-73b56a446f5f.png">
 
 ## Options
 
@@ -113,9 +115,7 @@ Override the Kinesis client if there is any special config needed:
 client := kinesis.New(session.New(aws.NewConfig()))
 
 // consumer
-c, err := consumer.New(appName, streamName,
-	consumer.WithClient(client),
-)
+c, err := consumer.New(streamName, consumer.WithClient(client))
 ```
 
 ### Metrics
@@ -127,9 +127,7 @@ Add optional counter for exposing counts for checkpoints and records processed:
 counter := expvar.NewMap("counters")
 
 // consumer
-c, err := consumer.New(appName, streamName,
-	consumer.WithCounter(counter),
-)
+c, err := consumer.New(streamName, consumer.WithCounter(counter))
 ```
 
 The [expvar package](https://golang.org/pkg/expvar/) will display consumer counts:
@@ -150,9 +148,7 @@ The package defaults to `ioutil.Discard` so swallow all logs. This can be custom
 logger := log.New(os.Stdout, "consumer-example: ", log.LstdFlags)
 
 // consumer
-c, err := consumer.New(appName, streamName,
-	consumer.WithLogger(logger),
-)
+c, err := consumer.New(streamName, consumer.WithLogger(logger))
 ```
 
 ## Contributing

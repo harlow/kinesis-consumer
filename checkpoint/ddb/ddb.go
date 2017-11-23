@@ -12,7 +12,7 @@ import (
 )
 
 // New returns a checkpoint that uses DynamoDB for underlying storage
-func New(tableName, appName, streamName string) (*Checkpoint, error) {
+func New(tableName, appName string) (*Checkpoint, error) {
 	client := dynamodb.New(session.New(aws.NewConfig()))
 
 	_, err := client.DescribeTable(&dynamodb.DescribeTableInput{
@@ -23,24 +23,21 @@ func New(tableName, appName, streamName string) (*Checkpoint, error) {
 	}
 
 	return &Checkpoint{
-		TableName:  tableName,
-		AppName:    appName,
-		StreamName: streamName,
-		client:     client,
+		tableName: tableName,
+		appName:   appName,
+		client:    client,
 	}, nil
 }
 
 // Checkpoint stores and retreives the last evaluated key from a DDB scan
 type Checkpoint struct {
-	AppName    string
-	StreamName string
-	TableName  string
-
-	client *dynamodb.DynamoDB
+	tableName string
+	appName   string
+	client    *dynamodb.DynamoDB
 }
 
 type item struct {
-	ConsumerGroup  string `json:"consumer_group"`
+	Namespace      string `json:"namespace"`
 	ShardID        string `json:"shard_id"`
 	SequenceNumber string `json:"sequence_number"`
 }
@@ -48,13 +45,15 @@ type item struct {
 // Get determines if a checkpoint for a particular Shard exists.
 // Typically used to determine whether we should start processing the shard with
 // TRIM_HORIZON or AFTER_SEQUENCE_NUMBER (if checkpoint exists).
-func (c *Checkpoint) Get(shardID string) (string, error) {
+func (c *Checkpoint) Get(streamName, shardID string) (string, error) {
+	namespace := fmt.Sprintf("%s-%s", c.appName, streamName)
+
 	params := &dynamodb.GetItemInput{
-		TableName:      aws.String(c.TableName),
+		TableName:      aws.String(c.tableName),
 		ConsistentRead: aws.Bool(true),
 		Key: map[string]*dynamodb.AttributeValue{
-			"consumer_group": &dynamodb.AttributeValue{
-				S: aws.String(c.consumerGroupName()),
+			"namespace": &dynamodb.AttributeValue{
+				S: aws.String(namespace),
 			},
 			"shard_id": &dynamodb.AttributeValue{
 				S: aws.String(shardID),
@@ -65,7 +64,7 @@ func (c *Checkpoint) Get(shardID string) (string, error) {
 	resp, err := c.client.GetItem(params)
 	if err != nil {
 		if retriableError(err) {
-			return c.Get(shardID)
+			return c.Get(streamName, shardID)
 		}
 		return "", err
 	}
@@ -77,13 +76,15 @@ func (c *Checkpoint) Get(shardID string) (string, error) {
 
 // Set stores a checkpoint for a shard (e.g. sequence number of last record processed by application).
 // Upon failover, record processing is resumed from this point.
-func (c *Checkpoint) Set(shardID string, sequenceNumber string) error {
+func (c *Checkpoint) Set(streamName, shardID, sequenceNumber string) error {
 	if sequenceNumber == "" {
 		return fmt.Errorf("sequence number should not be empty")
 	}
 
+	namespace := fmt.Sprintf("%s-%s", c.appName, streamName)
+
 	item, err := dynamodbattribute.MarshalMap(item{
-		ConsumerGroup:  c.consumerGroupName(),
+		Namespace:      namespace,
 		ShardID:        shardID,
 		SequenceNumber: sequenceNumber,
 	})
@@ -93,20 +94,16 @@ func (c *Checkpoint) Set(shardID string, sequenceNumber string) error {
 	}
 
 	_, err = c.client.PutItem(&dynamodb.PutItemInput{
-		TableName: aws.String(c.TableName),
+		TableName: aws.String(c.tableName),
 		Item:      item,
 	})
 	if err != nil {
 		if !retriableError(err) {
 			return err
 		}
-		return c.Set(shardID, sequenceNumber)
+		return c.Set(streamName, shardID, sequenceNumber)
 	}
 	return nil
-}
-
-func (c *Checkpoint) consumerGroupName() string {
-	return fmt.Sprintf("%s-%s", c.StreamName, c.AppName)
 }
 
 func retriableError(err error) bool {

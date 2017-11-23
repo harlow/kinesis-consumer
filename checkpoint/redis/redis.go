@@ -10,7 +10,7 @@ import (
 const localhost = "127.0.0.1:6379"
 
 // New returns a checkpoint that uses Redis for underlying storage
-func New(appName, streamName string) (*Checkpoint, error) {
+func New(appName string) (*Checkpoint, error) {
 	addr := os.Getenv("REDIS_URL")
 	if addr == "" {
 		addr = localhost
@@ -25,32 +25,30 @@ func New(appName, streamName string) (*Checkpoint, error) {
 	}
 
 	return &Checkpoint{
-		appName:    appName,
-		streamName: streamName,
-		client:     client,
+		appName: appName,
+		client:  client,
 	}, nil
 }
 
 // Checkpoint stores and retreives the last evaluated key from a DDB scan
 type Checkpoint struct {
-	appName    string
-	streamName string
-	client     *redis.Client
+	appName string
+	client  *redis.Client
 }
 
 // Get fetches the checkpoint for a particular Shard.
-func (c *Checkpoint) Get(shardID string) (string, error) {
-	val, _ := c.client.Get(c.key(shardID)).Result()
+func (c *Checkpoint) Get(streamName, shardID string) (string, error) {
+	val, _ := c.client.Get(c.key(streamName, shardID)).Result()
 	return val, nil
 }
 
 // Set stores a checkpoint for a shard (e.g. sequence number of last record processed by application).
 // Upon failover, record processing is resumed from this point.
-func (c *Checkpoint) Set(shardID string, sequenceNumber string) error {
+func (c *Checkpoint) Set(streamName, shardID, sequenceNumber string) error {
 	if sequenceNumber == "" {
 		return fmt.Errorf("sequence number should not be empty")
 	}
-	err := c.client.Set(c.key(shardID), sequenceNumber, 0).Err()
+	err := c.client.Set(c.key(streamName, shardID), sequenceNumber, 0).Err()
 	if err != nil {
 		return err
 	}
@@ -58,6 +56,6 @@ func (c *Checkpoint) Set(shardID string, sequenceNumber string) error {
 }
 
 // key generates a unique Redis key for storage of Checkpoint.
-func (c *Checkpoint) key(shardID string) string {
-	return fmt.Sprintf("%v:checkpoint:%v:%v", c.appName, c.streamName, shardID)
+func (c *Checkpoint) key(streamName, shardID string) string {
+	return fmt.Sprintf("%v:checkpoint:%v:%v", c.appName, streamName, shardID)
 }

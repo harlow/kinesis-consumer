@@ -39,13 +39,13 @@ func main() {
 	)
 
 	// checkpoint
-	ck, err := checkpoint.New(*app, *stream)
+	ck, err := checkpoint.New(*app)
 	if err != nil {
 		log.Fatalf("checkpoint error: %v", err)
 	}
 
 	// consumer
-	c, err := consumer.New(*app, *stream,
+	c, err := consumer.New(*stream,
 		consumer.WithCheckpoint(ck),
 		consumer.WithLogger(logger),
 		consumer.WithCounter(counter),
