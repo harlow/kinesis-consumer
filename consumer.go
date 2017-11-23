@@ -10,12 +10,11 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/kinesis"
-	"github.com/harlow/kinesis-consumer/checkpoint"
 )
 
 type Record = kinesis.Record
 
-// Counter is used for exposing basic metrics from the scanner
+// Counter interface is used for exposing basic metrics from the scanner
 type Counter interface {
 	Add(string, int64)
 }
@@ -24,11 +23,22 @@ type noopCounter struct{}
 
 func (n noopCounter) Add(string, int64) {}
 
+// Checkpoint interface used track consumer progress in the stream
+type Checkpoint interface {
+	Get(shardID string) (string, error)
+	Set(shardID string, sequenceNumber string) error
+}
+
+type noopCheckpoint struct{}
+
+func (n noopCheckpoint) Set(string, string) error { return nil }
+func (n noopCheckpoint) Get(string) (string, error) { return "", nil }
+
 // Option is used to override defaults when creating a new Consumer
 type Option func(*Consumer) error
 
 // WithCheckpoint overrides the default checkpoint
-func WithCheckpoint(checkpoint checkpoint.Checkpoint) Option {
+func WithCheckpoint(checkpoint Checkpoint) Option {
 	return func(c *Consumer) error {
 		c.checkpoint = checkpoint
 		return nil
@@ -53,11 +63,7 @@ func WithCounter(counter Counter) Option {
 
 // New creates a kinesis consumer with default settings. Use Option to override
 // any of the optional attributes.
-func New(checkpoint checkpoint.Checkpoint, app, stream string, opts ...Option) (*Consumer, error) {
-	if checkpoint == nil {
-		return nil, fmt.Errorf("must provide checkpoint")
-	}
-
+func New(app, stream string, opts ...Option) (*Consumer, error) {
 	if app == "" {
 		return nil, fmt.Errorf("must provide app name")
 	}
@@ -67,9 +73,10 @@ func New(checkpoint checkpoint.Checkpoint, app, stream string, opts ...Option) (
 	}
 
 	c := &Consumer{
-		checkpoint: checkpoint,
 		appName:    app,
 		streamName: stream,
+		checkpoint: &noopCheckpoint{},
+		counter: 	&noopCounter{},
 	}
 
 	// set options
@@ -89,11 +96,6 @@ func New(checkpoint checkpoint.Checkpoint, app, stream string, opts ...Option) (
 		c.client = kinesis.New(session.New(aws.NewConfig()))
 	}
 
-	// provide default no-op counter
-	if c.counter == nil {
-		c.counter = &noopCounter{}
-	}
-
 	return c, nil
 }
 
@@ -103,7 +105,7 @@ type Consumer struct {
 	streamName string
 	client     *kinesis.Kinesis
 	logger     *log.Logger
-	checkpoint checkpoint.Checkpoint
+	checkpoint Checkpoint
 	counter    Counter
 }
 

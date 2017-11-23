@@ -45,7 +45,8 @@ func main() {
 	}
 
 	// consumer
-	c, err := consumer.New(ck, *app, *stream,
+	c, err := consumer.New(*app, *stream,
+		consumer.WithCheckpoint(ck),
 		consumer.WithLogger(logger),
 		consumer.WithCounter(counter),
 	)

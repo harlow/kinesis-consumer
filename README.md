@@ -18,11 +18,13 @@ Get the package source:
 
 The consumer leverages a handler func that accepts a Kinesis record. The `Scan` method will consume all shards concurrently and call the callback func as it receives records from the stream.
 
+Important: The default Log, Counter, and Checkpoint are no-op which means no logs, counts, or checkpoints will be emitted when scanning the stream. See the options below to override these defaults.
+
 ```go
 import(
 	// ...
+
 	consumer "github.com/harlow/kinesis-consumer"
-	checkpoint "github.com/harlow/kinesis-consumer/checkpoint/redis"
 )
 
 func main() {
@@ -32,14 +34,8 @@ func main() {
 	)
 	flag.Parse()
 
-	// new checkpoint
-	ck, err := checkpoint.New(*app, *stream)
-	if err != nil {
-		log.Fatalf("checkpoint error: %v", err)
-	}
-
-	// new consumer
-	c, err := consumer.New(ck, *app, *stream)
+	// consumer
+	c, err := consumer.New(*app, *stream)
 	if err != nil {
 		log.Fatalf("consumer error: %v", err)
 	}
@@ -68,7 +64,9 @@ The uniq identifier for a consumer is `[appName, streamName, shardID]`
 
 <img width="722" alt="kinesis-checkpoints" src="https://user-images.githubusercontent.com/739782/33085867-d8336122-ce9a-11e7-8c8a-a8afeb09dff1.png">
 
-There are currently two storage types for checkpoints:
+Note: The default checkpoint is no-op. Which means the scan will not persist any state and the consumer will start from the beginning of the stream each time it is re-started.
+
+To persist scan progress choose one of the following checkpoints:
 
 ### Redis Checkpoint
 
@@ -116,7 +114,7 @@ client := kinesis.New(session.New(aws.NewConfig()))
 
 // consumer
 c, err := consumer.New(
-	consumer,
+	appName,
 	streamName,
 	consumer.WithClient(client),
 )
