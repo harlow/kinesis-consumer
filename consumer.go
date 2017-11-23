@@ -3,8 +3,8 @@ package consumer
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"log"
+	"os"
 	"sync"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -31,7 +31,7 @@ type Checkpoint interface {
 
 type noopCheckpoint struct{}
 
-func (n noopCheckpoint) Set(string, string) error { return nil }
+func (n noopCheckpoint) Set(string, string) error   { return nil }
 func (n noopCheckpoint) Get(string) (string, error) { return "", nil }
 
 // Option is used to override defaults when creating a new Consumer
@@ -76,7 +76,8 @@ func New(app, stream string, opts ...Option) (*Consumer, error) {
 		appName:    app,
 		streamName: stream,
 		checkpoint: &noopCheckpoint{},
-		counter: 	&noopCounter{},
+		counter:    &noopCounter{},
+		logger:     log.New(os.Stderr, "kinesis-consumer: ", log.LstdFlags),
 	}
 
 	// set options
@@ -84,11 +85,6 @@ func New(app, stream string, opts ...Option) (*Consumer, error) {
 		if err := opt(c); err != nil {
 			return nil, err
 		}
-	}
-
-	// provide default logger
-	if c.logger == nil {
-		c.logger = log.New(ioutil.Discard, "", log.LstdFlags)
 	}
 
 	// provide a default kinesis client
@@ -197,6 +193,8 @@ loop:
 				if err := c.checkpoint.Set(shardID, lastSeqNum); err != nil {
 					c.logger.Printf("set checkpoint error: %v", err)
 				}
+
+				c.logger.Println("checkpoint", shardID, len(resp.Records))
 				c.counter.Add("checkpoints", 1)
 			}
 

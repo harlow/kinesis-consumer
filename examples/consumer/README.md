@@ -14,4 +14,4 @@ export AWS_SECRET_KEY=
 
 ### Run the consumer
 
-    $ go run main.go -a appName -s streamName
+    $ go run main.go --app appName --stream streamName
