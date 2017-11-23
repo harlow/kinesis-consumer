@@ -35,10 +35,10 @@ func main() {
 
 	var (
 		counter = expvar.NewMap("counters")
-		logger  = log.New(os.Stdout, "consumer-example: ", log.LstdFlags)
+		logger  = log.New(os.Stdout, "", log.LstdFlags)
 	)
 
-	// checkpoint
+	// redis checkpoint
 	ck, err := checkpoint.New(*app)
 	if err != nil {
 		log.Fatalf("checkpoint error: %v", err)
