@@ -14,6 +14,8 @@ import (
 	"github.com/aws/aws-sdk-go/service/kinesis"
 )
 
+var svc = kinesis.New(session.New())
+
 func main() {
 	log.SetHandler(text.New(os.Stderr))
 	log.SetLevel(log.DebugLevel)
@@ -29,10 +31,7 @@ func main() {
 	}
 	defer f.Close()
 
-	var (
-		svc     = kinesis.New(session.New())
-		records []*kinesis.PutRecordsRequestEntry
-	)
+	var records []*kinesis.PutRecordsRequestEntry
 
 	// loop over file data
 	b := bufio.NewScanner(f)
@@ -42,17 +41,24 @@ func main() {
 			PartitionKey: aws.String(time.Now().Format(time.RFC3339Nano)),
 		})
 
-		if len(records) > 50 {
-			_, err = svc.PutRecords(&kinesis.PutRecordsInput{
-				StreamName: streamName,
-				Records:    records,
-			})
-			if err != nil {
-				log.WithError(err).Fatal("error producing")
-			}
+		if len(records) > 250 {
+			putRecords(streamName, records)
 			records = nil
 		}
-
-		fmt.Print(".")
 	}
+
+	if len(records) > 0 {
+		putRecords(streamName, records)
+	}
+}
+
+func putRecords(streamName *string, records []*kinesis.PutRecordsRequestEntry) {
+	_, err := svc.PutRecords(&kinesis.PutRecordsInput{
+		StreamName: streamName,
+		Records:    records,
+	})
+	if err != nil {
+		log.Fatal("error putting records")
+	}
+	fmt.Print(".")
 }
