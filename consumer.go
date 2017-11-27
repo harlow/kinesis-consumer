@@ -156,7 +156,7 @@ func (c *Consumer) Scan(ctx context.Context, fn func(*Record) bool) error {
 // ScanShard loops over records on a specific shard, calls the callback func
 // for each record and checkpoints the progress of scan.
 // Note: Returning `false` from the callback func will end the scan.
-func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn func(*Record) bool) (err error) {	
+func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn func(*Record) bool) (err error) {
 	lastSeqNum, err := c.checkpoint.Get(c.streamName, shardID)
 	if err != nil {
 		return fmt.Errorf("get checkpoint error: %v", err)
