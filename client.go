@@ -9,7 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/kinesis"
 )
 
-// NewKinesisClient returns a new client with kinesis client
+// NewKinesisClient returns a new wrapper around the Kinesis client
 func NewKinesisClient() Client {
 	svc := kinesis.New(session.New(aws.NewConfig()))
 	return &KinesisClient{svc}
