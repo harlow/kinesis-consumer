@@ -7,12 +7,17 @@ import (
 	"log"
 	"sync"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/kinesis"
 )
 
+// Record is an alias of record returned from kinesis library
 type Record = kinesis.Record
+
+// Client interface is used for interacting with kinesis stream
+type Client interface {
+	GetShardIDs(string) ([]string, error)
+	GetRecords(ctx context.Context, streamName, shardID, lastSeqNum string) (<-chan *Record, <-chan error, error)
+}
 
 // Counter interface is used for exposing basic metrics from the scanner
 type Counter interface {
@@ -61,30 +66,35 @@ func WithCounter(counter Counter) Option {
 	}
 }
 
+// WithClient overrides the default client
+func WithClient(client Client) Option {
+	return func(c *Consumer) error {
+		c.client = client
+		return nil
+	}
+}
+
 // New creates a kinesis consumer with default settings. Use Option to override
 // any of the optional attributes.
-func New(stream string, opts ...Option) (*Consumer, error) {
-	if stream == "" {
+func New(streamName string, opts ...Option) (*Consumer, error) {
+	if streamName == "" {
 		return nil, fmt.Errorf("must provide stream name")
 	}
 
+	// new consumer with no-op checkpoint, counter, and logger
 	c := &Consumer{
-		streamName: stream,
+		streamName: streamName,
 		checkpoint: &noopCheckpoint{},
 		counter:    &noopCounter{},
 		logger:     log.New(ioutil.Discard, "", log.LstdFlags),
+		client:     NewClient(),
 	}
 
-	// set options
+	// override defaults
 	for _, opt := range opts {
 		if err := opt(c); err != nil {
 			return nil, err
 		}
-	}
-
-	// provide a default kinesis client
-	if c.client == nil {
-		c.client = kinesis.New(session.New(aws.NewConfig()))
 	}
 
 	return c, nil
@@ -93,7 +103,7 @@ func New(stream string, opts ...Option) (*Consumer, error) {
 // Consumer wraps the interaction with the Kinesis stream
 type Consumer struct {
 	streamName string
-	client     *kinesis.Kinesis
+	client     Client
 	logger     *log.Logger
 	checkpoint Checkpoint
 	counter    Counter
@@ -101,32 +111,27 @@ type Consumer struct {
 
 // Scan scans each of the shards of the stream, calls the callback
 // func with each of the kinesis records.
-func (c *Consumer) Scan(ctx context.Context, fn func(*kinesis.Record) bool) error {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	// grab the stream details
-	resp, err := c.client.DescribeStream(
-		&kinesis.DescribeStreamInput{
-			StreamName: aws.String(c.streamName),
-		},
-	)
+func (c *Consumer) Scan(ctx context.Context, fn func(*Record) bool) error {
+	shardIDs, err := c.client.GetShardIDs(c.streamName)
 	if err != nil {
-		return fmt.Errorf("describe stream error: %v", err)
+		return fmt.Errorf("get shards error: %v", err)
 	}
 
-	if len(resp.StreamDescription.Shards) == 0 {
+	if len(shardIDs) == 0 {
 		return fmt.Errorf("no shards available")
 	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
 	var (
 		wg   sync.WaitGroup
 		errc = make(chan error, 1)
 	)
-	wg.Add(len(resp.StreamDescription.Shards))
+	wg.Add(len(shardIDs))
 
-	// launch goroutine to process each of the shards
-	for _, shard := range resp.StreamDescription.Shards {
+	// process each shard in goroutine
+	for _, shardID := range shardIDs {
 		go func(shardID string) {
 			defer wg.Done()
 
@@ -139,9 +144,8 @@ func (c *Consumer) Scan(ctx context.Context, fn func(*kinesis.Record) bool) erro
 				}
 			}
 
-			c.logger.Println("exiting", shardID)
 			cancel()
-		}(*shard.ShardId)
+		}(shardID)
 	}
 
 	wg.Wait()
@@ -152,100 +156,34 @@ func (c *Consumer) Scan(ctx context.Context, fn func(*kinesis.Record) bool) erro
 // ScanShard loops over records on a specific shard, calls the callback func
 // for each record and checkpoints the progress of scan.
 // Note: Returning `false` from the callback func will end the scan.
-func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn func(*kinesis.Record) bool) error {
-	c.logger.Println("scanning", shardID)
-
+func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn func(*Record) bool) (err error) {	
 	lastSeqNum, err := c.checkpoint.Get(c.streamName, shardID)
 	if err != nil {
 		return fmt.Errorf("get checkpoint error: %v", err)
 	}
 
-	shardIterator, err := c.getShardIterator(shardID, lastSeqNum)
+	c.logger.Println("scanning", shardID, lastSeqNum)
+
+	// get records
+	recc, errc, err := c.client.GetRecords(ctx, c.streamName, shardID, lastSeqNum)
 	if err != nil {
-		return fmt.Errorf("get shard iterator error: %v", err)
+		return fmt.Errorf("get records error: %v", err)
 	}
 
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		default:
-			resp, err := c.client.GetRecords(
-				&kinesis.GetRecordsInput{
-					ShardIterator: shardIterator,
-				},
-			)
+	// loop records
+	for r := range recc {
+		if ok := fn(r); !ok {
+			break
+		}
 
-			if err != nil {
-				shardIterator, err = c.getShardIterator(shardID, lastSeqNum)
-				if err != nil {
-					return fmt.Errorf("get shard iterator error: %v", err)
-				}
-				continue
-			}
+		c.counter.Add("records", 1)
 
-			if len(resp.Records) > 0 {
-				for _, r := range resp.Records {
-					select {
-					case <-ctx.Done():
-						return nil
-					default:
-						lastSeqNum = *r.SequenceNumber
-						c.counter.Add("records", 1)
-
-						if ok := fn(r); !ok {
-							if err := c.setCheckpoint(shardID, lastSeqNum); err != nil {
-								return fmt.Errorf("set checkpoint error: %v", err)
-							}
-							return nil
-						}
-					}
-				}
-
-				if err := c.setCheckpoint(shardID, lastSeqNum); err != nil {
-					return fmt.Errorf("set checkpoint error: %v", err)
-				}
-			}
-
-			if resp.NextShardIterator == nil || shardIterator == resp.NextShardIterator {
-				shardIterator, err = c.getShardIterator(shardID, lastSeqNum)
-				if err != nil {
-					return fmt.Errorf("get shard iterator error: %v", err)
-				}
-			} else {
-				shardIterator = resp.NextShardIterator
-			}
+		err := c.checkpoint.Set(c.streamName, shardID, *r.SequenceNumber)
+		if err != nil {
+			return fmt.Errorf("set checkpoint error: %v", err)
 		}
 	}
-}
 
-func (c *Consumer) setCheckpoint(shardID, lastSeqNum string) error {
-	err := c.checkpoint.Set(c.streamName, shardID, lastSeqNum)
-	if err != nil {
-		return err
-	}
-	c.logger.Println("checkpoint", shardID)
-	c.counter.Add("checkpoints", 1)
-	return nil
-}
-
-func (c *Consumer) getShardIterator(shardID, lastSeqNum string) (*string, error) {
-	params := &kinesis.GetShardIteratorInput{
-		ShardId:    aws.String(shardID),
-		StreamName: aws.String(c.streamName),
-	}
-
-	if lastSeqNum != "" {
-		params.ShardIteratorType = aws.String("AFTER_SEQUENCE_NUMBER")
-		params.StartingSequenceNumber = aws.String(lastSeqNum)
-	} else {
-		params.ShardIteratorType = aws.String("TRIM_HORIZON")
-	}
-
-	resp, err := c.client.GetShardIterator(params)
-	if err != nil {
-		return nil, err
-	}
-
-	return resp.ShardIterator, nil
+	c.logger.Println("exiting", shardID)
+	return <-errc
 }
