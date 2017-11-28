@@ -15,7 +15,7 @@ func NewKinesisClient() *KinesisClient {
 	return &KinesisClient{svc}
 }
 
-// Client acts as wrapper around Kinesis client
+// KinesisClient acts as wrapper around Kinesis client
 type KinesisClient struct {
 	svc *kinesis.Kinesis
 }
