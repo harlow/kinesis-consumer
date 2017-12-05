@@ -3,6 +3,8 @@ package redis
 import (
 	"fmt"
 	"log"
+	"sync"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
@@ -11,10 +13,21 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
 )
 
+// Option is used to override defaults when creating a new Checkpoint
+type Option func(*Checkpoint)
+
+// WithMaxInterval sets the flush interval
+func WithMaxInterval(maxInterval time.Duration) Option {
+	return func(c *Checkpoint) {
+		c.maxInterval = maxInterval
+	}
+}
+
 // New returns a checkpoint that uses DynamoDB for underlying storage
-func New(tableName, appName string) (*Checkpoint, error) {
+func New(appName, tableName string, opts ...Option) (*Checkpoint, error) {
 	client := dynamodb.New(session.New(aws.NewConfig()))
 
+	// ping table to verify it exists
 	_, err := client.DescribeTable(&dynamodb.DescribeTableInput{
 		TableName: aws.String(tableName),
 	})
@@ -22,18 +35,39 @@ func New(tableName, appName string) (*Checkpoint, error) {
 		return nil, err
 	}
 
-	return &Checkpoint{
-		tableName: tableName,
-		appName:   appName,
-		client:    client,
-	}, nil
+	ck := &Checkpoint{
+		tableName:   tableName,
+		appName:     appName,
+		client:      client,
+		maxInterval: time.Duration(1 * time.Minute),
+		done:        make(chan struct{}),
+		mu:          &sync.Mutex{},
+		checkpoints: map[key]string{},
+	}
+
+	for _, opt := range opts {
+		opt(ck)
+	}
+
+	go ck.loop()
+
+	return ck, nil
 }
 
 // Checkpoint stores and retreives the last evaluated key from a DDB scan
 type Checkpoint struct {
-	tableName string
-	appName   string
-	client    *dynamodb.DynamoDB
+	tableName   string
+	appName     string
+	client      *dynamodb.DynamoDB
+	maxInterval time.Duration
+	mu          *sync.Mutex // protects the checkpoints
+	checkpoints map[key]string
+	done        chan struct{}
+}
+
+type key struct {
+	streamName string
+	shardID    string
 }
 
 type item struct {
@@ -77,32 +111,70 @@ func (c *Checkpoint) Get(streamName, shardID string) (string, error) {
 // Set stores a checkpoint for a shard (e.g. sequence number of last record processed by application).
 // Upon failover, record processing is resumed from this point.
 func (c *Checkpoint) Set(streamName, shardID, sequenceNumber string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	if sequenceNumber == "" {
 		return fmt.Errorf("sequence number should not be empty")
 	}
 
-	namespace := fmt.Sprintf("%s-%s", c.appName, streamName)
-
-	item, err := dynamodbattribute.MarshalMap(item{
-		Namespace:      namespace,
-		ShardID:        shardID,
-		SequenceNumber: sequenceNumber,
-	})
-	if err != nil {
-		log.Printf("marshal map error: %v", err)
-		return nil
+	key := key{
+		streamName: streamName,
+		shardID:    shardID,
 	}
+	c.checkpoints[key] = sequenceNumber
 
-	_, err = c.client.PutItem(&dynamodb.PutItemInput{
-		TableName: aws.String(c.tableName),
-		Item:      item,
-	})
-	if err != nil {
-		if !retriableError(err) {
-			return err
+	return nil
+}
+
+// Shutdown the checkpoint. Save any in-flight data.
+func (c *Checkpoint) Shutdown() error {
+	c.done <- struct{}{}
+	return c.save()
+}
+
+func (c *Checkpoint) loop() {
+	tick := time.NewTicker(c.maxInterval)
+	defer tick.Stop()
+	defer close(c.done)
+
+	for {
+		select {
+		case <-tick.C:
+			c.save()
+		case <-c.done:
+			return
 		}
-		return c.Set(streamName, shardID, sequenceNumber)
 	}
+}
+
+func (c *Checkpoint) save() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for key, sequenceNumber := range c.checkpoints {
+		item, err := dynamodbattribute.MarshalMap(item{
+			Namespace:      fmt.Sprintf("%s-%s", c.appName, key.streamName),
+			ShardID:        key.shardID,
+			SequenceNumber: sequenceNumber,
+		})
+		if err != nil {
+			log.Printf("marshal map error: %v", err)
+			return nil
+		}
+
+		_, err = c.client.PutItem(&dynamodb.PutItemInput{
+			TableName: aws.String(c.tableName),
+			Item:      item,
+		})
+		if err != nil {
+			if !retriableError(err) {
+				return err
+			}
+			return c.save()
+		}
+	}
+
 	return nil
 }
 

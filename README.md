@@ -87,7 +87,7 @@ The DynamoDB checkpoint requires Table Name, App Name, and Stream Name:
 import checkpoint "github.com/harlow/kinesis-consumer/checkpoint/ddb"
 
 // ddb checkpoint
-ck, err := checkpoint.New(tableName, appName)
+ck, err := checkpoint.New(appName, tableName)
 if err != nil {
 	log.Fatalf("new checkpoint error: %v", err)
 }
