@@ -10,10 +10,9 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"syscall"
 
 	consumer "github.com/harlow/kinesis-consumer"
-	checkpoint "github.com/harlow/kinesis-consumer/checkpoint/redis"
+	checkpoint "github.com/harlow/kinesis-consumer/checkpoint/ddb"
 )
 
 // kick off a server for exposing scan metrics
@@ -32,28 +31,12 @@ func main() {
 	var (
 		app    = flag.String("app", "", "App name")
 		stream = flag.String("stream", "", "Stream name")
+		table  = flag.String("table", "", "Checkpoint table name")
 	)
 	flag.Parse()
 
-	// trap SIGINT, wait to trigger shutdown
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals,
-		os.Interrupt,
-		syscall.SIGHUP,
-		syscall.SIGINT,
-		syscall.SIGTERM,
-		syscall.SIGQUIT,
-	)
-
-	// use cancel func to signal shutdown
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		<-signals
-		cancel()
-	}()
-
-	// redis checkpoint
-	ck, err := checkpoint.New(*app)
+	// ddb checkpoint
+	ck, err := checkpoint.New(*app, *table)
 	if err != nil {
 		log.Fatalf("checkpoint error: %v", err)
 	}
@@ -74,12 +57,28 @@ func main() {
 		log.Fatalf("consumer error: %v", err)
 	}
 
-	// start scan
+	// use cancel func to signal shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// trap SIGINT, wait to trigger shutdown
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt)
+
+	go func() {
+		<-signals
+		cancel()
+	}()
+
+	// scan stream
 	err = c.Scan(ctx, func(r *consumer.Record) bool {
 		fmt.Println(string(r.Data))
 		return true // continue scanning
 	})
 	if err != nil {
 		log.Fatalf("scan error: %v", err)
+	}
+
+	if err := ck.Shutdown(); err != nil {
+		log.Fatalf("checkpoint shutdown error: %v", err)
 	}
 }
