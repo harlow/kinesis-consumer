@@ -9,10 +9,29 @@ import (
 	"github.com/aws/aws-sdk-go/service/kinesis"
 )
 
+// ClientOption is used to override defaults when creating a KinesisClient
+type ClientOption func(*KinesisClient)
+
+// WithKinesis overrides the default Kinesis client
+func WithKinesis(svc *kinesis.Kinesis) ClientOption {
+	return func(kc *KinesisClient) {
+		kc.svc = svc
+	}
+}
+
 // NewKinesisClient returns client to interface with Kinesis stream
-func NewKinesisClient() *KinesisClient {
-	svc := kinesis.New(session.New(aws.NewConfig()))
-	return &KinesisClient{svc}
+func NewKinesisClient(opts ...ClientOption) *KinesisClient {
+	kc := &KinesisClient{}
+
+	for _, opt := range opts {
+		opt(kc)
+	}
+
+	if kc.svc == nil {
+		kc.svc = kinesis.New(session.New(aws.NewConfig()))
+	}
+
+	return kc
 }
 
 // KinesisClient acts as wrapper around Kinesis client
