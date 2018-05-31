@@ -11,6 +11,10 @@ import (
 	"os"
 	"os/signal"
 
+    "github.com/aws/aws-sdk-go/aws"
+    "github.com/aws/aws-sdk-go/aws/session"
+    "github.com/aws/aws-sdk-go/service/kinesis"
+
 	consumer "github.com/harlow/kinesis-consumer"
 	checkpoint "github.com/harlow/kinesis-consumer/checkpoint/ddb"
 )
@@ -46,12 +50,16 @@ func main() {
 		logger  = log.New(os.Stdout, "", log.LstdFlags)
 	)
 
+    myKinesisClient := kinesis.New(session.New(aws.NewConfig()))
+    newKclient := consumer.NewKinesisClient(consumer.WithKinesis(myKinesisClient))
+
 	// consumer
 	c, err := consumer.New(
 		*stream,
 		consumer.WithCheckpoint(ck),
 		consumer.WithLogger(logger),
 		consumer.WithCounter(counter),
+        consumer.WithClient(newKclient),
 	)
 	if err != nil {
 		log.Fatalf("consumer error: %v", err)
