@@ -192,7 +192,7 @@ func (c *Checkpoint) save() error {
 
 func retriableError(err error) bool {
 	if awsErr, ok := err.(awserr.Error); ok {
-		if awsErr.Code() == "ProvisionedThroughputExceededException" {
+		if awsErr.Code() == dynamodb.ErrCodeProvisionedThroughputExceededException {
 			return true
 		}
 	}
