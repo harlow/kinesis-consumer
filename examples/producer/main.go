@@ -27,7 +27,7 @@ func main() {
 
 	// download file with test data
 	// curl https://s3.amazonaws.com/kinesis.test/users.txt -o /tmp/users.txt
-	f, err := os.Open("/tmp/users.txt")
+	f, err := os.Open("./data/users.txt")
 	if err != nil {
 		log.Fatal("Cannot open users.txt file")
 	}

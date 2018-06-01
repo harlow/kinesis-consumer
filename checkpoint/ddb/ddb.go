@@ -35,14 +35,6 @@ func WithDynamoClient(svc dynamodbiface.DynamoDBAPI) Option {
 func New(appName, tableName string, opts ...Option) (*Checkpoint, error) {
 	client := dynamodb.New(session.New(aws.NewConfig()))
 
-	// ping table to verify it exists
-	_, err := client.DescribeTable(&dynamodb.DescribeTableInput{
-		TableName: aws.String(tableName),
-	})
-	if err != nil {
-		return nil, err
-	}
-
 	ck := &Checkpoint{
 		tableName:   tableName,
 		appName:     appName,
@@ -133,6 +125,18 @@ func (c *Checkpoint) Set(streamName, shardID, sequenceNumber string) error {
 	c.checkpoints[key] = sequenceNumber
 
 	return nil
+}
+
+// ValidaCheckpoint validate the checkpoint table exits, shut down
+func (c *Checkpoint) ValidateCheckpoint() error {
+	// ping table to verify it exists
+	_, err := c.client.DescribeTable(&dynamodb.DescribeTableInput{
+		TableName: aws.String(c.tableName),
+	})
+	if err != nil {
+		c.done <- struct{}{}
+	}
+	return err
 }
 
 // Shutdown the checkpoint. Save any in-flight data.
