@@ -41,6 +41,8 @@ func main() {
 	flag.Parse()
 
 	// Following will overwrite the default dynamodb client
+	// Older versions of aws sdk does not picking up aws config properly.
+	// You probably need to update aws sdk verison. Tested the following with 1.13.59
 	myDynamoDbClient := dynamodb.New(session.New(aws.NewConfig()), &aws.Config{
 		Region: aws.String("us-west-2"),
 	})
