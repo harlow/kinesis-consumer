@@ -3,15 +3,51 @@
 
 [[projects]]
   name = "github.com/apex/log"
-  packages = [".","handlers/text"]
+  packages = [
+    ".",
+    "handlers/text"
+  ]
   revision = "0296d6eb16bb28f8a0c55668affcf4876dc269be"
   version = "v1.0.0"
 
 [[projects]]
   name = "github.com/aws/aws-sdk-go"
-  packages = ["aws","aws/awserr","aws/awsutil","aws/client","aws/client/metadata","aws/corehandlers","aws/credentials","aws/credentials/ec2rolecreds","aws/credentials/endpointcreds","aws/credentials/stscreds","aws/defaults","aws/ec2metadata","aws/endpoints","aws/request","aws/session","aws/signer/v4","internal/shareddefaults","private/protocol","private/protocol/json/jsonutil","private/protocol/jsonrpc","private/protocol/query","private/protocol/query/queryutil","private/protocol/rest","private/protocol/xml/xmlutil","service/dynamodb","service/dynamodb/dynamodbattribute","service/kinesis","service/sts"]
-  revision = "e4f7e38b704e3ed0acc4a7f8196b777696f6f1f3"
-  version = "v1.12.30"
+  packages = [
+    "aws",
+    "aws/awserr",
+    "aws/awsutil",
+    "aws/client",
+    "aws/client/metadata",
+    "aws/corehandlers",
+    "aws/credentials",
+    "aws/credentials/ec2rolecreds",
+    "aws/credentials/endpointcreds",
+    "aws/credentials/stscreds",
+    "aws/defaults",
+    "aws/ec2metadata",
+    "aws/endpoints",
+    "aws/request",
+    "aws/session",
+    "aws/signer/v4",
+    "internal/sdkio",
+    "internal/sdkrand",
+    "internal/shareddefaults",
+    "private/protocol",
+    "private/protocol/json/jsonutil",
+    "private/protocol/jsonrpc",
+    "private/protocol/query",
+    "private/protocol/query/queryutil",
+    "private/protocol/rest",
+    "private/protocol/xml/xmlutil",
+    "service/dynamodb",
+    "service/dynamodb/dynamodbattribute",
+    "service/dynamodb/dynamodbiface",
+    "service/kinesis",
+    "service/kinesis/kinesisiface",
+    "service/sts"
+  ]
+  revision = "827e7eac8c2680d5bdea7bc3ef29c596eabe1eae"
+  version = "v1.13.59"
 
 [[projects]]
   name = "github.com/go-ini/ini"
@@ -32,13 +68,20 @@
 
 [[projects]]
   name = "gopkg.in/redis.v5"
-  packages = [".","internal","internal/consistenthash","internal/hashtag","internal/pool","internal/proto"]
+  packages = [
+    ".",
+    "internal",
+    "internal/consistenthash",
+    "internal/hashtag",
+    "internal/pool",
+    "internal/proto"
+  ]
   revision = "a16aeec10ff407b1e7be6dd35797ccf5426ef0f0"
   version = "v5.2.9"
 
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "acfe7035926da063cb81920dbb47c5e7dbcf5dbfbcf2e7dc5dd4ae0e4186490c"
+  inputs-digest = "1b40486b645b81bc2215d0153631e9e002e534ba86713ba55500ce62c07cbad8"
   solver-name = "gps-cdcl"
   solver-version = 1

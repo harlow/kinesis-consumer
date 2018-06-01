@@ -91,6 +91,20 @@ ck, err := checkpoint.New(appName, tableName)
 if err != nil {
 	log.Fatalf("new checkpoint error: %v", err)
 }
+
+// Override the Kinesis if any needs on session (e.g. assume role)
+myDynamoDbClient := dynamodb.New(session.New(aws.NewConfig()))
+
+// For versions of AWS sdk that fixed config being picked up properly, the example of
+// setting region should work.
+//    myDynamoDbClient := dynamodb.New(session.New(aws.NewConfig()), &aws.Config{
+//        Region: aws.String("us-west-2"),
+//    })
+
+ck, err := checkpoint.New(*app, *table, checkpoint.WithDynamoClient(myDynamoDbClient))
+if err != nil {
+    log.Fatalf("new checkpoint error: %v", err)
+}
 ```
 
 To leverage the DDB checkpoint we'll also need to create a table:

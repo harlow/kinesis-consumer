@@ -41,21 +41,30 @@ func main() {
 	flag.Parse()
 
 	// Following will overwrite the default dynamodb client
-	myDynamoDbClient := dynamodb.New(session.New(aws.NewConfig()))
+	// Older versions of aws sdk does not picking up aws config properly.
+	// You probably need to update aws sdk verison. Tested the following with 1.13.59
+	myDynamoDbClient := dynamodb.New(session.New(aws.NewConfig()), &aws.Config{
+		Region: aws.String("us-west-2"),
+	})
 
 	// ddb checkpoint
 	ck, err := checkpoint.New(*app, *table, checkpoint.WithDynamoClient(myDynamoDbClient))
 	if err != nil {
 		log.Fatalf("checkpoint error: %v", err)
 	}
-
+	err = ck.ValidateCheckpoint()
+	if err != nil {
+		log.Fatalf("checkpoint validation error: %v", err)
+	}
 	var (
 		counter = expvar.NewMap("counters")
 		logger  = log.New(os.Stdout, "", log.LstdFlags)
 	)
 
 	// The following 2 lines will overwrite the default kinesis client
-	myKinesisClient := kinesis.New(session.New(aws.NewConfig()))
+	myKinesisClient := kinesis.New(session.New(aws.NewConfig()), &aws.Config{
+		Region: aws.String("us-west-2"),
+	})
 	newKclient := consumer.NewKinesisClient(consumer.WithKinesis(myKinesisClient))
 
 	// consumer
