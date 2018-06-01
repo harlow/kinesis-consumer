@@ -11,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
+	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbiface"
 )
 
 // Option is used to override defaults when creating a new Checkpoint
@@ -20,6 +21,13 @@ type Option func(*Checkpoint)
 func WithMaxInterval(maxInterval time.Duration) Option {
 	return func(c *Checkpoint) {
 		c.maxInterval = maxInterval
+	}
+}
+
+// WithDynamoClient sets the dynamoDb client
+func WithDynamoClient(svc dynamodbiface.DynamoDBAPI) Option {
+	return func(c *Checkpoint) {
+		c.client = svc
 	}
 }
 
@@ -58,7 +66,7 @@ func New(appName, tableName string, opts ...Option) (*Checkpoint, error) {
 type Checkpoint struct {
 	tableName   string
 	appName     string
-	client      *dynamodb.DynamoDB
+	client      dynamodbiface.DynamoDBAPI
 	maxInterval time.Duration
 	mu          *sync.Mutex // protects the checkpoints
 	checkpoints map[key]string

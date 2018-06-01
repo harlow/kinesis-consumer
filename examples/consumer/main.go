@@ -11,6 +11,11 @@ import (
 	"os"
 	"os/signal"
 
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/dynamodb"
+	"github.com/aws/aws-sdk-go/service/kinesis"
+
 	consumer "github.com/harlow/kinesis-consumer"
 	checkpoint "github.com/harlow/kinesis-consumer/checkpoint/ddb"
 )
@@ -35,8 +40,11 @@ func main() {
 	)
 	flag.Parse()
 
+	// Following will overwrite the default dynamodb client
+	myDynamoDbClient := dynamodb.New(session.New(aws.NewConfig()))
+
 	// ddb checkpoint
-	ck, err := checkpoint.New(*app, *table)
+	ck, err := checkpoint.New(*app, *table, checkpoint.WithDynamoClient(myDynamoDbClient))
 	if err != nil {
 		log.Fatalf("checkpoint error: %v", err)
 	}
@@ -46,12 +54,17 @@ func main() {
 		logger  = log.New(os.Stdout, "", log.LstdFlags)
 	)
 
+	// The following 2 lines will overwrite the default kinesis client
+	myKinesisClient := kinesis.New(session.New(aws.NewConfig()))
+	newKclient := consumer.NewKinesisClient(consumer.WithKinesis(myKinesisClient))
+
 	// consumer
 	c, err := consumer.New(
 		*stream,
 		consumer.WithCheckpoint(ck),
 		consumer.WithLogger(logger),
 		consumer.WithCounter(counter),
+		consumer.WithClient(newKclient),
 	)
 	if err != nil {
 		log.Fatalf("consumer error: %v", err)
