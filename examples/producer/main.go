@@ -14,7 +14,9 @@ import (
 	"github.com/aws/aws-sdk-go/service/kinesis"
 )
 
-var svc = kinesis.New(session.New())
+var svc = kinesis.New(session.New(), &aws.Config{
+	Region: aws.String("us-west-2"),
+})
 
 func main() {
 	log.SetHandler(text.New(os.Stderr))

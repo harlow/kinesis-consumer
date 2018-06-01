@@ -41,7 +41,9 @@ func main() {
 	flag.Parse()
 
 	// Following will overwrite the default dynamodb client
-	myDynamoDbClient := dynamodb.New(session.New(aws.NewConfig()))
+	myDynamoDbClient := dynamodb.New(session.New(aws.NewConfig()), &aws.Config{
+		Region: aws.String("us-west-2"),
+	})
 
 	// ddb checkpoint
 	ck, err := checkpoint.New(*app, *table, checkpoint.WithDynamoClient(myDynamoDbClient))
@@ -55,7 +57,9 @@ func main() {
 	)
 
 	// The following 2 lines will overwrite the default kinesis client
-	myKinesisClient := kinesis.New(session.New(aws.NewConfig()))
+	myKinesisClient := kinesis.New(session.New(aws.NewConfig()), &aws.Config{
+		Region: aws.String("us-west-2"),
+	})
 	newKclient := consumer.NewKinesisClient(consumer.WithKinesis(myKinesisClient))
 
 	// consumer
