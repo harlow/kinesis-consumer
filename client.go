@@ -7,13 +7,14 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/kinesis"
+	"github.com/aws/aws-sdk-go/service/kinesis/kinesisiface"
 )
 
 // ClientOption is used to override defaults when creating a KinesisClient
 type ClientOption func(*KinesisClient)
 
 // WithKinesis overrides the default Kinesis client
-func WithKinesis(svc *kinesis.Kinesis) ClientOption {
+func WithKinesis(svc kinesisiface.KinesisAPI) ClientOption {
 	return func(kc *KinesisClient) {
 		kc.svc = svc
 	}
@@ -36,7 +37,7 @@ func NewKinesisClient(opts ...ClientOption) *KinesisClient {
 
 // KinesisClient acts as wrapper around Kinesis client
 type KinesisClient struct {
-	svc *kinesis.Kinesis
+	svc kinesisiface.KinesisAPI
 }
 
 // GetShardIDs returns shard ids in a given stream
