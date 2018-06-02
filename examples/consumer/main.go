@@ -52,10 +52,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("checkpoint error: %v", err)
 	}
-	err = ck.ValidateCheckpoint()
-	if err != nil {
-		log.Fatalf("checkpoint validation error: %v", err)
-	}
 	var (
 		counter = expvar.NewMap("counters")
 		logger  = log.New(os.Stdout, "", log.LstdFlags)

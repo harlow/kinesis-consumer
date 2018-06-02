@@ -127,18 +127,6 @@ func (c *Checkpoint) Set(streamName, shardID, sequenceNumber string) error {
 	return nil
 }
 
-// ValidaCheckpoint validate the checkpoint table exits, shut down
-func (c *Checkpoint) ValidateCheckpoint() error {
-	// ping table to verify it exists
-	_, err := c.client.DescribeTable(&dynamodb.DescribeTableInput{
-		TableName: aws.String(c.tableName),
-	})
-	if err != nil {
-		c.done <- struct{}{}
-	}
-	return err
-}
-
 // Shutdown the checkpoint. Save any in-flight data.
 func (c *Checkpoint) Shutdown() error {
 	c.done <- struct{}{}
