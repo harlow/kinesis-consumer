@@ -179,6 +179,9 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn func(*Recor
 	// loop records
 	for r := range recc {
 		scanError := fn(r)
+		if scanError.StopScan {
+			break
+		}
 		if scanError.Error != nil {
 			c.logger.Println(fmt.Errorf("record processing error: %v", scanError.Error))
 		}
