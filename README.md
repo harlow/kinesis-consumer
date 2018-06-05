@@ -40,7 +40,7 @@ func main() {
 	// start
 	err = c.Scan(context.TODO(), func(r *consumer.Record) consumer.ScanError {
 		fmt.Println(string(r.Data))
-        // continue canning
+        // continue scanning
         return consumer.ScanError{
             StopScan:       false,  // true to stop scan 
             SkipCheckpoint: false,  // true to skip checkpoint
