@@ -12,6 +12,7 @@ import (
 	"os/signal"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/kinesis"
@@ -48,7 +49,7 @@ func main() {
 	})
 
 	// ddb checkpoint
-	ck, err := checkpoint.New(*app, *table, checkpoint.WithDynamoClient(myDynamoDbClient))
+	ck, err := checkpoint.New(*app, *table, checkpoint.WithDynamoClient(myDynamoDbClient), checkpoint.WithRetryer(&MyRetryer{}))
 	if err != nil {
 		log.Fatalf("checkpoint error: %v", err)
 	}
@@ -99,4 +100,20 @@ func main() {
 	if err := ck.Shutdown(); err != nil {
 		log.Fatalf("checkpoint shutdown error: %v", err)
 	}
+}
+
+type MyRetryer struct {
+	checkpoint.Retryer
+}
+
+func (r *MyRetryer) ShouldRetry(err error) bool {
+	if awsErr, ok := err.(awserr.Error); ok {
+		switch awsErr.Code() {
+		case dynamodb.ErrCodeProvisionedThroughputExceededException, dynamodb.ErrCodeLimitExceededException:
+			return true
+		default:
+			return false
+		}
+	}
+	return false
 }
