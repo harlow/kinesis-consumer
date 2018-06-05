@@ -89,9 +89,9 @@ func main() {
 	}()
 
 	// scan stream
-	err = c.Scan(ctx, func(r *consumer.Record) bool {
+	err = c.Scan(ctx, func(r *consumer.Record) (bool, bool) {
 		fmt.Println(string(r.Data))
-		return true // continue scanning
+		return true, true // checkpoint and continue scanning
 	})
 	if err != nil {
 		log.Fatalf("scan error: %v", err)
