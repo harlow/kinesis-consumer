@@ -1,4 +1,4 @@
-package redis
+package ddb
 
 import (
 	"fmt"
@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
@@ -31,6 +30,13 @@ func WithDynamoClient(svc dynamodbiface.DynamoDBAPI) Option {
 	}
 }
 
+// WithRetryer sets the retryer
+func WithRetryer(r Retryer) Option {
+	return func(c *Checkpoint) {
+		c.retryer = r
+	}
+}
+
 // New returns a checkpoint that uses DynamoDB for underlying storage
 func New(appName, tableName string, opts ...Option) (*Checkpoint, error) {
 	client := dynamodb.New(session.New(aws.NewConfig()))
@@ -43,6 +49,7 @@ func New(appName, tableName string, opts ...Option) (*Checkpoint, error) {
 		done:        make(chan struct{}),
 		mu:          &sync.Mutex{},
 		checkpoints: map[key]string{},
+		retryer:     &DefaultRetryer{},
 	}
 
 	for _, opt := range opts {
@@ -63,6 +70,7 @@ type Checkpoint struct {
 	mu          *sync.Mutex // protects the checkpoints
 	checkpoints map[key]string
 	done        chan struct{}
+	retryer     Retryer
 }
 
 type key struct {
@@ -97,7 +105,7 @@ func (c *Checkpoint) Get(streamName, shardID string) (string, error) {
 
 	resp, err := c.client.GetItem(params)
 	if err != nil {
-		if retriableError(err) {
+		if c.retryer.ShouldRetry(err) {
 			return c.Get(streamName, shardID)
 		}
 		return "", err
@@ -168,7 +176,7 @@ func (c *Checkpoint) save() error {
 			Item:      item,
 		})
 		if err != nil {
-			if !retriableError(err) {
+			if !c.retryer.ShouldRetry(err) {
 				return err
 			}
 			return c.save()
@@ -176,13 +184,4 @@ func (c *Checkpoint) save() error {
 	}
 
 	return nil
-}
-
-func retriableError(err error) bool {
-	if awsErr, ok := err.(awserr.Error); ok {
-		if awsErr.Code() == dynamodb.ErrCodeProvisionedThroughputExceededException {
-			return true
-		}
-	}
-	return false
 }
