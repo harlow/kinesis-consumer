@@ -47,7 +47,9 @@ func TestScanShard(t *testing.T) {
 		resultData string
 		fn         = func(r *Record) ScanError {
 			resultData += string(r.Data)
+			err := errors.New("some error happened")
 			return ScanError{
+				Error:          err,
 				StopScan:       false,
 				SkipCheckpoint: false,
 			}

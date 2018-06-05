@@ -13,6 +13,7 @@ import (
 // ScanError signals the consumer if we should continue scanning for next record
 // and whether to checkpoint.
 type ScanError struct {
+	Error          error
 	StopScan       bool
 	SkipCheckpoint bool
 }
@@ -170,18 +171,16 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn func(*Recor
 	}
 
 	c.logger.Println("scanning", shardID, lastSeqNum)
-
 	// get records
 	recc, errc, err := c.client.GetRecords(ctx, c.streamName, shardID, lastSeqNum)
 	if err != nil {
 		return fmt.Errorf("get records error: %v", err)
 	}
-
 	// loop records
 	for r := range recc {
 		scanError := fn(r)
-		if scanError.StopScan {
-			break
+		if scanError.Error != nil {
+			c.logger.Println(fmt.Errorf("record processing error: %v", scanError.Error))
 		}
 		if !scanError.SkipCheckpoint {
 			c.counter.Add("records", 1)
