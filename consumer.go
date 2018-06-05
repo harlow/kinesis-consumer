@@ -179,15 +179,21 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn func(*Recor
 	// loop records
 	for r := range recc {
 		scanError := fn(r)
+		if scanError.Error != nil {
+			err = scanError.Error
+		}
+
+		// Skip invalid state
+		if scanError.StopScan && scanError.SkipCheckpoint {
+			continue
+		}
+
 		if scanError.StopScan {
 			break
 		}
-		if scanError.Error != nil {
-			c.logger.Println(fmt.Errorf("record processing error: %v", scanError.Error))
-		}
+
 		if !scanError.SkipCheckpoint {
 			c.counter.Add("records", 1)
-
 			err := c.checkpoint.Set(c.streamName, shardID, *r.SequenceNumber)
 			if err != nil {
 				return fmt.Errorf("set checkpoint error: %v", err)
