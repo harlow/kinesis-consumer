@@ -105,6 +105,9 @@ ck, err := checkpoint.New(*app, *table, checkpoint.WithDynamoClient(myDynamoDbCl
 if err != nil {
     log.Fatalf("new checkpoint error: %v", err)
 }
+// Or we can provide your own Retryer to customize what triggers a retry inside checkpoint
+// See code in examples
+// ck, err := checkpoint.New(*app, *table, checkpoint.WithDynamoClient(myDynamoDbClient), checkpoint.WithRetryer(&MyRetryer{}))
 ```
 
 To leverage the DDB checkpoint we'll also need to create a table:
