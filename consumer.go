@@ -179,9 +179,8 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn func(*Recor
 	// loop records
 	for r := range recc {
 		scanError := fn(r)
-		if scanError.Error != nil {
-			err = scanError.Error
-		}
+		// It will be nicer if this can be reported with checkpoint error
+		err = scanError.Error
 
 		// Skip invalid state
 		if scanError.StopScan && scanError.SkipCheckpoint {
