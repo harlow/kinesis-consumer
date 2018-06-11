@@ -43,6 +43,7 @@ type Checkpoint struct {
 }
 
 // New returns a checkpoint that uses DynamoDB for underlying storage
+// Using connectionStr turn it more flexible to use specific db configs
 func New(appName, tableName, connectionStr string) (*Checkpoint, error) {
 
 	conn, err := sql.Open("postgres", connectionStr)
