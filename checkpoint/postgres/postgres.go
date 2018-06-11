@@ -9,13 +9,8 @@ import (
 	_ "github.com/lib/pq"
 )
 
-type key struct {
-	streamName string
-	shardID    string
-}
-
-// Consumer represents the data that will be stored about the checkpoint
-type Consumer struct {
+// consumer represents the data that will be stored about the checkpoint
+type consumer struct {
 	Checkpoint JSONMap `db:"checkpoint"`
 }
 
@@ -31,6 +26,14 @@ const upsertCheckpoint = `INSERT INTO %s
 						  UPDATE 
 						  SET checkpoint = %[1]s.checkpoint::jsonb || '{"sequence_number":"%[4]s"}'`
 
+type key struct {
+	streamName string
+	shardID    string
+}
+
+// Option is used to override defaults when creating a new Checkpoint
+type Option func(*Checkpoint)
+
 // Checkpoint stores and retreives the last evaluated key from a DDB scan
 type Checkpoint struct {
 	appName     string
@@ -44,7 +47,7 @@ type Checkpoint struct {
 
 // New returns a checkpoint that uses DynamoDB for underlying storage
 // Using connectionStr turn it more flexible to use specific db configs
-func New(appName, tableName, connectionStr string) (*Checkpoint, error) {
+func New(appName, tableName, connectionStr string, opts ...Option) (*Checkpoint, error) {
 
 	conn, err := sql.Open("postgres", connectionStr)
 
@@ -62,6 +65,10 @@ func New(appName, tableName, connectionStr string) (*Checkpoint, error) {
 		checkpoints: map[key]string{},
 	}
 
+	for _, opt := range opts {
+		opt(ck)
+	}
+
 	go ck.loop()
 
 	return ck, nil
@@ -72,7 +79,7 @@ func New(appName, tableName, connectionStr string) (*Checkpoint, error) {
 // TRIM_HORIZON or AFTER_SEQUENCE_NUMBER (if checkpoint exists).
 func (c *Checkpoint) Get(streamName, shardID string) (string, error) {
 	namespace := fmt.Sprintf("%s-%s", c.appName, streamName)
-	consumer := Consumer{}
+	consumer := consumer{}
 	// using fmt instead of using args in order to be able to use quotes surrounding the param
 	query := fmt.Sprintf(getCheckpointQuery, c.tableName, namespace, shardID)
 
