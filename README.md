@@ -38,9 +38,13 @@ func main() {
 	}
 
 	// start
-	err = c.Scan(context.TODO(), func(r *consumer.Record) bool {
+	err = c.Scan(context.TODO(), func(r *consumer.Record) consumer.ScanError {
 		fmt.Println(string(r.Data))
-		return true // continue scanning
+        // continue scanning
+        return consumer.ScanError{
+            StopScan:       false,  // true to stop scan 
+            SkipCheckpoint: false,  // true to skip checkpoint
+        }
 	})
 	if err != nil {
 		log.Fatalf("scan error: %v", err)
@@ -53,7 +57,7 @@ func main() {
 
 ## Checkpoint
 
-To record the progress of the consumer in the stream we use a checkpoint to store the last sequence number the consumer has read from a particular shard.
+To record the progress of the consumer in the stream we use a checkpoint to store the last sequence number the consumer has read from a particular shard. The boolean value SkipCheckpoint of consumer.ScanError determines if checkpoint will be activated. ScanError is returned by the record processing callback.
 
 This will allow consumers to re-launch and pick up at the position in the stream where they left off.
 
