@@ -148,9 +148,9 @@ func (c *Checkpoint) save() error {
 		// using fmt instead of using args in order to be able to use quotes surrounding the param
 		upsertStatement := fmt.Sprintf(upsertCheckpoint, c.tableName, fmt.Sprintf("%s-%s", c.appName, key.streamName), key.shardID, sequenceNumber)
 
-		_, err := c.conn.Exec(upsertStatement)
-
-		return err
+		if _, err := c.conn.Exec(upsertStatement); err != nil {
+			return err
+		}
 	}
 
 	return nil
