@@ -18,6 +18,9 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/kinesis"
 
+	alog "github.com/apex/log"
+	"github.com/apex/log/handlers/text"
+
 	consumer "github.com/harlow/kinesis-consumer"
 	checkpoint "github.com/harlow/kinesis-consumer/checkpoint/ddb"
 )
@@ -26,7 +29,7 @@ import (
 func init() {
 	sock, err := net.Listen("tcp", "localhost:8080")
 	if err != nil {
-		log.Fatalf("net listen error: %v", err)
+		log.Println("net listen error: %v", err)
 	}
 	go func() {
 		fmt.Println("Metrics available at http://localhost:8080/debug/vars")
@@ -34,7 +37,25 @@ func init() {
 	}()
 }
 
+// A myLogger provides a minimalistic logger satisfying the Logger interface.
+type myLogger struct {
+	logger alog.Logger
+}
+
+// Log logs the parameters to the stdlib logger. See log.Println.
+func (l *myLogger) Log(args ...interface{}) {
+	l.logger.Infof("producer", args...)
+}
+
 func main() {
+	// Wrap myLogger around  apex logger
+	log := &myLogger{
+		logger: alog.Logger{
+			Handler: text.New(os.Stdout),
+			Level:   alog.DebugLevel,
+		},
+	}
+
 	var (
 		app    = flag.String("app", "", "App name")
 		stream = flag.String("stream", "", "Stream name")
@@ -52,11 +73,10 @@ func main() {
 	// ddb checkpoint
 	ck, err := checkpoint.New(*app, *table, checkpoint.WithDynamoClient(myDynamoDbClient), checkpoint.WithRetryer(&MyRetryer{}))
 	if err != nil {
-		log.Fatalf("checkpoint error: %v", err)
+		log.Log("checkpoint error: %v", err)
 	}
 	var (
 		counter = expvar.NewMap("counters")
-		logger  = log.New(os.Stdout, "", log.LstdFlags)
 	)
 
 	// The following 2 lines will overwrite the default kinesis client
@@ -69,12 +89,12 @@ func main() {
 	c, err := consumer.New(
 		*stream,
 		consumer.WithCheckpoint(ck),
-		consumer.WithLogger(logger),
+		consumer.WithLogger(log),
 		consumer.WithCounter(counter),
 		consumer.WithClient(newKclient),
 	)
 	if err != nil {
-		log.Fatalf("consumer error: %v", err)
+		log.Log("consumer error: %v", err)
 	}
 
 	// use cancel func to signal shutdown
@@ -101,11 +121,11 @@ func main() {
 		}
 	})
 	if err != nil {
-		log.Fatalf("scan error: %v", err)
+		log.Log("scan error: %v", err)
 	}
 
 	if err := ck.Shutdown(); err != nil {
-		log.Fatalf("checkpoint shutdown error: %v", err)
+		log.Log("checkpoint shutdown error: %v", err)
 	}
 }
 

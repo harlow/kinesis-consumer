@@ -161,15 +161,50 @@ The [expvar package](https://golang.org/pkg/expvar/) will display consumer count
 ```
 
 ### Logging
+Logging supports the basic built-in logging library or use thrid party external one, so long as
+it implements the Logger interface.
+
+For example, to use the builtin logging package, we wrap it with myLogger structure.
+
+```
+// A myLogger provides a minimalistic logger satisfying the Logger interface.
+type myLogger struct {
+    logger *log.Logger
+}
+
+// Log logs the parameters to the stdlib logger. See log.Println.
+func (l *myLogger) Log(args ...interface{}) {
+    l.logger.Println(args...)
+}
+```
 
 The package defaults to `ioutil.Discard` so swallow all logs. This can be customized with the preferred logging strategy:
 
 ```go
 // logger
-logger := log.New(os.Stdout, "consumer-example: ", log.LstdFlags)
-
+log := &myLogger{ logger : log.New(os.Stdout, "consumer-example: ", log.LstdFlags),}
 // consumer
 c, err := consumer.New(streamName, consumer.WithLogger(logger))
+```
+To use a more complicated logging library, e.g. apex log
+```
+type myLogger struct {
+    logger *log.Logger
+}
+
+func (l *myLogger) Log(args ...interface{}) {
+       l.logger.Infof("producer", args...)
+
+}
+
+func main() {
+
+    log := &myLogger{
+             logger: alog.Logger{
+                     Handler: text.New(os.Stderr),
+                     Level:   alog.DebugLevel,
+             },
+    }
 ```
 
 ## Contributing
