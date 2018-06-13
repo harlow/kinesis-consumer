@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"expvar"
 	"flag"
 	"fmt"
@@ -109,9 +110,15 @@ func main() {
 	}()
 
 	// scan stream
-	err = c.Scan(ctx, func(r *consumer.Record) bool {
+	err = c.Scan(ctx, func(r *consumer.Record) consumer.ScanError {
 		fmt.Println(string(r.Data))
-		return true // continue scanning
+		err := errors.New("some error happened")
+		// continue scanning
+		return consumer.ScanError{
+			Error:          err,
+			StopScan:       true,
+			SkipCheckpoint: false,
+		}
 	})
 	if err != nil {
 		log.Log("scan error: %v", err)
