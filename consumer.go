@@ -3,8 +3,6 @@ package consumer
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
-	"log"
 	"sync"
 
 	"github.com/aws/aws-sdk-go/service/kinesis"
@@ -51,7 +49,7 @@ func WithCheckpoint(checkpoint Checkpoint) Option {
 }
 
 // WithLogger overrides the default logger
-func WithLogger(logger *log.Logger) Option {
+func WithLogger(logger Logger) Option {
 	return func(c *Consumer) error {
 		c.logger = logger
 		return nil
@@ -86,7 +84,7 @@ func New(streamName string, opts ...Option) (*Consumer, error) {
 		streamName: streamName,
 		checkpoint: &noopCheckpoint{},
 		counter:    &noopCounter{},
-		logger:     log.New(ioutil.Discard, "", log.LstdFlags),
+		logger:     NewDefaultLogger(),
 		client:     NewKinesisClient(),
 	}
 
@@ -104,7 +102,7 @@ func New(streamName string, opts ...Option) (*Consumer, error) {
 type Consumer struct {
 	streamName string
 	client     Client
-	logger     *log.Logger
+	logger     Logger
 	checkpoint Checkpoint
 	counter    Counter
 }
@@ -162,7 +160,7 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn func(*Recor
 		return fmt.Errorf("get checkpoint error: %v", err)
 	}
 
-	c.logger.Println("scanning", shardID, lastSeqNum)
+	c.logger.Log("scanning", shardID, lastSeqNum)
 
 	// get records
 	recc, errc, err := c.client.GetRecords(ctx, c.streamName, shardID, lastSeqNum)
@@ -184,6 +182,6 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn func(*Recor
 		}
 	}
 
-	c.logger.Println("exiting", shardID)
+	c.logger.Log("exiting", shardID)
 	return <-errc
 }
