@@ -43,14 +43,14 @@ type Checkpoint struct {
 // Using connectionStr turn it more flexible to use specific db configs
 func New(appName, tableName, connectionStr string, opts ...Option) (*Checkpoint, error) {
 
+	if tableName == "" {
+		return nil, errors.New("Table name not defined")
+	}
+
 	conn, err := sql.Open("postgres", connectionStr)
 
 	if err != nil {
 		return nil, err
-	}
-
-	if tableName == "" {
-		return nil, errors.New("Table name not defined")
 	}
 
 	getCheckpointQuery = fmt.Sprintf(getCheckpointQuery, tableName)
