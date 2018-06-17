@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -46,6 +47,10 @@ func New(appName, tableName, connectionStr string, opts ...Option) (*Checkpoint,
 
 	if err != nil {
 		return nil, err
+	}
+
+	if tableName == "" {
+		return nil, errors.New("Table name not defined")
 	}
 
 	getCheckpointQuery = fmt.Sprintf(getCheckpointQuery, tableName)
