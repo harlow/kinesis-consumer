@@ -31,7 +31,6 @@ func main() {
 
 	var (
 		counter = expvar.NewMap("counters")
-		logger  = log.New(os.Stdout, "", log.LstdFlags)
 	)
 
 	newKclient := consumer.NewKinesisClient()
@@ -40,7 +39,6 @@ func main() {
 	c, err := consumer.New(
 		*stream,
 		consumer.WithCheckpoint(ck),
-		consumer.WithLogger(logger),
 		consumer.WithCounter(counter),
 		consumer.WithClient(newKclient),
 	)
