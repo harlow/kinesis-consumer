@@ -141,11 +141,12 @@ if err != nil {
 To leverage the Postgres checkpoint we'll also need to create a table:
 
 ```sql
-CREATE TABLE kinesis_consumer (
-    checkpoint jsonb NOT NULL
+CREATE TABLE public.kinesis_consumer (
+	namespace text NOT NULL,
+	shard_id text NOT NULL,
+	sequence_number text NOT NULL,
+	CONSTRAINT kinesis_consumer_pk PRIMARY KEY (namespace,shard_id)
 );
-
-CREATE UNIQUE INDEX kinesis_consumer_pk ON kinesis_consumer USING btree (((checkpoint ->> 'namespace'::text)), ((checkpoint ->> 'shard_id'::text)));
 ```
 
 The table name has to be the same that you specify when creating the checkpoint. The primary key composed by namespace and shard_id is mandatory in order to the checkpoint run without issues and also to ensure data integrity.

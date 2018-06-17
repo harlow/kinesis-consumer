@@ -9,22 +9,16 @@ import (
 	_ "github.com/lib/pq"
 )
 
-// consumer represents the data that will be stored about the checkpoint
-type consumer struct {
-	Checkpoint JSONMap `db:"checkpoint"`
-}
+var getCheckpointQuery = `SELECT sequence_number 
+						  FROM %s
+						  WHERE namespace=$1 AND shard_id=$2`
 
-const getCheckpointQuery = `
-							SELECT checkpoint 
-							FROM %s
-							WHERE checkpoint @> '{"namespace":"%s", "shard_id":"%s"}'`
-
-const upsertCheckpoint = `INSERT INTO %s 
-						  VALUES('{"namespace": "%s", "shard_id": "%s", "sequence_number":"%s"}')
-						  ON CONFLICT ((checkpoint->>'namespace'),(checkpoint->>'shard_id'))
-						  DO 
-						  UPDATE 
-						  SET checkpoint = %[1]s.checkpoint::jsonb || '{"sequence_number":"%[4]s"}'`
+var upsertCheckpoint = `INSERT INTO %s (namespace, shard_id, sequence_number)
+						VALUES($1, $2, $3)
+						ON CONFLICT (namespace, shard_id)
+						DO 
+						UPDATE 
+						SET sequence_number= $3`
 
 type key struct {
 	streamName string
@@ -37,7 +31,6 @@ type Option func(*Checkpoint)
 // Checkpoint stores and retreives the last evaluated key from a DDB scan
 type Checkpoint struct {
 	appName     string
-	tableName   string
 	conn        *sql.DB
 	mu          *sync.Mutex // protects the checkpoints
 	done        chan struct{}
@@ -45,7 +38,7 @@ type Checkpoint struct {
 	maxInterval time.Duration
 }
 
-// New returns a checkpoint that uses DynamoDB for underlying storage
+// New returns a checkpoint that uses PostgresDB for underlying storage
 // Using connectionStr turn it more flexible to use specific db configs
 func New(appName, tableName, connectionStr string, opts ...Option) (*Checkpoint, error) {
 
@@ -55,10 +48,12 @@ func New(appName, tableName, connectionStr string, opts ...Option) (*Checkpoint,
 		return nil, err
 	}
 
+	getCheckpointQuery = fmt.Sprintf(getCheckpointQuery, tableName)
+	upsertCheckpoint = fmt.Sprintf(upsertCheckpoint, tableName)
+
 	ck := &Checkpoint{
 		conn:        conn,
 		appName:     appName,
-		tableName:   tableName,
 		done:        make(chan struct{}),
 		maxInterval: time.Duration(1 * time.Minute),
 		mu:          new(sync.Mutex),
@@ -79,11 +74,10 @@ func New(appName, tableName, connectionStr string, opts ...Option) (*Checkpoint,
 // TRIM_HORIZON or AFTER_SEQUENCE_NUMBER (if checkpoint exists).
 func (c *Checkpoint) Get(streamName, shardID string) (string, error) {
 	namespace := fmt.Sprintf("%s-%s", c.appName, streamName)
-	consumer := consumer{}
-	// using fmt instead of using args in order to be able to use quotes surrounding the param
-	query := fmt.Sprintf(getCheckpointQuery, c.tableName, namespace, shardID)
 
-	err := c.conn.QueryRow(query).Scan(&consumer.Checkpoint)
+	var sequenceNumber string
+
+	err := c.conn.QueryRow(getCheckpointQuery, namespace, shardID).Scan(&sequenceNumber)
 
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -93,7 +87,7 @@ func (c *Checkpoint) Get(streamName, shardID string) (string, error) {
 		return "", err
 	}
 
-	return consumer.Checkpoint["sequence_number"].(string), nil
+	return sequenceNumber, nil
 }
 
 // Set stores a checkpoint for a shard (e.g. sequence number of last record processed by application).
@@ -145,10 +139,8 @@ func (c *Checkpoint) save() error {
 	defer c.mu.Unlock()
 
 	for key, sequenceNumber := range c.checkpoints {
-		// using fmt instead of using args in order to be able to use quotes surrounding the param
-		upsertStatement := fmt.Sprintf(upsertCheckpoint, c.tableName, fmt.Sprintf("%s-%s", c.appName, key.streamName), key.shardID, sequenceNumber)
 
-		if _, err := c.conn.Exec(upsertStatement); err != nil {
+		if _, err := c.conn.Exec(upsertCheckpoint, fmt.Sprintf("%s-%s", c.appName, key.streamName), key.shardID, sequenceNumber); err != nil {
 			return err
 		}
 	}
