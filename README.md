@@ -123,6 +123,34 @@ Sort key: shard_id
 
 <img width="727" alt="screen shot 2017-11-22 at 7 59 36 pm" src="https://user-images.githubusercontent.com/739782/33158557-b90e4228-cfbf-11e7-9a99-73b56a446f5f.png">
 
+### Postgres Checkpoint
+
+The Postgres checkpoint requires Table Name, App Name, Stream Name and ConnectionString:
+
+```go
+import checkpoint "github.com/harlow/kinesis-consumer/checkpoint/postgres"
+
+// postgres checkpoint
+ck, err := checkpoint.New(app, table, connStr)
+if err != nil {
+    log.Fatalf("new checkpoint error: %v", err)
+}
+
+```
+
+To leverage the Postgres checkpoint we'll also need to create a table:
+
+```sql
+CREATE TABLE kinesis_consumer (
+	namespace text NOT NULL,
+	shard_id text NOT NULL,
+	sequence_number numeric NOT NULL,
+	CONSTRAINT kinesis_consumer_pk PRIMARY KEY (namespace, shard_id)
+);
+```
+
+The table name has to be the same that you specify when creating the checkpoint. The primary key composed by namespace and shard_id is mandatory in order to the checkpoint run without issues and also to ensure data integrity.
+
 ## Options
 
 The consumer allows the following optional overrides.

@@ -42,3 +42,7 @@ vendor/**
 # Benchmark files
 prof.cpu
 prof.mem
+
+# VSCode files
+/.vscode
+/**/debug
