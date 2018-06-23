@@ -37,14 +37,14 @@ func main() {
 		log.Fatalf("consumer error: %v", err)
 	}
 
-	// start
-	err = c.Scan(context.TODO(), func(r *consumer.Record) consumer.ScanError {
-		fmt.Println(string(r.Data))
-        // continue scanning
-        return consumer.ScanError{
-            StopScan:       false,  // true to stop scan 
-            SkipCheckpoint: false,  // true to skip checkpoint
-        }
+	// start scan
+	err = c.Scan(context.TODO(), func(r *consumer.Record) consumer.ScanStatus {
+			fmt.Println(string(r.Data))
+
+			return consumer.ScanStatus{
+					StopScan:       false,  // true to stop scan
+					SkipCheckpoint: false,  // true to skip checkpoint
+			}
 	})
 	if err != nil {
 		log.Fatalf("scan error: %v", err)
@@ -54,6 +54,12 @@ func main() {
 	// method should be leverged instead.
 }
 ```
+
+## Scan status
+
+To allow the
+
+// consumer.ScanStatus
 
 ## Checkpoint
 
@@ -109,6 +115,7 @@ ck, err := checkpoint.New(*app, *table, checkpoint.WithDynamoClient(myDynamoDbCl
 if err != nil {
     log.Fatalf("new checkpoint error: %v", err)
 }
+
 // Or we can provide your own Retryer to customize what triggers a retry inside checkpoint
 // See code in examples
 // ck, err := checkpoint.New(*app, *table, checkpoint.WithDynamoClient(myDynamoDbClient), checkpoint.WithRetryer(&MyRetryer{}))
@@ -155,7 +162,7 @@ The table name has to be the same that you specify when creating the checkpoint.
 
 The consumer allows the following optional overrides.
 
-### Client
+### Kinesis Client
 
 Override the Kinesis client if there is any special config needed:
 
@@ -189,6 +196,7 @@ The [expvar package](https://golang.org/pkg/expvar/) will display consumer count
 ```
 
 ### Logging
+
 Logging supports the basic built-in logging library or use thrid party external one, so long as
 it implements the Logger interface.
 
@@ -210,28 +218,31 @@ The package defaults to `ioutil.Discard` so swallow all logs. This can be custom
 
 ```go
 // logger
-log := &myLogger{ logger : log.New(os.Stdout, "consumer-example: ", log.LstdFlags),}
+log := &myLogger{
+	logger : log.New(os.Stdout, "consumer-example: ", log.LstdFlags)
+}
+
 // consumer
 c, err := consumer.New(streamName, consumer.WithLogger(logger))
 ```
+
 To use a more complicated logging library, e.g. apex log
+
 ```
 type myLogger struct {
-    logger *log.Logger
+		logger *log.Logger
 }
 
 func (l *myLogger) Log(args ...interface{}) {
-       l.logger.Infof("producer", args...)
-
+		l.logger.Infof("producer", args...)
 }
 
 func main() {
-
     log := &myLogger{
-             logger: alog.Logger{
-                     Handler: text.New(os.Stderr),
-                     Level:   alog.DebugLevel,
-             },
+				logger: alog.Logger{
+						Handler: text.New(os.Stderr),
+						Level:   alog.DebugLevel,
+				},
     }
 ```
 

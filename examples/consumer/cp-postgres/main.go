@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"expvar"
 	"flag"
 	"fmt"
@@ -29,24 +28,19 @@ func main() {
 		log.Fatalf("checkpoint error: %v", err)
 	}
 
-	var (
-		counter = expvar.NewMap("counters")
-	)
-
-	newKclient := consumer.NewKinesisClient()
+	var counter = expvar.NewMap("counters")
 
 	// consumer
 	c, err := consumer.New(
 		*stream,
 		consumer.WithCheckpoint(ck),
 		consumer.WithCounter(counter),
-		consumer.WithClient(newKclient),
 	)
 	if err != nil {
 		log.Fatalf("consumer error: %v", err)
 	}
 
-	// use cancel \func to signal shutdown
+	// use cancel func to signal shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// trap SIGINT, wait to trigger shutdown
@@ -59,15 +53,11 @@ func main() {
 	}()
 
 	// scan stream
-	err = c.Scan(ctx, func(r *consumer.Record) consumer.ScanError {
+	err = c.Scan(ctx, func(r *consumer.Record) consumer.ScanStatus {
 		fmt.Println(string(r.Data))
-		err := errors.New("some error happened")
+
 		// continue scanning
-		return consumer.ScanError{
-			Error:          err,
-			StopScan:       false,
-			SkipCheckpoint: false,
-		}
+		return consumer.ScanStatus{}
 	})
 
 	if err != nil {

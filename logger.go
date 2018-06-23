@@ -1,7 +1,6 @@
 package consumer
 
 import (
-	"io/ioutil"
 	"log"
 )
 
@@ -12,19 +11,12 @@ type Logger interface {
 
 type LoggerFunc func(...interface{})
 
-// NewDefaultLogger returns a Logger which discards messages.
-func NewDefaultLogger() Logger {
-	return &defaultLogger{
-		logger: log.New(ioutil.Discard, "", log.LstdFlags),
-	}
-}
-
-// A defaultLogger provides a logging instance when none is provided.
-type defaultLogger struct {
+// noopLogger implements logger interface with discard
+type noopLogger struct {
 	logger *log.Logger
 }
 
 // Log using stdlib logger. See log.Println.
-func (l defaultLogger) Log(args ...interface{}) {
+func (l noopLogger) Log(args ...interface{}) {
 	l.logger.Println(args...)
 }
