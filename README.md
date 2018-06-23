@@ -125,7 +125,7 @@ myDynamoDbClient := dynamodb.New(session.New(aws.NewConfig()))
 
 ck, err := checkpoint.New(*app, *table, checkpoint.WithDynamoClient(myDynamoDbClient))
 if err != nil {
-    log.Fatalf("new checkpoint error: %v", err)
+  log.Fatalf("new checkpoint error: %v", err)
 }
 
 // Or we can provide your own Retryer to customize what triggers a retry inside checkpoint
@@ -152,7 +152,7 @@ import checkpoint "github.com/harlow/kinesis-consumer/checkpoint/postgres"
 // postgres checkpoint
 ck, err := checkpoint.New(app, table, connStr)
 if err != nil {
-    log.Fatalf("new checkpoint error: %v", err)
+  log.Fatalf("new checkpoint error: %v", err)
 }
 
 ```
@@ -217,12 +217,12 @@ For example, to use the builtin logging package, we wrap it with myLogger struct
 ```
 // A myLogger provides a minimalistic logger satisfying the Logger interface.
 type myLogger struct {
-    logger *log.Logger
+	logger *log.Logger
 }
 
 // Log logs the parameters to the stdlib logger. See log.Println.
 func (l *myLogger) Log(args ...interface{}) {
-    l.logger.Println(args...)
+	l.logger.Println(args...)
 }
 ```
 
@@ -231,7 +231,7 @@ The package defaults to `ioutil.Discard` so swallow all logs. This can be custom
 ```go
 // logger
 log := &myLogger{
-	logger : log.New(os.Stdout, "consumer-example: ", log.LstdFlags)
+	logger: log.New(os.Stdout, "consumer-example: ", log.LstdFlags)
 }
 
 // consumer
@@ -242,20 +242,20 @@ To use a more complicated logging library, e.g. apex log
 
 ```
 type myLogger struct {
-		logger *log.Logger
+	logger *log.Logger
 }
 
 func (l *myLogger) Log(args ...interface{}) {
-		l.logger.Infof("producer", args...)
+	l.logger.Infof("producer", args...)
 }
 
 func main() {
-    log := &myLogger{
-				logger: alog.Logger{
-						Handler: text.New(os.Stderr),
-						Level:   alog.DebugLevel,
-				},
-    }
+	log := &myLogger{
+		logger: alog.Logger{
+			Handler: text.New(os.Stderr),
+			Level:   alog.DebugLevel,
+		},
+	}
 ```
 
 ## Contributing
