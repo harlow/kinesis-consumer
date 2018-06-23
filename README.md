@@ -39,12 +39,12 @@ func main() {
 
 	// start scan
 	err = c.Scan(context.TODO(), func(r *consumer.Record) consumer.ScanStatus {
-			fmt.Println(string(r.Data))
+		fmt.Println(string(r.Data))
 
-			return consumer.ScanStatus{
-					StopScan:       false,  // true to stop scan
-					SkipCheckpoint: false,  // true to skip checkpoint
-			}
+		return consumer.ScanStatus{
+			StopScan:       false,  // true to stop scan
+			SkipCheckpoint: false,  // true to skip checkpoint
+		}
 	})
 	if err != nil {
 		log.Fatalf("scan error: %v", err)
@@ -57,9 +57,21 @@ func main() {
 
 ## Scan status
 
-To allow the
+The scan func returns a `consumer.ScanStatus` the struct allows some basic flow control.
 
-// consumer.ScanStatus
+```go
+// continue scanning
+return consumer.ScanStatus{}
+
+// continue scanning, skip saving checkpoint
+return consumer.ScanStatus{SkipCheckpoint: true}
+
+// stop scanning, return nil
+return consumer.ScanStatus{StopScan: true}
+
+// stop scanning, return error
+return consumer.ScanStatus{Error: err}
+```
 
 ## Checkpoint
 
