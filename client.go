@@ -23,7 +23,7 @@ func WithKinesis(svc kinesisiface.KinesisAPI) ClientOption {
 // WithStartFrmLatest will make sure the client start consuming
 // events starting from the most recent event in kinesis. This
 // option discards the checkpoints.
-func WithStartFromLatest() Option {
+func WithStartFromLatest() ClientOption {
 	return func(kc *KinesisClient) {
 		kc.fromLatest = true
 	}
