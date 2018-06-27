@@ -24,7 +24,7 @@ func WithKinesis(svc kinesisiface.KinesisAPI) ClientOption {
 // events starting from the most recent event in kinesis. This
 // option discards the checkpoints.
 func WithStartFromLatest() Option {
-	return func(kc *KinesisClient) error {
+	return func(kc *KinesisClient) {
 		kc.fromLatest = true
 	}
 }
