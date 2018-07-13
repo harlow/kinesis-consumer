@@ -29,6 +29,13 @@ type key struct {
 // Option is used to override defaults when creating a new Checkpoint
 type Option func(*Checkpoint)
 
+// WithMaxInterval sets the flush interval
+func WithMaxInterval(maxInterval time.Duration) Option {
+	return func(c *Checkpoint) {
+		c.maxInterval = maxInterval
+	}
+}
+
 // Checkpoint stores and retreives the last evaluated key from a DDB scan
 type Checkpoint struct {
 	appName     string
