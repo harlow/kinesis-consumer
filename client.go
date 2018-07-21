@@ -20,7 +20,7 @@ func WithKinesis(svc kinesisiface.KinesisAPI) ClientOption {
 	}
 }
 
-// WithStartFrmLatest will make sure the client start consuming
+// WithStartFromLatest will make sure the client start consuming
 // events starting from the most recent event in kinesis. This
 // option discards the checkpoints.
 func WithStartFromLatest() ClientOption {
@@ -30,18 +30,21 @@ func WithStartFromLatest() ClientOption {
 }
 
 // NewKinesisClient returns client to interface with Kinesis stream
-func NewKinesisClient(opts ...ClientOption) *KinesisClient {
+func NewKinesisClient(opts ...ClientOption) (*KinesisClient, error) {
 	kc := &KinesisClient{}
 
 	for _, opt := range opts {
 		opt(kc)
 	}
-
+	newSession, err := session.NewSession(aws.NewConfig())
+	if err != nil {
+		return nil, err
+	}
 	if kc.svc == nil {
-		kc.svc = kinesis.New(session.New(aws.NewConfig()))
+		kc.svc = kinesis.New(newSession)
 	}
 
-	return kc
+	return kc, nil
 }
 
 // KinesisClient acts as wrapper around Kinesis client
@@ -61,7 +64,7 @@ func (c *KinesisClient) GetShardIDs(streamName string) ([]string, error) {
 		return nil, fmt.Errorf("describe stream error: %v", err)
 	}
 
-	ss := []string{}
+	var ss []string
 	for _, shard := range resp.StreamDescription.Shards {
 		ss = append(ss, *shard.ShardId)
 	}

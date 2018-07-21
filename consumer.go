@@ -87,13 +87,18 @@ func New(streamName string, opts ...Option) (*Consumer, error) {
 		return nil, fmt.Errorf("must provide stream name")
 	}
 
+	kc, err := NewKinesisClient()
+	if err != nil {
+		return nil, err
+	}
+
 	// new consumer with no-op checkpoint, counter, and logger
 	c := &Consumer{
 		streamName: streamName,
 		checkpoint: &noopCheckpoint{},
 		counter:    &noopCounter{},
 		logger:     NewDefaultLogger(),
-		client:     NewKinesisClient(),
+		client:     kc,
 	}
 
 	// override defaults
@@ -178,8 +183,6 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn func(*Recor
 	// loop records
 	for r := range recc {
 		scanError := fn(r)
-		// It will be nicer if this can be reported with checkpoint error
-		err = scanError.Error
 
 		// Skip invalid state
 		if scanError.StopScan && scanError.SkipCheckpoint {
