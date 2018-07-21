@@ -46,3 +46,6 @@ prof.mem
 # VSCode files
 /.vscode
 /**/debug
+
+# Goland files
+.idea/
