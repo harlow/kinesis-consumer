@@ -3,10 +3,10 @@ package consumer
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
-	"log"
 	"sync"
 	"testing"
+
+	"errors"
 
 	"github.com/aws/aws-sdk-go/aws"
 )
@@ -39,7 +39,7 @@ func TestScanShard(t *testing.T) {
 		client:     client,
 		checkpoint: ckp,
 		counter:    ctr,
-		logger:     log.New(ioutil.Discard, "", log.LstdFlags),
+		logger:     NewDefaultLogger(),
 	}
 
 	// callback fn simply appends the record data to result string
