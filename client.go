@@ -108,7 +108,6 @@ func (c *KinesisClient) GetRecords(ctx context.Context, streamName, shardID, las
 					}
 					continue
 				}
-
 				for _, r := range resp.Records {
 					select {
 					case <-ctx.Done():
@@ -117,16 +116,11 @@ func (c *KinesisClient) GetRecords(ctx context.Context, streamName, shardID, las
 						lastSeqNum = *r.SequenceNumber
 					}
 				}
-
 				if resp.NextShardIterator == nil || shardIterator == resp.NextShardIterator {
-					shardIterator, err = c.getShardIterator(streamName, shardID, lastSeqNum)
-					if err != nil {
-						errc <- fmt.Errorf("get shard iterator error: %v", err)
-						return
-					}
-				} else {
-					shardIterator = resp.NextShardIterator
+					errc <- fmt.Errorf("get shard iterator error: %v", err)
+					return
 				}
+				shardIterator = resp.NextShardIterator
 			}
 		}
 	}()
