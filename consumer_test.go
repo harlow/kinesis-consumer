@@ -3,12 +3,14 @@ package consumer
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
+	"log"
 	"sync"
 	"testing"
 
-	"errors"
-
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/service/kinesis"
+	"github.com/aws/aws-sdk-go/service/kinesis/kinesisiface"
 )
 
 func TestNew(t *testing.T) {
@@ -20,41 +22,36 @@ func TestNew(t *testing.T) {
 
 func TestScanShard(t *testing.T) {
 	var (
-		ckp    = &fakeCheckpoint{cache: map[string]string{}}
-		ctr    = &fakeCounter{}
-		client = newFakeClient(
-			&Record{
-				Data:           []byte("firstData"),
-				SequenceNumber: aws.String("firstSeqNum"),
-			},
-			&Record{
-				Data:           []byte("lastData"),
-				SequenceNumber: aws.String("lastSeqNum"),
-			},
-		)
+		resultData string
+		ckp        = &fakeCheckpoint{cache: map[string]string{}}
+		ctr        = &fakeCounter{}
+		mockSvc    = &mockKinesisClient{}
+		logger     = &noopLogger{
+			logger: log.New(ioutil.Discard, "", log.LstdFlags),
+		}
 	)
 
 	c := &Consumer{
 		streamName: "myStreamName",
-		client:     client,
+		client:     mockSvc,
 		checkpoint: ckp,
 		counter:    ctr,
-		logger:     NewDefaultLogger(),
+		logger:     logger,
 	}
 
+	var recordNum = 0
+
 	// callback fn simply appends the record data to result string
-	var (
-		resultData string
-		fn         = func(r *Record) ScanError {
-			resultData += string(r.Data)
-			err := errors.New("some error happened")
-			return ScanError{
-				Error:          err,
-				StopScan:       false,
-				SkipCheckpoint: false,
-			}
+	var fn = func(r *Record) ScanStatus {
+		resultData += string(r.Data)
+		recordNum++
+		stopScan := recordNum == 2
+
+		return ScanStatus{
+			StopScan:       stopScan,
+			SkipCheckpoint: false,
 		}
-	)
+	}
 
 	// scan shard
 	err := c.ScanShard(context.Background(), "myShard", fn)
@@ -79,34 +76,30 @@ func TestScanShard(t *testing.T) {
 	}
 }
 
-func newFakeClient(rs ...*Record) *fakeClient {
-	fc := &fakeClient{
-		recc: make(chan *Record, len(rs)),
-		errc: make(chan error),
-	}
-
-	for _, r := range rs {
-		fc.recc <- r
-	}
-
-	close(fc.errc)
-	close(fc.recc)
-
-	return fc
+type mockKinesisClient struct {
+	kinesisiface.KinesisAPI
 }
 
-type fakeClient struct {
-	shardIDs []string
-	recc     chan *Record
-	errc     chan error
+func (m *mockKinesisClient) GetRecords(input *kinesis.GetRecordsInput) (*kinesis.GetRecordsOutput, error) {
+
+	return &kinesis.GetRecordsOutput{
+		Records: []*kinesis.Record{
+			&kinesis.Record{
+				Data:           []byte("firstData"),
+				SequenceNumber: aws.String("firstSeqNum"),
+			},
+			&kinesis.Record{
+				Data:           []byte("lastData"),
+				SequenceNumber: aws.String("lastSeqNum"),
+			},
+		},
+	}, nil
 }
 
-func (fc *fakeClient) GetShardIDs(string) ([]string, error) {
-	return fc.shardIDs, nil
-}
-
-func (fc *fakeClient) GetRecords(ctx context.Context, streamName, shardID, lastSeqNum string) (<-chan *Record, <-chan error, error) {
-	return fc.recc, fc.errc, nil
+func (m *mockKinesisClient) GetShardIterator(input *kinesis.GetShardIteratorInput) (*kinesis.GetShardIteratorOutput, error) {
+	return &kinesis.GetShardIteratorOutput{
+		ShardIterator: aws.String("myshard"),
+	}, nil
 }
 
 type fakeCheckpoint struct {

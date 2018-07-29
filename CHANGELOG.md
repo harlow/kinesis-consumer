@@ -4,25 +4,26 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased (`master`)][unreleased]
 
-** Breaking changes to consumer library **
-
 Major changes:
 
-* Use [functional options][options] for config
-* Remove intermediate batching of kinesis records
-* Call the callback func with each record
-* Use dep for vendoring dependencies
-* Add DDB as storage layer for checkpoints
+* Remove concept of `Client` it was confusing as it wasn't a direct standin for a Kinesis client.
+* Rename `ScanError` to `ScanStatus` as it's not always an error.
 
 Minor changes:
 
-* remove unused buffer and emitter code
+* Update tests to use Kinesis mock
 
-[unreleased]: https://github.com/harlow/kinesis-consumer/compare/v0.1.0...HEAD
-[options]: https://dave.cheney.net/2014/10/17/functional-options-for-friendly-apis
+## v0.2.0 - 2018-07-28
+
+This is the last stable release from which there is a separate Client. It has caused confusion and will be removed going forward.
+
+https://github.com/harlow/kinesis-consumer/releases/tag/v0.2.0
 
 ## v0.1.0 - 2017-11-20
 
-This is the last stable release of the consumer which aggregated records in `batch` before calling the callback func. 
+This is the last stable release of the consumer which aggregated records in `batch` before calling the callback func.
 
 https://github.com/harlow/kinesis-consumer/releases/tag/v0.1.0
+
+[unreleased]: https://github.com/harlow/kinesis-consumer/compare/v0.2.0...HEAD
+[options]: https://dave.cheney.net/2014/10/17/functional-options-for-friendly-apis

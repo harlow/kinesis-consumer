@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"expvar"
 	"flag"
 	"fmt"
 	"log"
@@ -10,31 +9,25 @@ import (
 	"os/signal"
 
 	consumer "github.com/harlow/kinesis-consumer"
-	checkpoint "github.com/harlow/kinesis-consumer/checkpoint/postgres"
+	checkpoint "github.com/harlow/kinesis-consumer/checkpoint/redis"
 )
 
 func main() {
 	var (
-		app     = flag.String("app", "", "App name")
-		stream  = flag.String("stream", "", "Stream name")
-		table   = flag.String("table", "", "Table name")
-		connStr = flag.String("connection", "", "Connection Str")
+		app    = flag.String("app", "", "App name")
+		stream = flag.String("stream", "", "Stream name")
 	)
 	flag.Parse()
 
-	// postgres checkpoint
-	ck, err := checkpoint.New(*app, *table, *connStr)
+	// redis checkpoint
+	ck, err := checkpoint.New(*app)
 	if err != nil {
 		log.Fatalf("checkpoint error: %v", err)
 	}
 
-	var counter = expvar.NewMap("counters")
-
 	// consumer
 	c, err := consumer.New(
-		*stream,
-		consumer.WithCheckpoint(ck),
-		consumer.WithCounter(counter),
+		*stream, consumer.WithCheckpoint(ck),
 	)
 	if err != nil {
 		log.Fatalf("consumer error: %v", err)
@@ -59,12 +52,7 @@ func main() {
 		// continue scanning
 		return consumer.ScanStatus{}
 	})
-
 	if err != nil {
 		log.Fatalf("scan error: %v", err)
-	}
-
-	if err := ck.Shutdown(); err != nil {
-		log.Fatalf("checkpoint shutdown error: %v", err)
 	}
 }

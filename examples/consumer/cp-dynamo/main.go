@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"expvar"
 	"flag"
 	"fmt"
@@ -29,7 +28,7 @@ import (
 func init() {
 	sock, err := net.Listen("tcp", "localhost:8080")
 	if err != nil {
-		log.Println("net listen error: %v", err)
+		log.Printf("net listen error: %v", err)
 	}
 	go func() {
 		fmt.Println("Metrics available at http://localhost:8080/debug/vars")
@@ -66,24 +65,26 @@ func main() {
 	// Following will overwrite the default dynamodb client
 	// Older versions of aws sdk does not picking up aws config properly.
 	// You probably need to update aws sdk verison. Tested the following with 1.13.59
-	myDynamoDbClient := dynamodb.New(session.New(aws.NewConfig()), &aws.Config{
-		Region: aws.String("us-west-2"),
-	})
+	myDynamoDbClient := dynamodb.New(
+		session.New(aws.NewConfig()), &aws.Config{
+			Region: aws.String("us-west-2"),
+		},
+	)
 
 	// ddb checkpoint
 	ck, err := checkpoint.New(*app, *table, checkpoint.WithDynamoClient(myDynamoDbClient), checkpoint.WithRetryer(&MyRetryer{}))
 	if err != nil {
 		log.Log("checkpoint error: %v", err)
 	}
-	var (
-		counter = expvar.NewMap("counters")
-	)
+
+	var counter = expvar.NewMap("counters")
 
 	// The following 2 lines will overwrite the default kinesis client
-	myKinesisClient := kinesis.New(session.New(aws.NewConfig()), &aws.Config{
-		Region: aws.String("us-west-2"),
-	})
-	newKclient := consumer.NewKinesisClient(consumer.WithKinesis(myKinesisClient))
+	ksis := kinesis.New(
+		session.New(aws.NewConfig()), &aws.Config{
+			Region: aws.String("us-west-2"),
+		},
+	)
 
 	// consumer
 	c, err := consumer.New(
@@ -91,7 +92,7 @@ func main() {
 		consumer.WithCheckpoint(ck),
 		consumer.WithLogger(log),
 		consumer.WithCounter(counter),
-		consumer.WithClient(newKclient),
+		consumer.WithClient(ksis),
 	)
 	if err != nil {
 		log.Log("consumer error: %v", err)
@@ -110,15 +111,11 @@ func main() {
 	}()
 
 	// scan stream
-	err = c.Scan(ctx, func(r *consumer.Record) consumer.ScanError {
+	err = c.Scan(ctx, func(r *consumer.Record) consumer.ScanStatus {
 		fmt.Println(string(r.Data))
-		err := errors.New("some error happened")
+
 		// continue scanning
-		return consumer.ScanError{
-			Error:          err,
-			StopScan:       true,
-			SkipCheckpoint: false,
-		}
+		return consumer.ScanStatus{}
 	})
 	if err != nil {
 		log.Log("scan error: %v", err)
@@ -129,10 +126,12 @@ func main() {
 	}
 }
 
+// MyRetryer used for checkpointing
 type MyRetryer struct {
 	checkpoint.Retryer
 }
 
+// ShouldRetry implements custom logic for when a checkpont should retry
 func (r *MyRetryer) ShouldRetry(err error) bool {
 	if awsErr, ok := err.(awserr.Error); ok {
 		switch awsErr.Code() {
