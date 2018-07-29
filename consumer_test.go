@@ -3,10 +3,10 @@ package consumer
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
+	"log"
 	"sync"
 	"testing"
-
-	"errors"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/kinesis"

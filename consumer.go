@@ -62,17 +62,11 @@ func New(streamName string, opts ...Option) (*Consumer, error) {
 		return nil, fmt.Errorf("must provide stream name")
 	}
 
-	kc, err := NewKinesisClient()
-	if err != nil {
-		return nil, err
-	}
-
 	// new consumer with no-op checkpoint, counter, and logger
 	c := &Consumer{
 		streamName: streamName,
 		checkpoint: &noopCheckpoint{},
 		counter:    &noopCounter{},
-		client:     kc,
 		logger: &noopLogger{
 			logger: log.New(ioutil.Discard, "", log.LstdFlags),
 		},
@@ -185,37 +179,32 @@ func (c *Consumer) ScanShard(
 				continue
 			}
 
-			// loop records
+			// loop records of page
 			for _, r := range resp.Records {
-				select {
-				case <-ctx.Done():
-					return nil
-				default:
+				status := fn(r)
+
+				if !status.SkipCheckpoint {
 					lastSeqNum = *r.SequenceNumber
-					status := fn(r)
 
-					if !status.SkipCheckpoint {
-						if err := c.checkpoint.Set(c.streamName, shardID, lastSeqNum); err != nil {
-							return err
-						}
-					}
-
-					if err := status.Error; err != nil {
+					if err := c.checkpoint.Set(c.streamName, shardID, lastSeqNum); err != nil {
 						return err
 					}
+				}
 
-					c.counter.Add("records", 1)
+				if err := status.Error; err != nil {
+					return err
+				}
 
-					if status.StopScan {
-						return nil
-					}
+				c.counter.Add("records", 1)
+
+				if status.StopScan {
+					return nil
 				}
 			}
 
 			if resp.NextShardIterator == nil || shardIterator == resp.NextShardIterator {
-				return
+				return nil
 			}
-
 			shardIterator = resp.NextShardIterator
 		}
 	}
