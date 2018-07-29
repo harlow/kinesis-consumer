@@ -179,8 +179,11 @@ The consumer allows the following optional overrides.
 Override the Kinesis client if there is any special config needed:
 
 ```go
-// client
-client := kinesis.New(session.New(aws.NewConfig()))
+// kinesis 
+k := kinesis.New(session.New(aws.NewConfig()))
+
+//setup kinesis client
+client := consumer.NewKinesisClient(consumer.WithKinesis(k))
 
 // consumer
 c, err := consumer.New(streamName, consumer.WithClient(client))
