@@ -3,8 +3,6 @@ package consumer
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
-	"log"
 	"sync"
 	"testing"
 
@@ -21,42 +19,61 @@ func TestNew(t *testing.T) {
 }
 
 func TestScanShard(t *testing.T) {
-	var (
-		resultData string
-		ckp        = &fakeCheckpoint{cache: map[string]string{}}
-		ctr        = &fakeCounter{}
-		mockSvc    = &mockKinesisClient{}
-		logger     = &noopLogger{
-			logger: log.New(ioutil.Discard, "", log.LstdFlags),
-		}
-	)
-
-	c := &Consumer{
-		streamName: "myStreamName",
-		client:     mockSvc,
-		checkpoint: ckp,
-		counter:    ctr,
-		logger:     logger,
+	var records = []*kinesis.Record{
+		&kinesis.Record{
+			Data:           []byte("firstData"),
+			SequenceNumber: aws.String("firstSeqNum"),
+		},
+		&kinesis.Record{
+			Data:           []byte("lastData"),
+			SequenceNumber: aws.String("lastSeqNum"),
+		},
 	}
 
-	var recordNum = 0
+	var client = &kinesisClientMock{
+		getShardIteratorMock: func(input *kinesis.GetShardIteratorInput) (*kinesis.GetShardIteratorOutput, error) {
+			return &kinesis.GetShardIteratorOutput{
+				ShardIterator: aws.String("49578481031144599192696750682534686652010819674221576194"),
+			}, nil
+		},
+		getRecordsMock: func(input *kinesis.GetRecordsInput) (*kinesis.GetRecordsOutput, error) {
+			return &kinesis.GetRecordsOutput{
+				NextShardIterator: nil,
+				Records:           records,
+			}, nil
+		},
+	}
 
-	// callback fn simply appends the record data to result string
+	var (
+		cp  = &fakeCheckpoint{cache: map[string]string{}}
+		ctr = &fakeCounter{}
+	)
+
+	c, err := New("myStreamName",
+		WithClient(client),
+		WithCounter(ctr),
+		WithCheckpoint(cp),
+	)
+	if err != nil {
+		t.Fatalf("new consumer error: %v", err)
+	}
+
+	var resultData string
+
+	// callback fn appends record data
 	var fn = func(r *Record) ScanStatus {
 		resultData += string(r.Data)
-		recordNum++
-		stopScan := recordNum == 2
-
-		return ScanStatus{
-			StopScan:       stopScan,
-			SkipCheckpoint: false,
-		}
+		return ScanStatus{}
 	}
 
 	// scan shard
-	err := c.ScanShard(context.Background(), "myShard", fn)
-	if err != nil {
+	if err := c.ScanShard(context.Background(), "myShard", fn); err != nil {
 		t.Fatalf("scan shard error: %v", err)
+	}
+
+	// runs callback func
+	if resultData != "firstDatalastData" {
+		t.Fatalf("callback error expected %s, got %s", "firstDatalastData", resultData)
 	}
 
 	// increments counter
@@ -65,43 +82,56 @@ func TestScanShard(t *testing.T) {
 	}
 
 	// sets checkpoint
-	val, err := ckp.Get("myStreamName", "myShard")
+	val, err := cp.Get("myStreamName", "myShard")
 	if err != nil && val != "lastSeqNum" {
 		t.Fatalf("checkout error expected %s, got %s", "lastSeqNum", val)
 	}
+}
 
-	// calls callback func
-	if resultData != "firstDatalastData" {
-		t.Fatalf("callback error expected %s, got %s", "firstDatalastData", val)
+func TestScanShard_ShardIsClosed(t *testing.T) {
+	var client = &kinesisClientMock{
+		getShardIteratorMock: func(input *kinesis.GetShardIteratorInput) (*kinesis.GetShardIteratorOutput, error) {
+			return &kinesis.GetShardIteratorOutput{
+				ShardIterator: aws.String("49578481031144599192696750682534686652010819674221576194"),
+			}, nil
+		},
+		getRecordsMock: func(input *kinesis.GetRecordsInput) (*kinesis.GetRecordsOutput, error) {
+			return &kinesis.GetRecordsOutput{
+				NextShardIterator: nil,
+				Records:           make([]*Record, 0),
+			}, nil
+		},
+	}
+
+	c, err := New("myStreamName", WithClient(client))
+	if err != nil {
+		t.Fatalf("new consumer error: %v", err)
+	}
+
+	var fn = func(r *Record) ScanStatus {
+		return ScanStatus{}
+	}
+
+	if err := c.ScanShard(context.Background(), "myShard", fn); err != nil {
+		t.Fatalf("scan shard error: %v", err)
 	}
 }
 
-type mockKinesisClient struct {
+type kinesisClientMock struct {
 	kinesisiface.KinesisAPI
+	getShardIteratorMock func(*kinesis.GetShardIteratorInput) (*kinesis.GetShardIteratorOutput, error)
+	getRecordsMock       func(*kinesis.GetRecordsInput) (*kinesis.GetRecordsOutput, error)
 }
 
-func (m *mockKinesisClient) GetRecords(input *kinesis.GetRecordsInput) (*kinesis.GetRecordsOutput, error) {
-
-	return &kinesis.GetRecordsOutput{
-		Records: []*kinesis.Record{
-			&kinesis.Record{
-				Data:           []byte("firstData"),
-				SequenceNumber: aws.String("firstSeqNum"),
-			},
-			&kinesis.Record{
-				Data:           []byte("lastData"),
-				SequenceNumber: aws.String("lastSeqNum"),
-			},
-		},
-	}, nil
+func (c *kinesisClientMock) GetRecords(in *kinesis.GetRecordsInput) (*kinesis.GetRecordsOutput, error) {
+	return c.getRecordsMock(in)
 }
 
-func (m *mockKinesisClient) GetShardIterator(input *kinesis.GetShardIteratorInput) (*kinesis.GetShardIteratorOutput, error) {
-	return &kinesis.GetShardIteratorOutput{
-		ShardIterator: aws.String("myshard"),
-	}, nil
+func (c *kinesisClientMock) GetShardIterator(in *kinesis.GetShardIteratorInput) (*kinesis.GetShardIteratorOutput, error) {
+	return c.getShardIteratorMock(in)
 }
 
+// implementation of checkpoint
 type fakeCheckpoint struct {
 	cache map[string]string
 	mu    sync.Mutex
@@ -124,6 +154,7 @@ func (fc *fakeCheckpoint) Get(streamName, shardID string) (string, error) {
 	return fc.cache[key], nil
 }
 
+// implementation of counter
 type fakeCounter struct {
 	counter int64
 }

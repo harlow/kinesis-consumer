@@ -9,8 +9,6 @@ type Logger interface {
 	Log(...interface{})
 }
 
-type LoggerFunc func(...interface{})
-
 // noopLogger implements logger interface with discard
 type noopLogger struct {
 	logger *log.Logger
