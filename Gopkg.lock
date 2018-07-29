@@ -23,6 +23,7 @@
     "aws/credentials/ec2rolecreds",
     "aws/credentials/endpointcreds",
     "aws/credentials/stscreds",
+    "aws/csm",
     "aws/defaults",
     "aws/ec2metadata",
     "aws/endpoints",
@@ -31,6 +32,7 @@
     "aws/signer/v4",
     "internal/sdkio",
     "internal/sdkrand",
+    "internal/sdkuri",
     "internal/shareddefaults",
     "private/protocol",
     "private/protocol/json/jsonutil",
@@ -46,14 +48,14 @@
     "service/kinesis/kinesisiface",
     "service/sts"
   ]
-  revision = "827e7eac8c2680d5bdea7bc3ef29c596eabe1eae"
-  version = "v1.13.59"
+  revision = "8475c414b1bd58b8cc214873a8854e3a621e67d7"
+  version = "v1.15.0"
 
 [[projects]]
   name = "github.com/go-ini/ini"
   packages = ["."]
-  revision = "7e7da451323b6766da368f8a1e8ec9a88a16b4a0"
-  version = "v1.31.1"
+  revision = "358ee7663966325963d4e8b2e1fbd570c5195153"
+  version = "v1.38.1"
 
 [[projects]]
   name = "github.com/jmespath/go-jmespath"
@@ -91,6 +93,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "82ad275b394f4727b9d9ad816f534e512b1b007806a4b785d8a742e5836eee48"
+  inputs-digest = "6b3044ce1b075f919471f2457f32450efaa36518381fd84164641860c296de5a"
   solver-name = "gps-cdcl"
   solver-version = 1
