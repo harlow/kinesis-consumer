@@ -79,7 +79,11 @@ func New(streamName string, opts ...Option) (*Consumer, error) {
 
 	// default client if none provided
 	if c.client == nil {
-		c.client = kinesis.New(session.New(aws.NewConfig()))
+		newSession, err := session.NewSession(aws.NewConfig())
+		if err != nil {
+			return nil, err
+		}
+		c.client = kinesis.New(newSession)
 	}
 
 	return c, nil
@@ -161,7 +165,10 @@ func (c *Consumer) ScanShard(
 
 	c.logger.Log("scanning", shardID, lastSeqNum)
 
-	// scan pages of shard
+	return c.scanPagesOfShard(ctx, shardID, lastSeqNum, shardIterator, fn)
+}
+
+func (c *Consumer) scanPagesOfShard(ctx context.Context, shardID, lastSeqNum string, shardIterator *string, fn func(*Record) ScanStatus) error {
 	for {
 		select {
 		case <-ctx.Done():
@@ -181,33 +188,47 @@ func (c *Consumer) ScanShard(
 
 			// loop records of page
 			for _, r := range resp.Records {
-				status := fn(r)
-
-				if !status.SkipCheckpoint {
-					lastSeqNum = *r.SequenceNumber
-
-					if err := c.checkpoint.Set(c.streamName, shardID, lastSeqNum); err != nil {
-						return err
-					}
-				}
-
-				if err := status.Error; err != nil {
+				isScanStopped, err := c.handleRecord(shardID, r, fn)
+				if err != nil {
 					return err
 				}
-
-				c.counter.Add("records", 1)
-
-				if status.StopScan {
+				if isScanStopped {
 					return nil
 				}
+				lastSeqNum = *r.SequenceNumber
 			}
 
-			if resp.NextShardIterator == nil || shardIterator == resp.NextShardIterator {
+			if isShardClosed(resp.NextShardIterator, shardIterator) {
 				return nil
 			}
 			shardIterator = resp.NextShardIterator
 		}
 	}
+}
+
+func isShardClosed(nextShardIterator, currentShardIterator *string) bool {
+	return nextShardIterator == nil || currentShardIterator == nextShardIterator
+}
+
+func (c *Consumer) handleRecord(shardID string, r *Record, fn func(*Record) ScanStatus) (isScanStopped bool, err error) {
+	status := fn(r)
+
+	if !status.SkipCheckpoint {
+		if err := c.checkpoint.Set(c.streamName, shardID, *r.SequenceNumber); err != nil {
+			return false, err
+		}
+	}
+
+	if err := status.Error; err != nil {
+		return false, err
+	}
+
+	c.counter.Add("records", 1)
+
+	if status.StopScan {
+		return true, nil
+	}
+	return false, nil
 }
 
 func (c *Consumer) getShardIDs(streamName string) ([]string, error) {
@@ -220,7 +241,7 @@ func (c *Consumer) getShardIDs(streamName string) ([]string, error) {
 		return nil, fmt.Errorf("describe stream error: %v", err)
 	}
 
-	ss := []string{}
+	var ss []string
 	for _, shard := range resp.StreamDescription.Shards {
 		ss = append(ss, *shard.ShardId)
 	}
