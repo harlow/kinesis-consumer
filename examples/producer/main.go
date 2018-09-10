@@ -4,24 +4,20 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"time"
 
-	"github.com/apex/log"
-	"github.com/apex/log/handlers/text"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/kinesis"
 )
 
 var svc = kinesis.New(session.New(), &aws.Config{
-	Region: aws.String("us-west-2"),
+	Region: aws.String("us-west-1"),
 })
 
 func main() {
-	log.SetHandler(text.New(os.Stderr))
-	log.SetLevel(log.DebugLevel)
-
 	var streamName = flag.String("stream", "", "Stream name")
 	flag.Parse()
 
@@ -60,7 +56,7 @@ func putRecords(streamName *string, records []*kinesis.PutRecordsRequestEntry) {
 		Records:    records,
 	})
 	if err != nil {
-		log.Fatal("error putting records")
+		log.Fatalf("error putting records: %v", err)
 	}
 	fmt.Print(".")
 }

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"expvar"
 	"flag"
 	"fmt"
@@ -18,6 +17,9 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/kinesis"
 
+	alog "github.com/apex/log"
+	"github.com/apex/log/handlers/text"
+
 	consumer "github.com/harlow/kinesis-consumer"
 	checkpoint "github.com/harlow/kinesis-consumer/checkpoint/ddb"
 )
@@ -26,7 +28,7 @@ import (
 func init() {
 	sock, err := net.Listen("tcp", "localhost:8080")
 	if err != nil {
-		log.Fatalf("net listen error: %v", err)
+		log.Printf("net listen error: %v", err)
 	}
 	go func() {
 		fmt.Println("Metrics available at http://localhost:8080/debug/vars")
@@ -34,7 +36,25 @@ func init() {
 	}()
 }
 
+// A myLogger provides a minimalistic logger satisfying the Logger interface.
+type myLogger struct {
+	logger alog.Logger
+}
+
+// Log logs the parameters to the stdlib logger. See log.Println.
+func (l *myLogger) Log(args ...interface{}) {
+	l.logger.Infof("producer", args...)
+}
+
 func main() {
+	// Wrap myLogger around  apex logger
+	log := &myLogger{
+		logger: alog.Logger{
+			Handler: text.New(os.Stdout),
+			Level:   alog.DebugLevel,
+		},
+	}
+
 	var (
 		app    = flag.String("app", "", "App name")
 		stream = flag.String("stream", "", "Stream name")
@@ -45,36 +65,37 @@ func main() {
 	// Following will overwrite the default dynamodb client
 	// Older versions of aws sdk does not picking up aws config properly.
 	// You probably need to update aws sdk verison. Tested the following with 1.13.59
-	myDynamoDbClient := dynamodb.New(session.New(aws.NewConfig()), &aws.Config{
-		Region: aws.String("us-west-2"),
-	})
+	myDynamoDbClient := dynamodb.New(
+		session.New(aws.NewConfig()), &aws.Config{
+			Region: aws.String("us-west-2"),
+		},
+	)
 
 	// ddb checkpoint
 	ck, err := checkpoint.New(*app, *table, checkpoint.WithDynamoClient(myDynamoDbClient), checkpoint.WithRetryer(&MyRetryer{}))
 	if err != nil {
-		log.Fatalf("checkpoint error: %v", err)
+		log.Log("checkpoint error: %v", err)
 	}
-	var (
-		counter = expvar.NewMap("counters")
-		logger  = log.New(os.Stdout, "", log.LstdFlags)
-	)
+
+	var counter = expvar.NewMap("counters")
 
 	// The following 2 lines will overwrite the default kinesis client
-	myKinesisClient := kinesis.New(session.New(aws.NewConfig()), &aws.Config{
-		Region: aws.String("us-west-2"),
-	})
-	newKclient := consumer.NewKinesisClient(consumer.WithKinesis(myKinesisClient))
+	ksis := kinesis.New(
+		session.New(aws.NewConfig()), &aws.Config{
+			Region: aws.String("us-west-2"),
+		},
+	)
 
 	// consumer
 	c, err := consumer.New(
 		*stream,
 		consumer.WithCheckpoint(ck),
-		consumer.WithLogger(logger),
+		consumer.WithLogger(log),
 		consumer.WithCounter(counter),
-		consumer.WithClient(newKclient),
+		consumer.WithClient(ksis),
 	)
 	if err != nil {
-		log.Fatalf("consumer error: %v", err)
+		log.Log("consumer error: %v", err)
 	}
 
 	// use cancel func to signal shutdown
@@ -90,29 +111,27 @@ func main() {
 	}()
 
 	// scan stream
-	err = c.Scan(ctx, func(r *consumer.Record) consumer.ScanError {
+	err = c.Scan(ctx, func(r *consumer.Record) consumer.ScanStatus {
 		fmt.Println(string(r.Data))
-		err := errors.New("some error happened")
+
 		// continue scanning
-		return consumer.ScanError{
-			Error:          err,
-			StopScan:       true,
-			SkipCheckpoint: false,
-		}
+		return consumer.ScanStatus{}
 	})
 	if err != nil {
-		log.Fatalf("scan error: %v", err)
+		log.Log("scan error: %v", err)
 	}
 
 	if err := ck.Shutdown(); err != nil {
-		log.Fatalf("checkpoint shutdown error: %v", err)
+		log.Log("checkpoint shutdown error: %v", err)
 	}
 }
 
+// MyRetryer used for checkpointing
 type MyRetryer struct {
 	checkpoint.Retryer
 }
 
+// ShouldRetry implements custom logic for when a checkpont should retry
 func (r *MyRetryer) ShouldRetry(err error) bool {
 	if awsErr, ok := err.(awserr.Error); ok {
 		switch awsErr.Code() {

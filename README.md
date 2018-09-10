@@ -37,14 +37,14 @@ func main() {
 		log.Fatalf("consumer error: %v", err)
 	}
 
-	// start
-	err = c.Scan(context.TODO(), func(r *consumer.Record) consumer.ScanError {
+	// start scan
+	err = c.Scan(context.TODO(), func(r *consumer.Record) consumer.ScanStatus {
 		fmt.Println(string(r.Data))
-        // continue scanning
-        return consumer.ScanError{
-            StopScan:       false,  // true to stop scan 
-            SkipCheckpoint: false,  // true to skip checkpoint
-        }
+
+		return consumer.ScanStatus{
+			StopScan:       false,  // true to stop scan
+			SkipCheckpoint: false,  // true to skip checkpoint
+		}
 	})
 	if err != nil {
 		log.Fatalf("scan error: %v", err)
@@ -53,6 +53,24 @@ func main() {
 	// Note: If you need to aggregate based on a specific shard the `ScanShard`
 	// method should be leverged instead.
 }
+```
+
+## Scan status
+
+The scan func returns a `consumer.ScanStatus` the struct allows some basic flow control.
+
+```go
+// continue scanning
+return consumer.ScanStatus{}
+
+// continue scanning, skip saving checkpoint
+return consumer.ScanStatus{SkipCheckpoint: true}
+
+// stop scanning, return nil
+return consumer.ScanStatus{StopScan: true}
+
+// stop scanning, return error
+return consumer.ScanStatus{Error: err}
 ```
 
 ## Checkpoint
@@ -107,8 +125,9 @@ myDynamoDbClient := dynamodb.New(session.New(aws.NewConfig()))
 
 ck, err := checkpoint.New(*app, *table, checkpoint.WithDynamoClient(myDynamoDbClient))
 if err != nil {
-    log.Fatalf("new checkpoint error: %v", err)
+  log.Fatalf("new checkpoint error: %v", err)
 }
+
 // Or we can provide your own Retryer to customize what triggers a retry inside checkpoint
 // See code in examples
 // ck, err := checkpoint.New(*app, *table, checkpoint.WithDynamoClient(myDynamoDbClient), checkpoint.WithRetryer(&MyRetryer{}))
@@ -123,11 +142,39 @@ Sort key: shard_id
 
 <img width="727" alt="screen shot 2017-11-22 at 7 59 36 pm" src="https://user-images.githubusercontent.com/739782/33158557-b90e4228-cfbf-11e7-9a99-73b56a446f5f.png">
 
+### Postgres Checkpoint
+
+The Postgres checkpoint requires Table Name, App Name, Stream Name and ConnectionString:
+
+```go
+import checkpoint "github.com/harlow/kinesis-consumer/checkpoint/postgres"
+
+// postgres checkpoint
+ck, err := checkpoint.New(app, table, connStr)
+if err != nil {
+  log.Fatalf("new checkpoint error: %v", err)
+}
+
+```
+
+To leverage the Postgres checkpoint we'll also need to create a table:
+
+```sql
+CREATE TABLE kinesis_consumer (
+	namespace text NOT NULL,
+	shard_id text NOT NULL,
+	sequence_number numeric NOT NULL,
+	CONSTRAINT kinesis_consumer_pk PRIMARY KEY (namespace, shard_id)
+);
+```
+
+The table name has to be the same that you specify when creating the checkpoint. The primary key composed by namespace and shard_id is mandatory in order to the checkpoint run without issues and also to ensure data integrity.
+
 ## Options
 
 The consumer allows the following optional overrides.
 
-### Client
+### Kinesis Client
 
 Override the Kinesis client if there is any special config needed:
 
@@ -162,14 +209,53 @@ The [expvar package](https://golang.org/pkg/expvar/) will display consumer count
 
 ### Logging
 
+Logging supports the basic built-in logging library or use thrid party external one, so long as
+it implements the Logger interface.
+
+For example, to use the builtin logging package, we wrap it with myLogger structure.
+
+```
+// A myLogger provides a minimalistic logger satisfying the Logger interface.
+type myLogger struct {
+	logger *log.Logger
+}
+
+// Log logs the parameters to the stdlib logger. See log.Println.
+func (l *myLogger) Log(args ...interface{}) {
+	l.logger.Println(args...)
+}
+```
+
 The package defaults to `ioutil.Discard` so swallow all logs. This can be customized with the preferred logging strategy:
 
 ```go
 // logger
-logger := log.New(os.Stdout, "consumer-example: ", log.LstdFlags)
+log := &myLogger{
+	logger: log.New(os.Stdout, "consumer-example: ", log.LstdFlags)
+}
 
 // consumer
 c, err := consumer.New(streamName, consumer.WithLogger(logger))
+```
+
+To use a more complicated logging library, e.g. apex log
+
+```
+type myLogger struct {
+	logger *log.Logger
+}
+
+func (l *myLogger) Log(args ...interface{}) {
+	l.logger.Infof("producer", args...)
+}
+
+func main() {
+	log := &myLogger{
+		logger: alog.Logger{
+			Handler: text.New(os.Stderr),
+			Level:   alog.DebugLevel,
+		},
+	}
 ```
 
 ## Contributing
