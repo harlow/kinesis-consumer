@@ -85,6 +85,12 @@ func TestNewCheckpointWithOptions(t *testing.T) {
 	if err != nil {
 		t.Errorf("new checkpoint error expected nil. got %v", err)
 	}
+	if ckPtr.appName != "testapp" {
+		t.Errorf("new checkpoint app name expected %v. got %v", "testapp", ckPtr.appName)
+	}
+	if ckPtr.tableName != "testtable" {
+		t.Errorf("new checkpoint table expected %v. got %v", "testtable", ckPtr.maxInterval)
+	}
 
 	if ckPtr.maxInterval != time.Duration(2*time.Minute) {
 		t.Errorf("new checkpoint maxInterval expected 2 minute. got %v", ckPtr.maxInterval)
