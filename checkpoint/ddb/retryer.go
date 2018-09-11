@@ -15,9 +15,11 @@ type DefaultRetryer struct {
 }
 
 func (r *DefaultRetryer) ShouldRetry(err error) bool {
-	if awsErr, ok := err.(awserr.Error); ok {
-		if awsErr.Code() == dynamodb.ErrCodeProvisionedThroughputExceededException {
-			return true
+	if r != nil {
+		if awsErr, ok := err.(awserr.Error); ok {
+			if awsErr.Code() == dynamodb.ErrCodeProvisionedThroughputExceededException {
+				return true
+			}
 		}
 	}
 	return false
