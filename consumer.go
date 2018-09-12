@@ -105,7 +105,7 @@ func (c *Consumer) Scan(ctx context.Context, fn func(*Record) ScanStatus) error 
 	defer cancel()
 
 	// get shard ids
-	shardIDs, err := c.getShardIDs(c.streamName)
+	shardIDs, err := c.getShardIDs(ctx, c.streamName)
 	if err != nil {
 		return fmt.Errorf("get shards error: %v", err)
 	}
@@ -158,7 +158,7 @@ func (c *Consumer) ScanShard(
 	}
 
 	// get shard iterator
-	shardIterator, err := c.getShardIterator(c.streamName, shardID, lastSeqNum)
+	shardIterator, err := c.getShardIterator(ctx, c.streamName, shardID, lastSeqNum)
 	if err != nil {
 		return fmt.Errorf("get shard iterator error: %v", err)
 	}
@@ -174,12 +174,12 @@ func (c *Consumer) scanPagesOfShard(ctx context.Context, shardID, lastSeqNum str
 		case <-ctx.Done():
 			return nil
 		default:
-			resp, err := c.client.GetRecords(&kinesis.GetRecordsInput{
+			resp, err := c.client.GetRecordsWithContext(ctx, &kinesis.GetRecordsInput{
 				ShardIterator: shardIterator,
 			})
 
 			if err != nil {
-				shardIterator, err = c.getShardIterator(c.streamName, shardID, lastSeqNum)
+				shardIterator, err = c.getShardIterator(ctx, c.streamName, shardID, lastSeqNum)
 				if err != nil {
 					return fmt.Errorf("get shard iterator error: %v", err)
 				}
@@ -231,8 +231,8 @@ func (c *Consumer) handleRecord(shardID string, r *Record, fn func(*Record) Scan
 	return false, nil
 }
 
-func (c *Consumer) getShardIDs(streamName string) ([]string, error) {
-	resp, err := c.client.DescribeStream(
+func (c *Consumer) getShardIDs(ctx context.Context, streamName string) ([]string, error) {
+	resp, err := c.client.DescribeStreamWithContext(ctx,
 		&kinesis.DescribeStreamInput{
 			StreamName: aws.String(streamName),
 		},
@@ -248,7 +248,7 @@ func (c *Consumer) getShardIDs(streamName string) ([]string, error) {
 	return ss, nil
 }
 
-func (c *Consumer) getShardIterator(streamName, shardID, lastSeqNum string) (*string, error) {
+func (c *Consumer) getShardIterator(ctx context.Context, streamName, shardID, lastSeqNum string) (*string, error) {
 	params := &kinesis.GetShardIteratorInput{
 		ShardId:    aws.String(shardID),
 		StreamName: aws.String(streamName),
@@ -261,7 +261,7 @@ func (c *Consumer) getShardIterator(streamName, shardID, lastSeqNum string) (*st
 		params.ShardIteratorType = aws.String("TRIM_HORIZON")
 	}
 
-	resp, err := c.client.GetShardIterator(params)
+	resp, err := c.client.GetShardIteratorWithContext(ctx, params)
 	if err != nil {
 		return nil, err
 	}

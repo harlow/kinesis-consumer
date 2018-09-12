@@ -1,6 +1,7 @@
 package ddb
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"sync"
@@ -88,6 +89,11 @@ type item struct {
 // Typically used to determine whether we should start processing the shard with
 // TRIM_HORIZON or AFTER_SEQUENCE_NUMBER (if checkpoint exists).
 func (c *Checkpoint) Get(streamName, shardID string) (string, error) {
+	return c.GetWithContext(context.Background(), streamName, shardID)
+}
+
+// GetWithContext is just Get taking in context also.
+func (c *Checkpoint) GetWithContext(ctx context.Context, streamName, shardID string) (string, error) {
 	namespace := fmt.Sprintf("%s-%s", c.appName, streamName)
 
 	params := &dynamodb.GetItemInput{
@@ -103,7 +109,7 @@ func (c *Checkpoint) Get(streamName, shardID string) (string, error) {
 		},
 	}
 
-	resp, err := c.client.GetItem(params)
+	resp, err := c.client.GetItemWithContext(ctx, params)
 	if err != nil {
 		if c.retryer.ShouldRetry(err) {
 			return c.Get(streamName, shardID)
@@ -119,6 +125,11 @@ func (c *Checkpoint) Get(streamName, shardID string) (string, error) {
 // Set stores a checkpoint for a shard (e.g. sequence number of last record processed by application).
 // Upon failover, record processing is resumed from this point.
 func (c *Checkpoint) Set(streamName, shardID, sequenceNumber string) error {
+	return c.SetWithContext(context.Background(), streamName, shardID, sequenceNumber)
+}
+
+// SetWithContext is just Set with context.
+func (c *Checkpoint) SetWithContext(ctx context.Context, streamName, shardID, sequenceNumber string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
