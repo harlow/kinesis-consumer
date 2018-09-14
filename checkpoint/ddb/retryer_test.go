@@ -8,7 +8,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 )
 
-func TestRetyer(t *testing.T) {
+func TestDefaultRetyer(t *testing.T) {
 	var r DefaultRetryer
 	retryableError := awserr.New(dynamodb.ErrCodeProvisionedThroughputExceededException, "error is retryable", errors.New("don't care what is here"))
 
@@ -20,6 +20,7 @@ func TestRetyer(t *testing.T) {
 		t.Errorf("expected ShouldRetry returns %v. got %v", false, shouldRetry)
 	}
 
+	// retryer is not nil and should returns according to what error is passed in.
 	q := &DefaultRetryer{}
 	if q.ShouldRetry(retryableError) != true {
 		t.Errorf("expected ShouldRetry returns %v. got %v", false, q.ShouldRetry(retryableError))
