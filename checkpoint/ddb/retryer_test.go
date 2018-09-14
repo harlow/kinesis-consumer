@@ -15,13 +15,14 @@ func TestRetyer(t *testing.T) {
 	p := &r
 	p = nil
 	shouldRetry := p.ShouldRetry(retryableError)
+	// retryer is nil so returns false
 	if shouldRetry != false {
 		t.Errorf("expected ShouldRetry returns %v. got %v", false, shouldRetry)
 	}
 
 	q := &DefaultRetryer{}
 	if q.ShouldRetry(retryableError) != true {
-		t.Errorf("expected ShouldRetry returns %v. got %v", true, q.ShouldRetry(retryableError))
+		t.Errorf("expected ShouldRetry returns %v. got %v", false, q.ShouldRetry(retryableError))
 	}
 
 	nonRetryableError := awserr.New(dynamodb.ErrCodeBackupInUseException, "error is not retryable", errors.New("don't care what is here"))

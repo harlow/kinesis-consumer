@@ -50,7 +50,6 @@ func TestCheckpointSetting(t *testing.T) {
 	setDDBClient := WithDynamoClient(fakeDbClient)
 	setDDBClient(ckPtr)
 
-	// Validation
 	if ckPtr.maxInterval != time.Duration(2*time.Minute) {
 		t.Errorf("new checkpoint maxInterval expected 2 minute. got %v", ckPtr.maxInterval)
 	}
