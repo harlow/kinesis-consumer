@@ -58,6 +58,17 @@
   version = "v1.38.1"
 
 [[projects]]
+  name = "github.com/harlow/kinesis-consumer"
+  packages = [
+    ".",
+    "checkpoint/ddb",
+    "checkpoint/postgres",
+    "checkpoint/redis"
+  ]
+  revision = "049445e259a2ab9146364bf60d6f5f71270a125b"
+  version = "v0.2.0"
+
+[[projects]]
   name = "github.com/jmespath/go-jmespath"
   packages = ["."]
   revision = "0b12d6b5"
@@ -78,6 +89,12 @@
   version = "v0.8.0"
 
 [[projects]]
+  name = "gopkg.in/DATA-DOG/go-sqlmock.v1"
+  packages = ["."]
+  revision = "d76b18b42f285b792bf985118980ce9eacea9d10"
+  version = "v1.3.0"
+
+[[projects]]
   name = "gopkg.in/redis.v5"
   packages = [
     ".",
@@ -93,6 +110,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "6b3044ce1b075f919471f2457f32450efaa36518381fd84164641860c296de5a"
+  inputs-digest = "2588ee54549a76e93e2e65a289fccd8b636f85b124c5ccb0ab3d5f3529a3cbaa"
   solver-name = "gps-cdcl"
   solver-version = 1
