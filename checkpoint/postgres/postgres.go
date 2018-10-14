@@ -10,17 +10,6 @@ import (
 	_ "github.com/lib/pq"
 )
 
-var getCheckpointQuery = `SELECT sequence_number 
-						  FROM %s
-						  WHERE namespace=$1 AND shard_id=$2`
-
-var upsertCheckpoint = `INSERT INTO %s (namespace, shard_id, sequence_number)
-						VALUES($1, $2, $3)
-						ON CONFLICT (namespace, shard_id)
-						DO 
-						UPDATE 
-						SET sequence_number= $3`
-
 type key struct {
 	streamName string
 	shardID    string
@@ -36,9 +25,10 @@ func WithMaxInterval(maxInterval time.Duration) Option {
 	}
 }
 
-// Checkpoint stores and retreives the last evaluated key from a DDB scan
+// Checkpoint stores and retrieves the last evaluated key from a DDB scan
 type Checkpoint struct {
 	appName     string
+	tableName   string
 	conn        *sql.DB
 	mu          *sync.Mutex // protects the checkpoints
 	done        chan struct{}
@@ -49,9 +39,12 @@ type Checkpoint struct {
 // New returns a checkpoint that uses PostgresDB for underlying storage
 // Using connectionStr turn it more flexible to use specific db configs
 func New(appName, tableName, connectionStr string, opts ...Option) (*Checkpoint, error) {
+	if appName == "" {
+		return nil, errors.New("application name not defined")
+	}
 
 	if tableName == "" {
-		return nil, errors.New("Table name not defined")
+		return nil, errors.New("table name not defined")
 	}
 
 	conn, err := sql.Open("postgres", connectionStr)
@@ -60,14 +53,12 @@ func New(appName, tableName, connectionStr string, opts ...Option) (*Checkpoint,
 		return nil, err
 	}
 
-	getCheckpointQuery = fmt.Sprintf(getCheckpointQuery, tableName)
-	upsertCheckpoint = fmt.Sprintf(upsertCheckpoint, tableName)
-
 	ck := &Checkpoint{
 		conn:        conn,
 		appName:     appName,
+		tableName:   tableName,
 		done:        make(chan struct{}),
-		maxInterval: time.Duration(1 * time.Minute),
+		maxInterval: 1 * time.Minute,
 		mu:          new(sync.Mutex),
 		checkpoints: map[key]string{},
 	}
@@ -81,6 +72,11 @@ func New(appName, tableName, connectionStr string, opts ...Option) (*Checkpoint,
 	return ck, nil
 }
 
+// GetMaxInterval returns the maximum interval before the checkpoint
+func (c *Checkpoint) GetMaxInterval() time.Duration {
+	return c.maxInterval
+}
+
 // Get determines if a checkpoint for a particular Shard exists.
 // Typically used to determine whether we should start processing the shard with
 // TRIM_HORIZON or AFTER_SEQUENCE_NUMBER (if checkpoint exists).
@@ -88,14 +84,13 @@ func (c *Checkpoint) Get(streamName, shardID string) (string, error) {
 	namespace := fmt.Sprintf("%s-%s", c.appName, streamName)
 
 	var sequenceNumber string
-
+	getCheckpointQuery := fmt.Sprintf(`SELECT sequence_number FROM %s WHERE namespace=$1 AND shard_id=$2;`, c.tableName) //nolint: gas, it replaces only the table name
 	err := c.conn.QueryRow(getCheckpointQuery, namespace, shardID).Scan(&sequenceNumber)
 
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return "", nil
 		}
-
 		return "", err
 	}
 
@@ -150,8 +145,15 @@ func (c *Checkpoint) save() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	for key, sequenceNumber := range c.checkpoints {
+	//nolint: gas, it replaces only the table name
+	upsertCheckpoint := fmt.Sprintf(`INSERT INTO %s (namespace, shard_id, sequence_number)
+					    VALUES($1, $2, $3)
+						ON CONFLICT (namespace, shard_id)
+						DO 
+						UPDATE 
+						SET sequence_number= $3;`, c.tableName)
 
+	for key, sequenceNumber := range c.checkpoints {
 		if _, err := c.conn.Exec(upsertCheckpoint, fmt.Sprintf("%s-%s", c.appName, key.streamName), key.shardID, sequenceNumber); err != nil {
 			return err
 		}
