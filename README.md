@@ -258,6 +258,9 @@ func main() {
 	}
 ```
 
+### Opentracing
+To enable integraton with Opentracing. Checkpoint, Consumer are now required to pass in context as first parameter. Context object wraps tracing context within and is required to pass down to other layer. Another change, that should be invisible from user is that, all AWS SDK GO call are now using the version WithContext, e.g. if codebase is using GetID(...), now they are replaced with GetIDWithContext(ctx,...). This is done so we can link the span created for AWS call to spans created upstream within application code.
+
 ## Contributing
 
 Please see [CONTRIBUTING.md] for more information. Thank you, [contributors]!

@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -80,7 +81,7 @@ func (c *Checkpoint) GetMaxInterval() time.Duration {
 // Get determines if a checkpoint for a particular Shard exists.
 // Typically used to determine whether we should start processing the shard with
 // TRIM_HORIZON or AFTER_SEQUENCE_NUMBER (if checkpoint exists).
-func (c *Checkpoint) Get(streamName, shardID string) (string, error) {
+func (c *Checkpoint) Get(ctx context.Context, streamName, shardID string) (string, error) {
 	namespace := fmt.Sprintf("%s-%s", c.appName, streamName)
 
 	var sequenceNumber string
@@ -99,7 +100,7 @@ func (c *Checkpoint) Get(streamName, shardID string) (string, error) {
 
 // Set stores a checkpoint for a shard (e.g. sequence number of last record processed by application).
 // Upon failover, record processing is resumed from this point.
-func (c *Checkpoint) Set(streamName, shardID, sequenceNumber string) error {
+func (c *Checkpoint) Set(ctx context.Context, streamName, shardID, sequenceNumber string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 

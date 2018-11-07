@@ -47,16 +47,16 @@ func main() {
 	span := tracer.StartSpan("consumer.main")
 	defer span.Finish()
 
-	var (
-		app    = flag.String("app", "", "App name")
-		stream = flag.String("stream", "", "Stream name")
-		table  = flag.String("table", "", "Checkpoint table name")
-	)
+	app := flag.String("app", "", "App name")
+	stream := flag.String("stream", "", "Stream name")
+	table := flag.String("table", "", "Checkpoint table name")
 	flag.Parse()
 
 	span.SetTag("app.name", app)
 	span.SetTag("stream.name", stream)
 	span.SetTag("table.name", table)
+
+	fmt.Println("set tag....")
 
 	// Following will overwrite the default dynamodb client
 	// Older versions of aws sdk does not picking up aws config properly.
@@ -67,8 +67,9 @@ func main() {
 	myDynamoDbClient := dynamodb.New(sess)
 
 	// ddb checkpoint
+	ctx := opentracing.ContextWithSpan(context.Background(), span)
 	retryer := utility.NewRetryer()
-	ck, err := checkpoint.New(*app, *table, checkpoint.WithDynamoClient(myDynamoDbClient), checkpoint.WithRetryer(retryer))
+	ck, err := checkpoint.New(ctx, *app, *table, checkpoint.WithDynamoClient(myDynamoDbClient), checkpoint.WithRetryer(retryer))
 	if err != nil {
 		span.LogKV("checkpoint error", err.Error())
 		span.SetTag("consumer.retry.count", retryer.Count())
@@ -97,7 +98,8 @@ func main() {
 	}
 
 	// use cancel func to signal shutdown
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx = opentracing.ContextWithSpan(ctx, span)
+	ctx, cancel := context.WithCancel(ctx)
 
 	// trap SIGINT, wait to trigger shutdown
 	signals := make(chan os.Signal, 1)
@@ -105,23 +107,25 @@ func main() {
 
 	go func() {
 		<-signals
+		span.Finish()
+		closer.Close()
 		cancel()
 	}()
 
 	// scan stream
 	err = c.Scan(ctx, func(r *consumer.Record) consumer.ScanStatus {
 		fmt.Println(string(r.Data))
-
 		// continue scanning
 		return consumer.ScanStatus{}
 	})
 	if err != nil {
-		span.LogKV("consumer scan error", err.Error())
-		ext.Error.Set(span, true)
+
+		//span.LogKV("consumer scan error", err.Error())
+		//ext.Error.Set(span, true)
 		log.Log("consumer scan error", "error", err.Error())
 	}
 
-	if err := ck.Shutdown(); err != nil {
+	if err := ck.Shutdown(ctx); err != nil {
 		span.LogKV("consumer shutdown error", err.Error())
 		ext.Error.Set(span, true)
 		log.Log("checkpoint shutdown error", "error", err.Error())

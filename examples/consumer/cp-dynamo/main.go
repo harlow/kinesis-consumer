@@ -16,13 +16,18 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/kinesis"
+	"github.com/opentracing/opentracing-go"
 
 	alog "github.com/apex/log"
 	"github.com/apex/log/handlers/text"
 
 	consumer "github.com/harlow/kinesis-consumer"
 	checkpoint "github.com/harlow/kinesis-consumer/checkpoint/ddb"
+
+	"github.com/harlow/kinesis-consumer/examples/distributed-tracing/utility"
 )
+
+const serviceName = "checkpoint.dynamodb"
 
 // kick off a server for exposing scan metrics
 func init() {
@@ -62,6 +67,12 @@ func main() {
 	)
 	flag.Parse()
 
+	tracer, closer := utility.NewTracer(serviceName)
+	defer closer.Close()
+	opentracing.InitGlobalTracer(tracer)
+	span := tracer.StartSpan("consumer.main")
+	ctx := opentracing.ContextWithSpan(context.Background(), span)
+
 	// Following will overwrite the default dynamodb client
 	// Older versions of aws sdk does not picking up aws config properly.
 	// You probably need to update aws sdk verison. Tested the following with 1.13.59
@@ -72,7 +83,7 @@ func main() {
 	)
 
 	// ddb checkpoint
-	ck, err := checkpoint.New(*app, *table, checkpoint.WithDynamoClient(myDynamoDbClient), checkpoint.WithRetryer(&MyRetryer{}))
+	ck, err := checkpoint.New(ctx, *app, *table, checkpoint.WithDynamoClient(myDynamoDbClient), checkpoint.WithRetryer(&MyRetryer{}))
 	if err != nil {
 		log.Log("checkpoint error: %v", err)
 	}
@@ -121,7 +132,7 @@ func main() {
 		log.Log("scan error: %v", err)
 	}
 
-	if err := ck.Shutdown(); err != nil {
+	if err := ck.Shutdown(ctx); err != nil {
 		log.Log("checkpoint shutdown error: %v", err)
 	}
 }

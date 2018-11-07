@@ -56,7 +56,7 @@ func main() {
 		// Need to end span here, since Fatalf calls os.Exit
 		span.Finish()
 		closer.Close()
-		log.Fatal(fmt.Sprintf("Cannot open %s file"), dataFile)
+		log.Fatal(fmt.Sprintf("Cannot open %s file", dataFile))
 	}
 	defer f.Close()
 	span.SetTag("producer.file.name", f.Name())
@@ -88,11 +88,11 @@ func main() {
 
 func putRecords(ctx context.Context, streamName *string, records []*kinesis.PutRecordsRequestEntry) {
 	// I am assuming each new AWS call is a new Span
-	span, _ := opentracing.StartSpanFromContext(ctx, "producer.putRecords")
+	span, ctx := opentracing.StartSpanFromContext(ctx, "producer.putRecords")
 	defer span.Finish()
 	span.SetTag("producer.records.count", len(records))
 	ctx = opentracing.ContextWithSpan(ctx, span)
-	_, err := svc.PutRecordsWithContext(&kinesis.PutRecordsInput{
+	_, err := svc.PutRecordsWithContext(ctx, &kinesis.PutRecordsInput{
 		StreamName: streamName,
 		Records:    records,
 	})

@@ -1,6 +1,7 @@
 package ddb
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"sync"
@@ -11,6 +12,8 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbiface"
+	"github.com/opentracing/opentracing-go"
+	"github.com/opentracing/opentracing-go/ext"
 )
 
 // Option is used to override defaults when creating a new Checkpoint
@@ -38,7 +41,7 @@ func WithRetryer(r Retryer) Option {
 }
 
 // New returns a checkpoint that uses DynamoDB for underlying storage
-func New(appName, tableName string, opts ...Option) (*Checkpoint, error) {
+func New(ctx context.Context, appName, tableName string, opts ...Option) (*Checkpoint, error) {
 	client := dynamodb.New(session.New(aws.NewConfig()))
 
 	ck := &Checkpoint{
@@ -56,7 +59,7 @@ func New(appName, tableName string, opts ...Option) (*Checkpoint, error) {
 		opt(ck)
 	}
 
-	go ck.loop()
+	go ck.loop(ctx)
 
 	return ck, nil
 }
@@ -87,9 +90,13 @@ type item struct {
 // Get determines if a checkpoint for a particular Shard exists.
 // Typically used to determine whether we should start processing the shard with
 // TRIM_HORIZON or AFTER_SEQUENCE_NUMBER (if checkpoint exists).
-func (c *Checkpoint) Get(streamName, shardID string) (string, error) {
+func (c *Checkpoint) Get(ctx context.Context, streamName, shardID string) (string, error) {
 	namespace := fmt.Sprintf("%s-%s", c.appName, streamName)
-
+	span, ctx := opentracing.StartSpanFromContext(ctx, "checkpoint.ddb.Get",
+		opentracing.Tag{Key: "namespace", Value: namespace},
+		opentracing.Tag{Key: "shardID", Value: shardID},
+	)
+	defer span.Finish()
 	params := &dynamodb.GetItemInput{
 		TableName:      aws.String(c.tableName),
 		ConsistentRead: aws.Bool(true),
@@ -103,11 +110,13 @@ func (c *Checkpoint) Get(streamName, shardID string) (string, error) {
 		},
 	}
 
-	resp, err := c.client.GetItem(params)
+	resp, err := c.client.GetItemWithContext(ctx, params)
 	if err != nil {
 		if c.retryer.ShouldRetry(err) {
-			return c.Get(streamName, shardID)
+			return c.Get(ctx, streamName, shardID)
 		}
+		span.LogKV("checkpoint get item error", err.Error())
+		ext.Error.Set(span, true)
 		return "", err
 	}
 
@@ -118,10 +127,14 @@ func (c *Checkpoint) Get(streamName, shardID string) (string, error) {
 
 // Set stores a checkpoint for a shard (e.g. sequence number of last record processed by application).
 // Upon failover, record processing is resumed from this point.
-func (c *Checkpoint) Set(streamName, shardID, sequenceNumber string) error {
+func (c *Checkpoint) Set(ctx context.Context, streamName, shardID, sequenceNumber string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
+	span, ctx := opentracing.StartSpanFromContext(ctx, "checkpoint.ddb.Set",
+		opentracing.Tag{Key: "stream.name", Value: streamName},
+		opentracing.Tag{Key: "shardID", Value: shardID},
+	)
+	defer span.Finish()
 	if sequenceNumber == "" {
 		return fmt.Errorf("sequence number should not be empty")
 	}
@@ -136,12 +149,12 @@ func (c *Checkpoint) Set(streamName, shardID, sequenceNumber string) error {
 }
 
 // Shutdown the checkpoint. Save any in-flight data.
-func (c *Checkpoint) Shutdown() error {
+func (c *Checkpoint) Shutdown(ctx context.Context) error {
 	c.done <- struct{}{}
-	return c.save()
+	return c.save(ctx)
 }
 
-func (c *Checkpoint) loop() {
+func (c *Checkpoint) loop(ctx context.Context) {
 	tick := time.NewTicker(c.maxInterval)
 	defer tick.Stop()
 	defer close(c.done)
@@ -149,16 +162,18 @@ func (c *Checkpoint) loop() {
 	for {
 		select {
 		case <-tick.C:
-			c.save()
+			c.save(ctx)
 		case <-c.done:
 			return
 		}
 	}
 }
 
-func (c *Checkpoint) save() error {
+func (c *Checkpoint) save(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	span, ctx := opentracing.StartSpanFromContext(ctx, "checkpoint.ddb.save")
+	defer span.Finish()
 
 	for key, sequenceNumber := range c.checkpoints {
 		item, err := dynamodbattribute.MarshalMap(item{
@@ -168,10 +183,12 @@ func (c *Checkpoint) save() error {
 		})
 		if err != nil {
 			log.Printf("marshal map error: %v", err)
+			span.LogKV("marshal map error", err.Error())
+			ext.Error.Set(span, true)
 			return nil
 		}
 
-		_, err = c.client.PutItem(&dynamodb.PutItemInput{
+		_, err = c.client.PutItemWithContext(ctx, &dynamodb.PutItemInput{
 			TableName: aws.String(c.tableName),
 			Item:      item,
 		})
@@ -179,7 +196,9 @@ func (c *Checkpoint) save() error {
 			if !c.retryer.ShouldRetry(err) {
 				return err
 			}
-			return c.save()
+			span.LogKV("checkpoint put item error", err.Error())
+			ext.Error.Set(span, true)
+			return c.save(ctx)
 		}
 	}
 
