@@ -91,7 +91,8 @@ func putRecords(ctx context.Context, streamName *string, records []*kinesis.PutR
 	span, _ := opentracing.StartSpanFromContext(ctx, "producer.putRecords")
 	defer span.Finish()
 	span.SetTag("producer.records.count", len(records))
-	_, err := svc.PutRecords(&kinesis.PutRecordsInput{
+	ctx = opentracing.ContextWithSpan(ctx, span)
+	_, err := svc.PutRecordsWithContext(&kinesis.PutRecordsInput{
 		StreamName: streamName,
 		Records:    records,
 	})

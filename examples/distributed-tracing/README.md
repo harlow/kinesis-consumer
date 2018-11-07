@@ -1,6 +1,6 @@
 # Examples with opentracing
 
-The examples are roughly the same as thoe without tracing, but to demonstrate what the code will look liek with distributed tracing integrated. The tracing api spec that we are using is Opentracing, due to a wider and more stable support at the moment.
+The examples are roughly the same as those without tracing, but to demonstrate what the code will look like with distributed tracing integrated. The tracing api spec that we are using is Opentracing, due to a wider and more stable support at the moment.
 
 Please refer to README under examples/consumer and examples/producer. 
 
@@ -34,7 +34,7 @@ export JAEGER_AGENT_PORT=6831
 
 ### Setup Backend
 
-Opencensus supports both tracing and stat backend. For demo purposes, we are going to use Jaeger as the tracing backend and Prometheus for stats.
+For demo purposes, we are going to use Jaeger as the tracing backend.
 
 ### Tracing Backend
 Please refer to docs in reference section for Jaeger.
