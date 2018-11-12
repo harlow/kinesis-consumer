@@ -119,9 +119,8 @@ func main() {
 		return consumer.ScanStatus{}
 	})
 	if err != nil {
-
-		//span.LogKV("consumer scan error", err.Error())
-		//ext.Error.Set(span, true)
+		span.LogKV("consumer scan error", err.Error())
+		ext.Error.Set(span, true)
 		log.Log("consumer scan error", "error", err.Error())
 	}
 
