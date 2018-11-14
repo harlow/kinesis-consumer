@@ -39,6 +39,7 @@ func init() {
 }
 
 func main() {
+	ctx := context.Background()
 	log := utility.NewLogger(serviceName, alog.DebugLevel)
 	tracer, closer := utility.NewTracer(serviceName)
 	defer closer.Close()
@@ -52,9 +53,9 @@ func main() {
 	table := flag.String("table", "", "Checkpoint table name")
 	flag.Parse()
 
-	span.SetTag("app.name", app)
-	span.SetTag("stream.name", stream)
-	span.SetTag("table.name", table)
+	span.SetBaggageItem("app.name", *app)
+	span.SetBaggageItem("stream.name", *stream)
+	span.SetBaggageItem("table.name", *table)
 
 	fmt.Println("set tag....")
 
@@ -67,7 +68,7 @@ func main() {
 	myDynamoDbClient := dynamodb.New(sess)
 
 	// ddb checkpoint
-	ctx := opentracing.ContextWithSpan(context.Background(), span)
+	ctx = opentracing.ContextWithSpan(ctx, span)
 	retryer := utility.NewRetryer()
 	ck, err := checkpoint.New(ctx, *app, *table, checkpoint.WithDynamoClient(myDynamoDbClient), checkpoint.WithRetryer(retryer))
 	if err != nil {
@@ -113,7 +114,9 @@ func main() {
 	}()
 
 	// scan stream
-	err = c.Scan(ctx, func(r *consumer.Record) consumer.ScanStatus {
+	err = c.Scan(ctx, func(ctx context.Context, r *consumer.Record) consumer.ScanStatus {
+		span, _ := opentracing.StartSpanFromContext(ctx, "consumer.processRecord")
+		defer span.Finish()
 		fmt.Println(string(r.Data))
 		// continue scanning
 		return consumer.ScanStatus{}

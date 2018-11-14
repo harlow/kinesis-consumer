@@ -43,8 +43,7 @@ func main() {
 
 	var streamName = flag.String("stream", "", "Stream name")
 	flag.Parse()
-
-	span.SetTag("producer.stream.name", streamName)
+	span.SetBaggageItem("producer.stream.name", *streamName)
 
 	// download file with test data
 	// curl https://s3.amazonaws.com/kinesis.test/users.txt -o /tmp/users.txt

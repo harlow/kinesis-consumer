@@ -93,6 +93,8 @@ type item struct {
 func (c *Checkpoint) Get(ctx context.Context, streamName, shardID string) (string, error) {
 	namespace := fmt.Sprintf("%s-%s", c.appName, streamName)
 	span, ctx := opentracing.StartSpanFromContext(ctx, "checkpoint.ddb.Get",
+		opentracing.Tag{Key: "appName", Value: c.appName},
+		opentracing.Tag{Key: "tableName", Value: c.tableName},
 		opentracing.Tag{Key: "namespace", Value: namespace},
 		opentracing.Tag{Key: "shardID", Value: shardID},
 	)
@@ -131,6 +133,8 @@ func (c *Checkpoint) Set(ctx context.Context, streamName, shardID, sequenceNumbe
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	span, ctx := opentracing.StartSpanFromContext(ctx, "checkpoint.ddb.Set",
+		opentracing.Tag{Key: "appName", Value: c.appName},
+		opentracing.Tag{Key: "tableName", Value: c.tableName},
 		opentracing.Tag{Key: "stream.name", Value: streamName},
 		opentracing.Tag{Key: "shardID", Value: shardID},
 	)
@@ -174,6 +178,8 @@ func (c *Checkpoint) save(ctx context.Context) error {
 	defer c.mu.Unlock()
 	span, ctx := opentracing.StartSpanFromContext(ctx, "checkpoint.ddb.save")
 	defer span.Finish()
+	span = span.SetTag("appName", c.appName)
+	span = span.SetTag("tableName", c.tableName)
 
 	for key, sequenceNumber := range c.checkpoints {
 		item, err := dynamodbattribute.MarshalMap(item{
