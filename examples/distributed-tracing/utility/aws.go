@@ -64,7 +64,6 @@ func (h *handlers) Complete(req *request.Request) {
 	defer FailIfError(span, req.Error)
 	span = span.SetTag("aws.requestID", req.RequestID)
 	span = span.SetTag("aws.request.retryCount", req.RetryCount)
-	span = span.SetTag("aws.requestID", req.RequestID)
 	if req.HTTPResponse != nil {
 		ext.HTTPStatusCode.Set(span, uint16(req.HTTPResponse.StatusCode))
 		span = span.SetTag("aws.response.contentLength", req.HTTPResponse.ContentLength)
