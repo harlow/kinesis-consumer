@@ -1,12 +1,16 @@
 package utility
 
 import (
+	"strings"
+
 	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/aws/session"
-
 	"github.com/opentracing/opentracing-go"
 	"github.com/opentracing/opentracing-go/ext"
 )
+
+// From github.com/aws/aws-xray-sdk-go/xray/aws.go
+const S3ExtendedRequestIDHeaderKey string = "x-amz-id-2"
 
 // When you initiate any resource client and pass in a AWS session, it does a few things:
 // * session carries the configuration to make and sign the request header
@@ -47,7 +51,6 @@ func (h *handlers) Send(req *request.Request) {
 	span = span.SetTag("aws.agent", h.awsAgent(req))
 	span = span.SetTag("aws.operation", req.Operation.Name)
 	span = span.SetTag("aws.region", req.ClientInfo.SigningRegion)
-	span = span.SetTag("aws.requestID", req.RequestID)
 	ext.HTTPMethod.Set(span, req.Operation.HTTPMethod)
 	ext.HTTPUrl.Set(span, req.HTTPRequest.URL.String())
 
@@ -55,12 +58,26 @@ func (h *handlers) Send(req *request.Request) {
 }
 
 func (h *handlers) Complete(req *request.Request) {
-	span := opentracing.SpanFromContext(req.Context())
+	ctx := req.Context()
+	span := opentracing.SpanFromContext(ctx)
 	defer span.Finish()
 	defer FailIfError(span, req.Error)
+	span = span.SetTag("aws.requestID", req.RequestID)
+	span = span.SetTag("aws.request.retryCount", req.RetryCount)
+	span = span.SetTag("aws.requestID", req.RequestID)
 	if req.HTTPResponse != nil {
 		ext.HTTPStatusCode.Set(span, uint16(req.HTTPResponse.StatusCode))
+		span = span.SetTag("aws.response.contentLength", req.HTTPResponse.ContentLength)
+		extendedRequestID := req.HTTPResponse.Header.Get(S3ExtendedRequestIDHeaderKey)
+		if len(strings.TrimSpace(extendedRequestID)) > 0 {
+			span = span.SetTag("aws.response.extendedRequestID", extendedRequestID)
+		}
 	}
+	if request.IsErrorThrottle(req.Error) {
+		span = span.SetTag("aws.request.throttled", "true")
+	}
+	ctx = opentracing.ContextWithSpan(ctx, span)
+	req.SetContext(ctx)
 }
 
 func (h *handlers) operationName(req *request.Request) string {
