@@ -12,8 +12,7 @@ import (
 )
 
 func TestNew(t *testing.T) {
-	_, err := New("myStreamName")
-	if err != nil {
+	if _, err := New("myStreamName"); err != nil {
 		t.Fatalf("new consumer error: %v", err)
 	}
 }
@@ -180,9 +179,9 @@ func TestScanShard(t *testing.T) {
 	}
 
 	// callback fn appends record data
-	var resultData string
+	var res string
 	var fn = func(r *Record) ScanStatus {
-		resultData += string(r.Data)
+		res += string(r.Data)
 		return ScanStatus{}
 	}
 
@@ -192,8 +191,8 @@ func TestScanShard(t *testing.T) {
 	}
 
 	// runs callback func
-	if resultData != "firstDatalastData" {
-		t.Fatalf("callback error expected %s, got %s", "firstDatalastData", resultData)
+	if res != "firstDatalastData" {
+		t.Fatalf("callback error expected %s, got %s", "firstDatalastData", res)
 	}
 
 	// increments counter
@@ -240,9 +239,9 @@ func TestScanShard_StopScan(t *testing.T) {
 	}
 
 	// callback fn appends record data
-	var resultData string
+	var res string
 	var fn = func(r *Record) ScanStatus {
-		resultData += string(r.Data)
+		res += string(r.Data)
 		return ScanStatus{StopScan: true}
 	}
 
@@ -250,8 +249,8 @@ func TestScanShard_StopScan(t *testing.T) {
 		t.Fatalf("scan shard error: %v", err)
 	}
 
-	if resultData != "firstData" {
-		t.Fatalf("callback error expected %s, got %s", "firstData", resultData)
+	if res != "firstData" {
+		t.Fatalf("callback error expected %s, got %s", "firstData", res)
 	}
 }
 
@@ -276,7 +275,7 @@ func TestScanShard_ShardIsClosed(t *testing.T) {
 	}
 
 	var fn = func(r *Record) ScanStatus {
-		return ScanStatus{}
+		return ScanStatus{StopScan: true}
 	}
 
 	if err := c.ScanShard(context.Background(), "myShard", fn); err != nil {
