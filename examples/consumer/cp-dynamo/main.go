@@ -11,15 +11,13 @@ import (
 	"os"
 	"os/signal"
 
+	alog "github.com/apex/log"
+	"github.com/apex/log/handlers/text"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/kinesis"
-
-	alog "github.com/apex/log"
-	"github.com/apex/log/handlers/text"
-
 	consumer "github.com/harlow/kinesis-consumer"
 	checkpoint "github.com/harlow/kinesis-consumer/checkpoint/ddb"
 )
@@ -62,29 +60,23 @@ func main() {
 	)
 	flag.Parse()
 
-	// Following will overwrite the default dynamodb client
-	// Older versions of aws sdk does not picking up aws config properly.
-	// You probably need to update aws sdk verison. Tested the following with 1.13.59
-	myDynamoDbClient := dynamodb.New(
-		session.New(aws.NewConfig()), &aws.Config{
-			Region: aws.String("us-west-2"),
-		},
-	)
+	sess, err := session.NewSession(aws.NewConfig())
+	if err != nil {
+		log.Log("new session error: %v", err)
+	}
+
+	// New Kinesis and DynamoDB clients (if you need custom config)
+	myKsis := kinesis.New(sess)
+	myDdbClient := dynamodb.New(sess)
 
 	// ddb checkpoint
-	ck, err := checkpoint.New(*app, *table, checkpoint.WithDynamoClient(myDynamoDbClient), checkpoint.WithRetryer(&MyRetryer{}))
+	ck, err := checkpoint.New(*app, *table, checkpoint.WithDynamoClient(myDdbClient), checkpoint.WithRetryer(&MyRetryer{}))
 	if err != nil {
 		log.Log("checkpoint error: %v", err)
 	}
 
+	// expvar counter
 	var counter = expvar.NewMap("counters")
-
-	// The following 2 lines will overwrite the default kinesis client
-	ksis := kinesis.New(
-		session.New(aws.NewConfig()), &aws.Config{
-			Region: aws.String("us-west-2"),
-		},
-	)
 
 	// consumer
 	c, err := consumer.New(
@@ -92,7 +84,7 @@ func main() {
 		consumer.WithCheckpoint(ck),
 		consumer.WithLogger(log),
 		consumer.WithCounter(counter),
-		consumer.WithClient(ksis),
+		consumer.WithClient(myKsis),
 	)
 	if err != nil {
 		log.Log("consumer error: %v", err)
