@@ -69,7 +69,7 @@ func TestConsumer_Scan(t *testing.T) {
 
 	var resultData string
 	var fnCallCounter int
-	var fn = func(r *Record) ScanStatus {
+	var fn = func(ctx context.Context, r *Record) ScanStatus {
 		fnCallCounter++
 		resultData += string(r.Data)
 		return ScanStatus{}
@@ -121,7 +121,7 @@ func TestConsumer_Scan_NoShardsAvailable(t *testing.T) {
 	}
 
 	var fnCallCounter int
-	var fn = func(r *Record) ScanStatus {
+	var fn = func(ctx context.Context, r *Record) ScanStatus {
 		fnCallCounter++
 		return ScanStatus{}
 	}
@@ -185,7 +185,7 @@ func TestScanShard(t *testing.T) {
 
 	// callback fn appends record data
 	var resultData string
-	var fn = func(r *Record) ScanStatus {
+	var fn = func(ctx context.Context, r *Record) ScanStatus {
 		resultData += string(r.Data)
 		return ScanStatus{}
 	}
@@ -246,7 +246,7 @@ func TestScanShard_StopScan(t *testing.T) {
 
 	// callback fn appends record data
 	var resultData string
-	var fn = func(r *Record) ScanStatus {
+	var fn = func(ctx context.Context, r *Record) ScanStatus {
 		resultData += string(r.Data)
 		return ScanStatus{StopScan: true}
 	}
@@ -281,7 +281,7 @@ func TestScanShard_ShardIsClosed(t *testing.T) {
 		t.Fatalf("new consumer error: %v", err)
 	}
 
-	var fn = func(r *Record) ScanStatus {
+	var fn = func(ctx context.Context, r *Record) ScanStatus {
 		return ScanStatus{}
 	}
 
