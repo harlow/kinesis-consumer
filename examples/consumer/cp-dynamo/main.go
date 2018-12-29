@@ -43,7 +43,7 @@ type myLogger struct {
 
 // Log logs the parameters to the stdlib logger. See log.Println.
 func (l *myLogger) Log(args ...interface{}) {
-	l.logger.Infof("producer", args...)
+	l.logger.Infof("producer: %v", args...)
 }
 
 func main() {

@@ -1,24 +1,20 @@
-package postgres_test
+package postgres
 
 import (
+	"database/sql"
+	"fmt"
 	"testing"
-
 	"time"
 
-	"fmt"
-
-	"database/sql"
-
-	"github.com/harlow/kinesis-consumer/checkpoint/postgres"
 	"github.com/pkg/errors"
-	"gopkg.in/DATA-DOG/go-sqlmock.v1"
+	sqlmock "gopkg.in/DATA-DOG/go-sqlmock.v1"
 )
 
 func TestNew(t *testing.T) {
 	appName := "streamConsumer"
 	tableName := "checkpoint"
 	connString := "UserID=root;Password=myPassword;Host=localhost;Port=5432;Database=myDataBase;"
-	ck, err := postgres.New(appName, tableName, connString)
+	ck, err := New(appName, tableName, connString)
 
 	if ck == nil {
 		t.Errorf("expected checkpointer not equal nil, but got %v", ck)
@@ -33,7 +29,7 @@ func TestNew_AppNameEmpty(t *testing.T) {
 	appName := ""
 	tableName := "checkpoint"
 	connString := ""
-	ck, err := postgres.New(appName, tableName, connString)
+	ck, err := New(appName, tableName, connString)
 
 	if ck != nil {
 		t.Errorf("expected checkpointer equal nil, but got %v", ck)
@@ -47,7 +43,7 @@ func TestNew_TableNameEmpty(t *testing.T) {
 	appName := "streamConsumer"
 	tableName := ""
 	connString := ""
-	ck, err := postgres.New(appName, tableName, connString)
+	ck, err := New(appName, tableName, connString)
 
 	if ck != nil {
 		t.Errorf("expected checkpointer equal nil, but got %v", ck)
@@ -62,7 +58,7 @@ func TestNew_WithMaxIntervalOption(t *testing.T) {
 	tableName := "checkpoint"
 	connString := "UserID=root;Password=myPassword;Host=localhost;Port=5432;Database=myDataBase;"
 	maxInterval := time.Second
-	ck, err := postgres.New(appName, tableName, connString, postgres.WithMaxInterval(maxInterval))
+	ck, err := New(appName, tableName, connString, WithMaxInterval(maxInterval))
 
 	if ck == nil {
 		t.Errorf("expected checkpointer not equal nil, but got %v", ck)
@@ -88,7 +84,7 @@ func TestCheckpoint_Get(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error occurred during the sqlmock creation. cause: %v", err)
 	}
-	ck, err := postgres.New(appName, tableName, connString, postgres.WithMaxInterval(maxInterval))
+	ck, err := New(appName, tableName, connString, WithMaxInterval(maxInterval))
 	if err != nil {
 		t.Fatalf("error occurred during the checkpoint creation. cause: %v", err)
 	}
@@ -127,7 +123,7 @@ func TestCheckpoint_Get_NoRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error occurred during the sqlmock creation. cause: %v", err)
 	}
-	ck, err := postgres.New(appName, tableName, connString, postgres.WithMaxInterval(maxInterval))
+	ck, err := New(appName, tableName, connString, WithMaxInterval(maxInterval))
 	if err != nil {
 		t.Fatalf("error occurred during the checkpoint creation. cause: %v", err)
 	}
@@ -163,7 +159,7 @@ func TestCheckpoint_Get_QueryError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error occurred during the sqlmock creation. cause: %v", err)
 	}
-	ck, err := postgres.New(appName, tableName, connString, postgres.WithMaxInterval(maxInterval))
+	ck, err := New(appName, tableName, connString, WithMaxInterval(maxInterval))
 	if err != nil {
 		t.Fatalf("error occurred during the checkpoint creation. cause: %v", err)
 	}
@@ -196,7 +192,7 @@ func TestCheckpoint_Set(t *testing.T) {
 	shardID := "shardId-00000000"
 	expectedSequenceNumber := "49578481031144599192696750682534686652010819674221576194"
 	maxInterval := time.Second
-	ck, err := postgres.New(appName, tableName, connString, postgres.WithMaxInterval(maxInterval))
+	ck, err := New(appName, tableName, connString, WithMaxInterval(maxInterval))
 	if err != nil {
 		t.Fatalf("error occurred during the checkpoint creation. cause: %v", err)
 	}
@@ -217,7 +213,7 @@ func TestCheckpoint_Set_SequenceNumberEmpty(t *testing.T) {
 	shardID := "shardId-00000000"
 	expectedSequenceNumber := ""
 	maxInterval := time.Second
-	ck, err := postgres.New(appName, tableName, connString, postgres.WithMaxInterval(maxInterval))
+	ck, err := New(appName, tableName, connString, WithMaxInterval(maxInterval))
 	if err != nil {
 		t.Fatalf("error occurred during the checkpoint creation. cause: %v", err)
 	}
@@ -242,7 +238,7 @@ func TestCheckpoint_Shutdown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error occurred during the sqlmock creation. cause: %v", err)
 	}
-	ck, err := postgres.New(appName, tableName, connString, postgres.WithMaxInterval(maxInterval))
+	ck, err := New(appName, tableName, connString, WithMaxInterval(maxInterval))
 	if err != nil {
 		t.Fatalf("error occurred during the checkpoint creation. cause: %v", err)
 	}
@@ -281,7 +277,7 @@ func TestCheckpoint_Shutdown_SaveError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error occurred during the sqlmock creation. cause: %v", err)
 	}
-	ck, err := postgres.New(appName, tableName, connString, postgres.WithMaxInterval(maxInterval))
+	ck, err := New(appName, tableName, connString, WithMaxInterval(maxInterval))
 	if err != nil {
 		t.Fatalf("error occurred during the checkpoint creation. cause: %v", err)
 	}
