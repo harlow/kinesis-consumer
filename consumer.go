@@ -11,6 +11,9 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/kinesis"
 	"github.com/aws/aws-sdk-go/service/kinesis/kinesisiface"
+
+	"github.com/opentracing/opentracing-go"
+	"github.com/opentracing/opentracing-go/ext"
 )
 
 // Record is an alias of record returned from kinesis library
@@ -109,17 +112,26 @@ type Consumer struct {
 
 // Scan scans each of the shards of the stream, calls the callback
 // func with each of the kinesis records.
-func (c *Consumer) Scan(ctx context.Context, fn func(*Record) ScanStatus) error {
+func (c *Consumer) Scan(ctx context.Context, fn func(context.Context, *Record) ScanStatus) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	span, ctx := opentracing.StartSpanFromContext(ctx, "consumer.scan")
+	defer span.Finish()
+
 	// get shard ids
-	shardIDs, err := c.getShardIDs(c.streamName)
+	shardIDs, err := c.getShardIDs(ctx, c.streamName)
+	span.SetTag("stream.name", c.streamName)
+	span.SetTag("shard.count", len(shardIDs))
 	if err != nil {
-		return fmt.Errorf("get shards error: %v", err)
+		span.LogKV("get shardID error", err.Error(), "stream.name", c.streamName)
+		ext.Error.Set(span, true)
+		return fmt.Errorf("get shards error: %s", err.Error())
 	}
 
 	if len(shardIDs) == 0 {
+		span.LogKV("stream.name", c.streamName, "shards.count", len(shardIDs))
+		ext.Error.Set(span, true)
 		return fmt.Errorf("no shards available")
 	}
 
@@ -135,6 +147,9 @@ func (c *Consumer) Scan(ctx context.Context, fn func(*Record) ScanStatus) error 
 			defer wg.Done()
 
 			if err := c.ScanShard(ctx, shardID, fn); err != nil {
+				span.LogKV("scan shard error", err.Error(), "shardID", shardID)
+				ext.Error.Set(span, true)
+				span.Finish()
 				select {
 				case errc <- fmt.Errorf("shard %s error: %v", shardID, err):
 					// first error to occur
@@ -158,38 +173,49 @@ func (c *Consumer) Scan(ctx context.Context, fn func(*Record) ScanStatus) error 
 func (c *Consumer) ScanShard(
 	ctx context.Context,
 	shardID string,
-	fn func(*Record) ScanStatus,
+	fn func(context.Context, *Record) ScanStatus,
 ) error {
+	span, ctx := opentracing.StartSpanFromContext(ctx, "consumer.scanshard")
+	defer span.Finish()
 	// get checkpoint
-	lastSeqNum, err := c.checkpoint.Get(c.streamName, shardID)
+	lastSeqNum, err := c.checkpoint.Get(ctx, c.streamName, shardID)
 	if err != nil {
+		span.LogKV("checkpoint error", err.Error(), "shardID", shardID)
+		ext.Error.Set(span, true)
 		return fmt.Errorf("get checkpoint error: %v", err)
 	}
 
 	// get shard iterator
-	shardIterator, err := c.getShardIterator(c.streamName, shardID, lastSeqNum)
+	shardIterator, err := c.getShardIterator(ctx, c.streamName, shardID, lastSeqNum)
 	if err != nil {
+		span.LogKV("get shard error", err.Error(), "shardID", shardID, "lastSeqNumber", lastSeqNum)
+		ext.Error.Set(span, true)
 		return fmt.Errorf("get shard iterator error: %v", err)
 	}
 
-	c.logger.Log("scanning", shardID, lastSeqNum)
+	c.logger.Log(fmt.Sprintf("scanning shardID %s lastSeqNum %s", shardID, lastSeqNum))
 
 	return c.scanPagesOfShard(ctx, shardID, lastSeqNum, shardIterator, fn)
 }
 
-func (c *Consumer) scanPagesOfShard(ctx context.Context, shardID, lastSeqNum string, shardIterator *string, fn func(*Record) ScanStatus) error {
+func (c *Consumer) scanPagesOfShard(ctx context.Context, shardID, lastSeqNum string, shardIterator *string, fn func(context.Context, *Record) ScanStatus) error {
+	span := opentracing.SpanFromContext(ctx)
 	for {
 		select {
 		case <-ctx.Done():
+			span.SetTag("scan", "done")
 			return nil
 		default:
-			resp, err := c.client.GetRecords(&kinesis.GetRecordsInput{
+			span.SetTag("scan", "on")
+			resp, err := c.client.GetRecordsWithContext(ctx, &kinesis.GetRecordsInput{
 				ShardIterator: shardIterator,
 			})
 
 			if err != nil {
-				shardIterator, err = c.getShardIterator(c.streamName, shardID, lastSeqNum)
+				shardIterator, err = c.getShardIterator(ctx, c.streamName, shardID, lastSeqNum)
 				if err != nil {
+					ext.Error.Set(span, true)
+					span.LogKV("get shard iterator error", err.Error())
 					return fmt.Errorf("get shard iterator error: %v", err)
 				}
 				continue
@@ -197,17 +223,22 @@ func (c *Consumer) scanPagesOfShard(ctx context.Context, shardID, lastSeqNum str
 
 			// loop records of page
 			for _, r := range resp.Records {
-				isScanStopped, err := c.handleRecord(shardID, r, fn)
+				ctx = opentracing.ContextWithSpan(ctx, span)
+				isScanStopped, err := c.handleRecord(ctx, shardID, r, fn)
 				if err != nil {
+					span.LogKV("handle record error", err.Error(), "shardID", shardID)
+					ext.Error.Set(span, true)
 					return err
 				}
 				if isScanStopped {
+					span.SetTag("scan", "stopped")
 					return nil
 				}
 				lastSeqNum = *r.SequenceNumber
 			}
 
 			if isShardClosed(resp.NextShardIterator, shardIterator) {
+				span.LogKV("is shard closed", "true")
 				return nil
 			}
 			shardIterator = resp.NextShardIterator
@@ -219,34 +250,47 @@ func isShardClosed(nextShardIterator, currentShardIterator *string) bool {
 	return nextShardIterator == nil || currentShardIterator == nextShardIterator
 }
 
-func (c *Consumer) handleRecord(shardID string, r *Record, fn func(*Record) ScanStatus) (isScanStopped bool, err error) {
-	status := fn(r)
-
+func (c *Consumer) handleRecord(ctx context.Context, shardID string, r *Record, fn func(context.Context, *Record) ScanStatus) (isScanStopped bool, err error) {
+	span, ctx := opentracing.StartSpanFromContext(ctx, "consumer.handleRecord")
+	defer span.Finish()
+	status := fn(ctx, r)
 	if !status.SkipCheckpoint {
-		if err := c.checkpoint.Set(c.streamName, shardID, *r.SequenceNumber); err != nil {
+		span.LogKV("scan.state", status)
+		if err := c.checkpoint.Set(ctx, c.streamName, shardID, *r.SequenceNumber); err != nil {
+			span.LogKV("checkpoint error", err.Error(), "stream.name", c.streamName, "shardID", shardID, "sequenceNumber", *r.SequenceNumber)
+			ext.Error.Set(span, true)
 			return false, err
 		}
 	}
 
 	if err := status.Error; err != nil {
+		span.LogKV("scan.state", status.Error)
+		ext.Error.Set(span, true)
 		return false, err
 	}
 
 	c.counter.Add("records", 1)
 
 	if status.StopScan {
+		span.LogKV("scan.state", "stopped")
 		return true, nil
 	}
 	return false, nil
 }
 
-func (c *Consumer) getShardIDs(streamName string) ([]string, error) {
-	resp, err := c.client.DescribeStream(
+func (c *Consumer) getShardIDs(ctx context.Context, streamName string) ([]string, error) {
+	span, ctx := opentracing.StartSpanFromContext(ctx, "consumer.getShardIDs")
+	defer span.Finish()
+	span = span.SetTag("streamName", streamName)
+
+	resp, err := c.client.DescribeStreamWithContext(ctx,
 		&kinesis.DescribeStreamInput{
 			StreamName: aws.String(streamName),
 		},
 	)
 	if err != nil {
+		span.LogKV("describe stream error", err.Error())
+		ext.Error.Set(span, true)
 		return nil, fmt.Errorf("describe stream error: %v", err)
 	}
 
@@ -257,11 +301,21 @@ func (c *Consumer) getShardIDs(streamName string) ([]string, error) {
 	return ss, nil
 }
 
-func (c *Consumer) getShardIterator(streamName, shardID, lastSeqNum string) (*string, error) {
+func (c *Consumer) getShardIterator(ctx context.Context, streamName, shardID, lastSeqNum string) (*string, error) {
+	span, ctx := opentracing.StartSpanFromContext(ctx, "consumer.getShardIterator",
+		opentracing.Tag{Key: "streamName", Value: streamName},
+		opentracing.Tag{Key: "shardID", Value: shardID},
+		opentracing.Tag{Key: "lastSeqNum", Value: lastSeqNum})
+	defer span.Finish()
+	shard := aws.String(shardID)
+	stream := aws.String(streamName)
 	params := &kinesis.GetShardIteratorInput{
-		ShardId:    aws.String(shardID),
-		StreamName: aws.String(streamName),
+		ShardId:    shard,
+		StreamName: stream,
 	}
+
+	span = span.SetTag("shardID", shard)
+	span = span.SetTag("streamName", stream)
 
 	if lastSeqNum != "" {
 		params.ShardIteratorType = aws.String("AFTER_SEQUENCE_NUMBER")
@@ -270,8 +324,10 @@ func (c *Consumer) getShardIterator(streamName, shardID, lastSeqNum string) (*st
 		params.ShardIteratorType = aws.String(c.initialShardIteratorType)
 	}
 
-	resp, err := c.client.GetShardIterator(params)
+	resp, err := c.client.GetShardIteratorWithContext(ctx, params)
 	if err != nil {
+		span.LogKV("get shard error", err.Error())
+		ext.Error.Set(span, true)
 		return nil, err
 	}
 	return resp.ShardIterator, nil

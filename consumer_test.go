@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/service/kinesis"
 	"github.com/aws/aws-sdk-go/service/kinesis/kinesisiface"
 )
@@ -18,6 +19,7 @@ func TestNew(t *testing.T) {
 }
 
 func TestConsumer_Scan(t *testing.T) {
+	ctx := context.TODO()
 	records := []*kinesis.Record{
 		{
 			Data:           []byte("firstData"),
@@ -29,18 +31,18 @@ func TestConsumer_Scan(t *testing.T) {
 		},
 	}
 	client := &kinesisClientMock{
-		getShardIteratorMock: func(input *kinesis.GetShardIteratorInput) (*kinesis.GetShardIteratorOutput, error) {
+		getShardIteratorMock: func(a aws.Context, input *kinesis.GetShardIteratorInput, o ...request.Option) (*kinesis.GetShardIteratorOutput, error) {
 			return &kinesis.GetShardIteratorOutput{
 				ShardIterator: aws.String("49578481031144599192696750682534686652010819674221576194"),
 			}, nil
 		},
-		getRecordsMock: func(input *kinesis.GetRecordsInput) (*kinesis.GetRecordsOutput, error) {
+		getRecordsMock: func(a aws.Context, input *kinesis.GetRecordsInput, o ...request.Option) (*kinesis.GetRecordsOutput, error) {
 			return &kinesis.GetRecordsOutput{
 				NextShardIterator: nil,
 				Records:           records,
 			}, nil
 		},
-		describeStreamMock: func(input *kinesis.DescribeStreamInput) (*kinesis.DescribeStreamOutput, error) {
+		describeStreamMock: func(a aws.Context, input *kinesis.DescribeStreamInput, o ...request.Option) (*kinesis.DescribeStreamOutput, error) {
 			return &kinesis.DescribeStreamOutput{
 				StreamDescription: &kinesis.StreamDescription{
 					Shards: []*kinesis.Shard{
@@ -72,7 +74,7 @@ func TestConsumer_Scan(t *testing.T) {
 		return ScanStatus{}
 	}
 
-	if err := c.Scan(context.Background(), fn); err != nil {
+	if err := c.Scan(ctx, fn); err != nil {
 		t.Errorf("scan shard error expected nil. got %v", err)
 	}
 
@@ -86,15 +88,16 @@ func TestConsumer_Scan(t *testing.T) {
 		t.Errorf("counter error expected %d, got %d", 2, val)
 	}
 
-	val, err := cp.Get("myStreamName", "myShard")
+	val, err := cp.Get(ctx, "myStreamName", "myShard")
 	if err != nil && val != "lastSeqNum" {
 		t.Errorf("checkout error expected %s, got %s", "lastSeqNum", val)
 	}
 }
 
 func TestConsumer_Scan_NoShardsAvailable(t *testing.T) {
+	ctx := context.TODO()
 	client := &kinesisClientMock{
-		describeStreamMock: func(input *kinesis.DescribeStreamInput) (*kinesis.DescribeStreamOutput, error) {
+		describeStreamMock: func(a aws.Context, input *kinesis.DescribeStreamInput, o ...request.Option) (*kinesis.DescribeStreamOutput, error) {
 			return &kinesis.DescribeStreamOutput{
 				StreamDescription: &kinesis.StreamDescription{
 					Shards: make([]*kinesis.Shard, 0),
@@ -122,7 +125,7 @@ func TestConsumer_Scan_NoShardsAvailable(t *testing.T) {
 		return ScanStatus{}
 	}
 
-	if err := c.Scan(context.Background(), fn); err == nil {
+	if err := c.Scan(ctx, fn); err == nil {
 		t.Errorf("scan shard error expected not nil. got %v", err)
 	}
 
@@ -132,13 +135,14 @@ func TestConsumer_Scan_NoShardsAvailable(t *testing.T) {
 	if val := ctr.counter; val != 0 {
 		t.Errorf("counter error expected %d, got %d", 0, val)
 	}
-	val, err := cp.Get("myStreamName", "myShard")
+	val, err := cp.Get(ctx, "myStreamName", "myShard")
 	if err != nil && val != "" {
 		t.Errorf("checkout error expected %s, got %s", "", val)
 	}
 }
 
 func TestScanShard(t *testing.T) {
+	ctx := context.TODO()
 	var records = []*kinesis.Record{
 		{
 			Data:           []byte("firstData"),
@@ -151,12 +155,12 @@ func TestScanShard(t *testing.T) {
 	}
 
 	var client = &kinesisClientMock{
-		getShardIteratorMock: func(input *kinesis.GetShardIteratorInput) (*kinesis.GetShardIteratorOutput, error) {
+		getShardIteratorMock: func(a aws.Context, input *kinesis.GetShardIteratorInput, o ...request.Option) (*kinesis.GetShardIteratorOutput, error) {
 			return &kinesis.GetShardIteratorOutput{
 				ShardIterator: aws.String("49578481031144599192696750682534686652010819674221576194"),
 			}, nil
 		},
-		getRecordsMock: func(input *kinesis.GetRecordsInput) (*kinesis.GetRecordsOutput, error) {
+		getRecordsMock: func(a aws.Context, input *kinesis.GetRecordsInput, o ...request.Option) (*kinesis.GetRecordsOutput, error) {
 			return &kinesis.GetRecordsOutput{
 				NextShardIterator: nil,
 				Records:           records,
@@ -186,7 +190,7 @@ func TestScanShard(t *testing.T) {
 	}
 
 	// scan shard
-	if err := c.ScanShard(context.Background(), "myShard", fn); err != nil {
+	if err := c.ScanShard(ctx, "myShard", fn); err != nil {
 		t.Fatalf("scan shard error: %v", err)
 	}
 
@@ -201,13 +205,14 @@ func TestScanShard(t *testing.T) {
 	}
 
 	// sets checkpoint
-	val, err := cp.Get("myStreamName", "myShard")
+	val, err := cp.Get(ctx, "myStreamName", "myShard")
 	if err != nil && val != "lastSeqNum" {
 		t.Fatalf("checkout error expected %s, got %s", "lastSeqNum", val)
 	}
 }
 
 func TestScanShard_StopScan(t *testing.T) {
+	ctx := context.TODO()
 	var records = []*kinesis.Record{
 		{
 			Data:           []byte("firstData"),
@@ -220,12 +225,12 @@ func TestScanShard_StopScan(t *testing.T) {
 	}
 
 	var client = &kinesisClientMock{
-		getShardIteratorMock: func(input *kinesis.GetShardIteratorInput) (*kinesis.GetShardIteratorOutput, error) {
+		getShardIteratorMock: func(a aws.Context, input *kinesis.GetShardIteratorInput, o ...request.Option) (*kinesis.GetShardIteratorOutput, error) {
 			return &kinesis.GetShardIteratorOutput{
 				ShardIterator: aws.String("49578481031144599192696750682534686652010819674221576194"),
 			}, nil
 		},
-		getRecordsMock: func(input *kinesis.GetRecordsInput) (*kinesis.GetRecordsOutput, error) {
+		getRecordsMock: func(a aws.Context, input *kinesis.GetRecordsInput, o ...request.Option) (*kinesis.GetRecordsOutput, error) {
 			return &kinesis.GetRecordsOutput{
 				NextShardIterator: nil,
 				Records:           records,
@@ -245,7 +250,7 @@ func TestScanShard_StopScan(t *testing.T) {
 		return ScanStatus{StopScan: true}
 	}
 
-	if err := c.ScanShard(context.Background(), "myShard", fn); err != nil {
+	if err := c.ScanShard(ctx, "myShard", fn); err != nil {
 		t.Fatalf("scan shard error: %v", err)
 	}
 
@@ -255,13 +260,14 @@ func TestScanShard_StopScan(t *testing.T) {
 }
 
 func TestScanShard_ShardIsClosed(t *testing.T) {
+	ctx := context.TODO()
 	var client = &kinesisClientMock{
-		getShardIteratorMock: func(input *kinesis.GetShardIteratorInput) (*kinesis.GetShardIteratorOutput, error) {
+		getShardIteratorMock: func(a aws.Context, input *kinesis.GetShardIteratorInput, o ...request.Option) (*kinesis.GetShardIteratorOutput, error) {
 			return &kinesis.GetShardIteratorOutput{
 				ShardIterator: aws.String("49578481031144599192696750682534686652010819674221576194"),
 			}, nil
 		},
-		getRecordsMock: func(input *kinesis.GetRecordsInput) (*kinesis.GetRecordsOutput, error) {
+		getRecordsMock: func(a aws.Context, input *kinesis.GetRecordsInput, o ...request.Option) (*kinesis.GetRecordsOutput, error) {
 			return &kinesis.GetRecordsOutput{
 				NextShardIterator: nil,
 				Records:           make([]*Record, 0),
@@ -278,28 +284,28 @@ func TestScanShard_ShardIsClosed(t *testing.T) {
 		return ScanStatus{StopScan: true}
 	}
 
-	if err := c.ScanShard(context.Background(), "myShard", fn); err != nil {
+	if err := c.ScanShard(ctx, "myShard", fn); err != nil {
 		t.Fatalf("scan shard error: %v", err)
 	}
 }
 
 type kinesisClientMock struct {
 	kinesisiface.KinesisAPI
-	getShardIteratorMock func(*kinesis.GetShardIteratorInput) (*kinesis.GetShardIteratorOutput, error)
-	getRecordsMock       func(*kinesis.GetRecordsInput) (*kinesis.GetRecordsOutput, error)
-	describeStreamMock   func(*kinesis.DescribeStreamInput) (*kinesis.DescribeStreamOutput, error)
+	getShardIteratorMock func(aws.Context, *kinesis.GetShardIteratorInput, ...request.Option) (*kinesis.GetShardIteratorOutput, error)
+	getRecordsMock       func(aws.Context, *kinesis.GetRecordsInput, ...request.Option) (*kinesis.GetRecordsOutput, error)
+	describeStreamMock   func(aws.Context, *kinesis.DescribeStreamInput, ...request.Option) (*kinesis.DescribeStreamOutput, error)
 }
 
-func (c *kinesisClientMock) GetRecords(in *kinesis.GetRecordsInput) (*kinesis.GetRecordsOutput, error) {
-	return c.getRecordsMock(in)
+func (c *kinesisClientMock) GetRecordsWithContext(a aws.Context, in *kinesis.GetRecordsInput, o ...request.Option) (*kinesis.GetRecordsOutput, error) {
+	return c.getRecordsMock(a, in, o...)
 }
 
-func (c *kinesisClientMock) GetShardIterator(in *kinesis.GetShardIteratorInput) (*kinesis.GetShardIteratorOutput, error) {
-	return c.getShardIteratorMock(in)
+func (c *kinesisClientMock) GetShardIteratorWithContext(a aws.Context, in *kinesis.GetShardIteratorInput, o ...request.Option) (*kinesis.GetShardIteratorOutput, error) {
+	return c.getShardIteratorMock(a, in, o...)
 }
 
-func (c *kinesisClientMock) DescribeStream(in *kinesis.DescribeStreamInput) (*kinesis.DescribeStreamOutput, error) {
-	return c.describeStreamMock(in)
+func (c *kinesisClientMock) DescribeStreamWithContext(a aws.Context, in *kinesis.DescribeStreamInput, o ...request.Option) (*kinesis.DescribeStreamOutput, error) {
+	return c.describeStreamMock(a, in, o...)
 }
 
 // implementation of checkpoint
@@ -308,7 +314,7 @@ type fakeCheckpoint struct {
 	mu    sync.Mutex
 }
 
-func (fc *fakeCheckpoint) Set(streamName, shardID, sequenceNumber string) error {
+func (fc *fakeCheckpoint) Set(ctx context.Context, streamName, shardID, sequenceNumber string) error {
 	fc.mu.Lock()
 	defer fc.mu.Unlock()
 
@@ -317,7 +323,7 @@ func (fc *fakeCheckpoint) Set(streamName, shardID, sequenceNumber string) error 
 	return nil
 }
 
-func (fc *fakeCheckpoint) Get(streamName, shardID string) (string, error) {
+func (fc *fakeCheckpoint) Get(ctx context.Context, streamName, shardID string) (string, error) {
 	fc.mu.Lock()
 	defer fc.mu.Unlock()
 
