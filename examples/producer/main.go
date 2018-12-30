@@ -13,23 +13,19 @@ import (
 	"github.com/aws/aws-sdk-go/service/kinesis"
 )
 
-var svc = kinesis.New(session.New(), &aws.Config{
-	Region: aws.String("us-west-1"),
-})
-
 func main() {
 	var streamName = flag.String("stream", "", "Stream name")
 	flag.Parse()
 
-	// download file with test data
-	// curl https://s3.amazonaws.com/kinesis.test/users.txt -o /tmp/users.txt
-	f, err := os.Open("/tmp/users.txt")
+	// open dummy user data
+	f, err := os.Open("users.txt")
 	if err != nil {
 		log.Fatal("Cannot open users.txt file")
 	}
 	defer f.Close()
 
 	var records []*kinesis.PutRecordsRequestEntry
+	var client = kinesis.New(session.New())
 
 	// loop over file data
 	b := bufio.NewScanner(f)
@@ -40,18 +36,18 @@ func main() {
 		})
 
 		if len(records) > 250 {
-			putRecords(streamName, records)
+			putRecords(client, streamName, records)
 			records = nil
 		}
 	}
 
 	if len(records) > 0 {
-		putRecords(streamName, records)
+		putRecords(client, streamName, records)
 	}
 }
 
-func putRecords(streamName *string, records []*kinesis.PutRecordsRequestEntry) {
-	_, err := svc.PutRecords(&kinesis.PutRecordsInput{
+func putRecords(client *kinesis.Kinesis, streamName *string, records []*kinesis.PutRecordsRequestEntry) {
+	_, err := client.PutRecords(&kinesis.PutRecordsInput{
 		StreamName: streamName,
 		Records:    records,
 	})
