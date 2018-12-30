@@ -40,39 +40,41 @@ func main() {
 	}
 
 	// start scan
-	err = c.Scan(context.TODO(), func(r *consumer.Record) consumer.ScanStatus {
+	err = c.Scan(context.TODO(), func(r *consumer.Record) error {
 		fmt.Println(string(r.Data))
-
-		return consumer.ScanStatus{
-			StopScan:       false,  // true to stop scan
-			SkipCheckpoint: false,  // true to skip checkpoint
-		}
+		return nil // continue scanning
 	})
 	if err != nil {
 		log.Fatalf("scan error: %v", err)
 	}
 
-	// Note: If you need to aggregate based on a specific shard the `ScanShard`
-	// method should be leverged instead.
+	// Note: If you need to aggregate based on a specific shard
+	// the `ScanShard` function should be used instead.
 }
 ```
 
-## Scan status
+## ScanFunc
 
-The scan func returns a `consumer.ScanStatus` the struct allows some basic flow control.
+The `ScanFunc` receives a Kinesis Record and returns an `error`
+
+```go
+type ScanFunc func(*Record) error
+```
+
+Return `nil` to continue scanning, or choose from the custom error types for additional flow control.
 
 ```go
 // continue scanning
-return consumer.ScanStatus{}
+return nil
 
-// continue scanning, skip saving checkpoint
-return consumer.ScanStatus{SkipCheckpoint: true}
+// continue scanning, skip checkpoint
+return consumer.SkipCheckpoint
 
 // stop scanning, return nil
-return consumer.ScanStatus{StopScan: true}
+return consumer.StopScan
 
 // stop scanning, return error
-return consumer.ScanStatus{Error: err}
+return errors.New("my error, exit all scans")
 ```
 
 ## Checkpoint
@@ -182,7 +184,7 @@ Override the Kinesis client if there is any special config needed:
 
 ```go
 // client
-client := kinesis.New(session.New(aws.NewConfig()))
+client := kinesis.New(session.NewSession(aws.NewConfig()))
 
 // consumer
 c, err := consumer.New(streamName, consumer.WithClient(client))

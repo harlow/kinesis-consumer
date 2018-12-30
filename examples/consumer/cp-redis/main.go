@@ -14,7 +14,7 @@ import (
 
 func main() {
 	var (
-		app    = flag.String("app", "", "App name")
+		app    = flag.String("app", "", "Consumer app name")
 		stream = flag.String("stream", "", "Stream name")
 	)
 	flag.Parse()
@@ -46,11 +46,9 @@ func main() {
 	}()
 
 	// scan stream
-	err = c.Scan(ctx, func(r *consumer.Record) consumer.ScanStatus {
+	err = c.Scan(ctx, func(r *consumer.Record) error {
 		fmt.Println(string(r.Data))
-
-		// continue scanning
-		return consumer.ScanStatus{}
+		return nil // continue scanning
 	})
 	if err != nil {
 		log.Fatalf("scan error: %v", err)

@@ -64,10 +64,10 @@ func TestConsumer_Scan(t *testing.T) {
 
 	var resultData string
 	var fnCallCounter int
-	var fn = func(r *Record) ScanStatus {
+	var fn = func(r *Record) error {
 		fnCallCounter++
 		resultData += string(r.Data)
-		return ScanStatus{}
+		return nil
 	}
 
 	if err := c.Scan(context.Background(), fn); err != nil {
@@ -98,39 +98,18 @@ func TestConsumer_Scan_NoShardsAvailable(t *testing.T) {
 			}, nil
 		},
 	}
-	var (
-		cp  = &fakeCheckpoint{cache: map[string]string{}}
-		ctr = &fakeCounter{}
-	)
 
-	c, err := New("myStreamName",
-		WithClient(client),
-		WithCounter(ctr),
-		WithCheckpoint(cp),
-	)
+	var fn = func(r *Record) error {
+		return nil
+	}
+
+	c, err := New("myStreamName", WithClient(client))
 	if err != nil {
 		t.Fatalf("new consumer error: %v", err)
 	}
 
-	var fnCallCounter int
-	var fn = func(r *Record) ScanStatus {
-		fnCallCounter++
-		return ScanStatus{}
-	}
-
 	if err := c.Scan(context.Background(), fn); err == nil {
 		t.Errorf("scan shard error expected not nil. got %v", err)
-	}
-
-	if fnCallCounter != 0 {
-		t.Errorf("the callback function expects %v, got %v", 0, fnCallCounter)
-	}
-	if val := ctr.counter; val != 0 {
-		t.Errorf("counter error expected %d, got %d", 0, val)
-	}
-	val, err := cp.Get("myStreamName", "myShard")
-	if err != nil && val != "" {
-		t.Errorf("checkout error expected %s, got %s", "", val)
 	}
 }
 
@@ -176,9 +155,9 @@ func TestScanShard(t *testing.T) {
 
 	// callback fn appends record data
 	var res string
-	var fn = func(r *Record) ScanStatus {
+	var fn = func(r *Record) error {
 		res += string(r.Data)
-		return ScanStatus{}
+		return nil
 	}
 
 	// scan shard
@@ -236,9 +215,9 @@ func TestScanShard_StopScan(t *testing.T) {
 
 	// callback fn appends record data
 	var res string
-	var fn = func(r *Record) ScanStatus {
+	var fn = func(r *Record) error {
 		res += string(r.Data)
-		return ScanStatus{StopScan: true}
+		return StopScan
 	}
 
 	if err := c.ScanShard(context.Background(), "myShard", fn); err != nil {
@@ -270,8 +249,8 @@ func TestScanShard_ShardIsClosed(t *testing.T) {
 		t.Fatalf("new consumer error: %v", err)
 	}
 
-	var fn = func(r *Record) ScanStatus {
-		return ScanStatus{StopScan: true}
+	var fn = func(r *Record) error {
+		return StopScan
 	}
 
 	if err := c.ScanShard(context.Background(), "myShard", fn); err != nil {
