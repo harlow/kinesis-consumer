@@ -139,7 +139,6 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 
 	c.logger.Log("scanning", shardID, lastSeqNum)
 
-	// loop until
 	for {
 		select {
 		case <-ctx.Done():
@@ -159,14 +158,13 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 				continue
 			}
 
-			// callback func with each record
+			// loop over records, call callback func
 			for _, r := range resp.Records {
 				select {
 				case <-ctx.Done():
 					return nil
 				default:
 					err := fn(r)
-
 					if err != nil && err != SkipCheckpoint {
 						return err
 					}
