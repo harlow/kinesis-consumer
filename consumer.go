@@ -72,7 +72,7 @@ func New(streamName string, opts ...Option) (*Consumer, error) {
 	// new consumer with no-op checkpoint, counter, and logger
 	c := &Consumer{
 		streamName:               streamName,
-		initialShardIteratorType: "TRIM_HORIZON",
+		initialShardIteratorType: kinesis.ShardIteratorTypeTrimHorizon,
 		checkpoint:               &noopCheckpoint{},
 		counter:                  &noopCounter{},
 		logger: &noopLogger{
@@ -280,7 +280,7 @@ func (c *Consumer) getShardIterator(streamName, shardID, lastSeqNum string) (*st
 	}
 
 	if lastSeqNum != "" {
-		params.ShardIteratorType = aws.String("AFTER_SEQUENCE_NUMBER")
+		params.ShardIteratorType = aws.String(kinesis.ShardIteratorTypeAfterSequenceNumber)
 		params.StartingSequenceNumber = aws.String(lastSeqNum)
 	} else {
 		params.ShardIteratorType = aws.String(c.initialShardIteratorType)
