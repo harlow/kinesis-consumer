@@ -46,7 +46,7 @@ func TestConsumer_Scan(t *testing.T) {
 					Shards: []*kinesis.Shard{
 						{ShardId: aws.String("myShard")},
 					},
-				},
+					HasMoreShards: aws.Bool(false)},
 			}, nil
 		},
 	}

@@ -241,20 +241,36 @@ func (c *Consumer) handleRecord(shardID string, r *Record, fn func(*Record) Scan
 }
 
 func (c *Consumer) getShardIDs(streamName string) ([]string, error) {
-	resp, err := c.client.DescribeStream(
-		&kinesis.DescribeStreamInput{
-			StreamName: aws.String(streamName),
-		},
-	)
-	if err != nil {
-		return nil, fmt.Errorf("describe stream error: %v", err)
-	}
-
 	var ss []string
-	for _, shard := range resp.StreamDescription.Shards {
-		ss = append(ss, *shard.ShardId)
+	var exclusiveStartShardId *string
+	for {
+		resp, err := c.client.DescribeStream(
+			&kinesis.DescribeStreamInput{
+				StreamName:            aws.String(streamName),
+				ExclusiveStartShardId: exclusiveStartShardId,
+			},
+		)
+		if err != nil {
+			return nil, fmt.Errorf("describe stream error: %v", err)
+		}
+
+		streamDescription := resp.StreamDescription
+		shards := streamDescription.Shards
+
+		if len(shards) == 0 {
+			return ss, nil
+		}
+
+		for _, shard := range shards {
+			ss = append(ss, *shard.ShardId)
+		}
+
+		exclusiveStartShardId = shards[len(shards)-1].ShardId
+
+		if *streamDescription.HasMoreShards == false {
+			return ss, nil
+		}
 	}
-	return ss, nil
 }
 
 func (c *Consumer) getShardIterator(streamName, shardID, lastSeqNum string) (*string, error) {
