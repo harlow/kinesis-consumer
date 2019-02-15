@@ -40,12 +40,10 @@ func TestConsumer_Scan(t *testing.T) {
 				Records:           records,
 			}, nil
 		},
-		describeStreamMock: func(input *kinesis.DescribeStreamInput) (*kinesis.DescribeStreamOutput, error) {
-			return &kinesis.DescribeStreamOutput{
-				StreamDescription: &kinesis.StreamDescription{
-					Shards: []*kinesis.Shard{
-						{ShardId: aws.String("myShard")},
-					},
+		listShardsMock: func(input *kinesis.ListShardsInput) (*kinesis.ListShardsOutput, error) {
+			return &kinesis.ListShardsOutput{
+				Shards: []*kinesis.Shard{
+					{ShardId: aws.String("myShard")},
 				},
 			}, nil
 		},
@@ -94,11 +92,9 @@ func TestConsumer_Scan(t *testing.T) {
 
 func TestConsumer_Scan_NoShardsAvailable(t *testing.T) {
 	client := &kinesisClientMock{
-		describeStreamMock: func(input *kinesis.DescribeStreamInput) (*kinesis.DescribeStreamOutput, error) {
-			return &kinesis.DescribeStreamOutput{
-				StreamDescription: &kinesis.StreamDescription{
-					Shards: make([]*kinesis.Shard, 0),
-				},
+		listShardsMock: func(input *kinesis.ListShardsInput) (*kinesis.ListShardsOutput, error) {
+			return &kinesis.ListShardsOutput{
+				Shards: make([]*kinesis.Shard, 0),
 			}, nil
 		},
 	}
@@ -287,7 +283,11 @@ type kinesisClientMock struct {
 	kinesisiface.KinesisAPI
 	getShardIteratorMock func(*kinesis.GetShardIteratorInput) (*kinesis.GetShardIteratorOutput, error)
 	getRecordsMock       func(*kinesis.GetRecordsInput) (*kinesis.GetRecordsOutput, error)
-	describeStreamMock   func(*kinesis.DescribeStreamInput) (*kinesis.DescribeStreamOutput, error)
+	listShardsMock       func(*kinesis.ListShardsInput) (*kinesis.ListShardsOutput, error)
+}
+
+func (c *kinesisClientMock) ListShards(in *kinesis.ListShardsInput) (*kinesis.ListShardsOutput, error) {
+	return c.listShardsMock(in)
 }
 
 func (c *kinesisClientMock) GetRecords(in *kinesis.GetRecordsInput) (*kinesis.GetRecordsOutput, error) {
@@ -296,10 +296,6 @@ func (c *kinesisClientMock) GetRecords(in *kinesis.GetRecordsInput) (*kinesis.Ge
 
 func (c *kinesisClientMock) GetShardIterator(in *kinesis.GetShardIteratorInput) (*kinesis.GetShardIteratorOutput, error) {
 	return c.getShardIteratorMock(in)
-}
-
-func (c *kinesisClientMock) DescribeStream(in *kinesis.DescribeStreamInput) (*kinesis.DescribeStreamOutput, error) {
-	return c.describeStreamMock(in)
 }
 
 // implementation of checkpoint

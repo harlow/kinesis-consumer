@@ -72,7 +72,7 @@ func New(streamName string, opts ...Option) (*Consumer, error) {
 	// new consumer with no-op checkpoint, counter, and logger
 	c := &Consumer{
 		streamName:               streamName,
-		initialShardIteratorType: "TRIM_HORIZON",
+		initialShardIteratorType: kinesis.ShardIteratorTypeTrimHorizon,
 		checkpoint:               &noopCheckpoint{},
 		counter:                  &noopCounter{},
 		logger: &noopLogger{
@@ -241,20 +241,28 @@ func (c *Consumer) handleRecord(shardID string, r *Record, fn func(*Record) Scan
 }
 
 func (c *Consumer) getShardIDs(streamName string) ([]string, error) {
-	resp, err := c.client.DescribeStream(
-		&kinesis.DescribeStreamInput{
-			StreamName: aws.String(streamName),
-		},
-	)
-	if err != nil {
-		return nil, fmt.Errorf("describe stream error: %v", err)
-	}
-
 	var ss []string
-	for _, shard := range resp.StreamDescription.Shards {
-		ss = append(ss, *shard.ShardId)
+	var listShardsInput = &kinesis.ListShardsInput{
+		StreamName: aws.String(streamName),
 	}
-	return ss, nil
+	for {
+		resp, err := c.client.ListShards(listShardsInput)
+		if err != nil {
+			return nil, fmt.Errorf("ListShards error: %v", err)
+		}
+
+		for _, shard := range resp.Shards {
+			ss = append(ss, *shard.ShardId)
+		}
+
+		if resp.NextToken == nil {
+			return ss, nil
+		}
+
+		listShardsInput = &kinesis.ListShardsInput{
+			NextToken: resp.NextToken,
+		}
+	}
 }
 
 func (c *Consumer) getShardIterator(streamName, shardID, lastSeqNum string) (*string, error) {
@@ -264,7 +272,7 @@ func (c *Consumer) getShardIterator(streamName, shardID, lastSeqNum string) (*st
 	}
 
 	if lastSeqNum != "" {
-		params.ShardIteratorType = aws.String("AFTER_SEQUENCE_NUMBER")
+		params.ShardIteratorType = aws.String(kinesis.ShardIteratorTypeAfterSequenceNumber)
 		params.StartingSequenceNumber = aws.String(lastSeqNum)
 	} else {
 		params.ShardIteratorType = aws.String(c.initialShardIteratorType)
