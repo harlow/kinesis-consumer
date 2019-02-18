@@ -225,9 +225,9 @@ func (c *Consumer) getShardIterator(streamName, shardID, seqNum string) (*string
 		StreamName: aws.String(streamName),
 	}
 
-	if lastSeqNum != "" {
+	if seqNum != "" {
 		params.ShardIteratorType = aws.String(kinesis.ShardIteratorTypeAfterSequenceNumber)
-		params.StartingSequenceNumber = aws.String(lastSeqNum)
+		params.StartingSequenceNumber = aws.String(seqNum)
 	} else {
 		params.ShardIteratorType = aws.String(c.initialShardIteratorType)
 	}
