@@ -198,6 +198,7 @@ func (c *Consumer) getShardIDs(streamName string) ([]string, error) {
 	var listShardsInput = &kinesis.ListShardsInput{
 		StreamName: aws.String(streamName),
 	}
+
 	for {
 		resp, err := c.client.ListShards(listShardsInput)
 		if err != nil {
@@ -216,7 +217,6 @@ func (c *Consumer) getShardIDs(streamName string) ([]string, error) {
 			NextToken: resp.NextToken,
 		}
 	}
-	return ss, nil
 }
 
 func (c *Consumer) getShardIterator(streamName, shardID, seqNum string) (*string, error) {
