@@ -1,0 +1,10 @@
+language: go
+services:
+  - redis-server
+go:
+  - "1.10"
+branches:
+  only:
+    - master
+script:
+  - go test -v -race ./...
