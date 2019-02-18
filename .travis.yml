@@ -1,5 +1,9 @@
 language: go
 
+# Setup database services required during tests.
+services:
+  - redis-server
+
 # Force-enable Go modules. This will be unnecessary when Go 1.12 lands.
 env:
   - GO111MODULE=on
@@ -9,20 +13,9 @@ env:
 go:
   - "1.10"
 
-# Setup database services required during tests.
-services:
-  - redis-server
-
 # Only clone the most recent commit.
 git:
   depth: 1
 
-# Skip the install step. Don't `go get` dependencies. Only build with the code
-# in vendor/
-install: true
-
-# script always runs to completion (set +e). If we have linter issues AND a
-# failing test, we want to see both. Configure golangci-lint with a
-# .golangci.yml file at the top level of your repo.
 script:
   - go test -v -race ./...  # Run all the tests with the race detector enabled
