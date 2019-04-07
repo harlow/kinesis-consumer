@@ -40,39 +40,62 @@ func main() {
 	}
 
 	// start scan
-	err = c.Scan(context.TODO(), func(r *consumer.Record) consumer.ScanStatus {
+	err = c.Scan(context.TODO(), func(r *consumer.Record) error {
 		fmt.Println(string(r.Data))
-
-		return consumer.ScanStatus{
-			StopScan:       false,  // true to stop scan
-			SkipCheckpoint: false,  // true to skip checkpoint
-		}
+		return nil // continue scanning
 	})
 	if err != nil {
 		log.Fatalf("scan error: %v", err)
 	}
 
-	// Note: If you need to aggregate based on a specific shard the `ScanShard`
-	// method should be leverged instead.
+	// Note: If you need to aggregate based on a specific shard
+	// the `ScanShard` function should be used instead.
 }
 ```
 
-## Scan status
+## ScanFunc
 
-The scan func returns a `consumer.ScanStatus` the struct allows some basic flow control.
+ScanFunc is the type of the function called for each message read
+from the stream. The record argument contains the original record
+returned from the AWS Kinesis library.
+
+```go
+type ScanFunc func(r *Record) error
+```
+
+If an error is returned, scanning stops. The sole exception is when the
+function returns the special value SkipCheckpoint.
 
 ```go
 // continue scanning
-return consumer.ScanStatus{}
+return nil
 
-// continue scanning, skip saving checkpoint
-return consumer.ScanStatus{SkipCheckpoint: true}
-
-// stop scanning, return nil
-return consumer.ScanStatus{StopScan: true}
+// continue scanning, skip checkpoint
+return consumer.SkipCheckpoint
 
 // stop scanning, return error
-return consumer.ScanStatus{Error: err}
+return errors.New("my error, exit all scans")
+```
+
+Use context cancel to signal the scan to exit without error. For example if we wanted to gracefulloy exit the scan on interrupt.
+
+```go
+// trap SIGINT, wait to trigger shutdown
+signals := make(chan os.Signal, 1)
+signal.Notify(signals, os.Interrupt)
+
+// context with cancel
+ctx, cancel := context.WithCancel(context.Background())
+
+go func() {
+	<-signals
+	cancel() // call cancellation
+}()
+
+err := c.Scan(ctx, func(r *consumer.Record) error {
+	fmt.Println(string(r.Data))
+	return nil // continue scanning
+})
 ```
 
 ## Checkpoint
@@ -182,7 +205,7 @@ Override the Kinesis client if there is any special config needed:
 
 ```go
 // client
-client := kinesis.New(session.New(aws.NewConfig()))
+client := kinesis.New(session.NewSession(aws.NewConfig()))
 
 // consumer
 c, err := consumer.New(streamName, consumer.WithClient(client))

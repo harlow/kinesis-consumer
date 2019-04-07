@@ -25,7 +25,12 @@ func main() {
 	defer f.Close()
 
 	var records []*kinesis.PutRecordsRequestEntry
-	var client = kinesis.New(session.New())
+
+	sess, err := session.NewSession(aws.NewConfig())
+	if err != nil {
+		log.Fatal(err)
+	}
+	var client = kinesis.New(sess)
 
 	// loop over file data
 	b := bufio.NewScanner(f)

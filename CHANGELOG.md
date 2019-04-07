@@ -6,6 +6,14 @@ All notable changes to this project will be documented in this file.
 
 Major changes:
 
+* Remove the concept of `ScanStatus` to simplify the scanning interface
+
+For more context on this change see: https://github.com/harlow/kinesis-consumer/issues/75
+
+## v0.3.0 - 2018-12-28
+
+Major changes:
+
 * Remove concept of `Client` it was confusing as it wasn't a direct standin for a Kinesis client.
 * Rename `ScanError` to `ScanStatus` as it's not always an error.
 

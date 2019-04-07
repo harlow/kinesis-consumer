@@ -11,23 +11,24 @@ import (
 	"github.com/aws/aws-sdk-go/service/kinesis/kinesisiface"
 )
 
+var records = []*kinesis.Record{
+	{
+		Data:           []byte("firstData"),
+		SequenceNumber: aws.String("firstSeqNum"),
+	},
+	{
+		Data:           []byte("lastData"),
+		SequenceNumber: aws.String("lastSeqNum"),
+	},
+}
+
 func TestNew(t *testing.T) {
 	if _, err := New("myStreamName"); err != nil {
 		t.Fatalf("new consumer error: %v", err)
 	}
 }
 
-func TestConsumer_Scan(t *testing.T) {
-	records := []*kinesis.Record{
-		{
-			Data:           []byte("firstData"),
-			SequenceNumber: aws.String("firstSeqNum"),
-		},
-		{
-			Data:           []byte("lastData"),
-			SequenceNumber: aws.String("lastSeqNum"),
-		},
-	}
+func TestScan(t *testing.T) {
 	client := &kinesisClientMock{
 		getShardIteratorMock: func(input *kinesis.GetShardIteratorInput) (*kinesis.GetShardIteratorOutput, error) {
 			return &kinesis.GetShardIteratorOutput{
@@ -64,10 +65,10 @@ func TestConsumer_Scan(t *testing.T) {
 
 	var resultData string
 	var fnCallCounter int
-	var fn = func(r *Record) ScanStatus {
+	var fn = func(r *Record) error {
 		fnCallCounter++
 		resultData += string(r.Data)
-		return ScanStatus{}
+		return nil
 	}
 
 	if err := c.Scan(context.Background(), fn); err != nil {
@@ -75,11 +76,13 @@ func TestConsumer_Scan(t *testing.T) {
 	}
 
 	if resultData != "firstDatalastData" {
-		t.Errorf("callback error expected %s, got %s", "firstDatalastData", resultData)
+		t.Errorf("callback error expected %s, got %s", "FirstLast", resultData)
 	}
+
 	if fnCallCounter != 2 {
 		t.Errorf("the callback function expects %v, got %v", 2, fnCallCounter)
 	}
+
 	if val := ctr.counter; val != 2 {
 		t.Errorf("counter error expected %d, got %d", 2, val)
 	}
@@ -90,7 +93,7 @@ func TestConsumer_Scan(t *testing.T) {
 	}
 }
 
-func TestConsumer_Scan_NoShardsAvailable(t *testing.T) {
+func TestScan_NoShardsAvailable(t *testing.T) {
 	client := &kinesisClientMock{
 		listShardsMock: func(input *kinesis.ListShardsInput) (*kinesis.ListShardsOutput, error) {
 			return &kinesis.ListShardsOutput{
@@ -98,54 +101,22 @@ func TestConsumer_Scan_NoShardsAvailable(t *testing.T) {
 			}, nil
 		},
 	}
-	var (
-		cp  = &fakeCheckpoint{cache: map[string]string{}}
-		ctr = &fakeCounter{}
-	)
 
-	c, err := New("myStreamName",
-		WithClient(client),
-		WithCounter(ctr),
-		WithCheckpoint(cp),
-	)
-	if err != nil {
-		t.Fatalf("new consumer error: %v", err)
+	var fn = func(r *Record) error {
+		return nil
 	}
 
-	var fnCallCounter int
-	var fn = func(r *Record) ScanStatus {
-		fnCallCounter++
-		return ScanStatus{}
+	c, err := New("myStreamName", WithClient(client))
+	if err != nil {
+		t.Fatalf("new consumer error: %v", err)
 	}
 
 	if err := c.Scan(context.Background(), fn); err == nil {
 		t.Errorf("scan shard error expected not nil. got %v", err)
 	}
-
-	if fnCallCounter != 0 {
-		t.Errorf("the callback function expects %v, got %v", 0, fnCallCounter)
-	}
-	if val := ctr.counter; val != 0 {
-		t.Errorf("counter error expected %d, got %d", 0, val)
-	}
-	val, err := cp.Get("myStreamName", "myShard")
-	if err != nil && val != "" {
-		t.Errorf("checkout error expected %s, got %s", "", val)
-	}
 }
 
 func TestScanShard(t *testing.T) {
-	var records = []*kinesis.Record{
-		{
-			Data:           []byte("firstData"),
-			SequenceNumber: aws.String("firstSeqNum"),
-		},
-		{
-			Data:           []byte("lastData"),
-			SequenceNumber: aws.String("lastSeqNum"),
-		},
-	}
-
 	var client = &kinesisClientMock{
 		getShardIteratorMock: func(input *kinesis.GetShardIteratorInput) (*kinesis.GetShardIteratorOutput, error) {
 			return &kinesis.GetShardIteratorOutput{
@@ -176,9 +147,9 @@ func TestScanShard(t *testing.T) {
 
 	// callback fn appends record data
 	var res string
-	var fn = func(r *Record) ScanStatus {
+	var fn = func(r *Record) error {
 		res += string(r.Data)
-		return ScanStatus{}
+		return nil
 	}
 
 	// scan shard
@@ -203,18 +174,7 @@ func TestScanShard(t *testing.T) {
 	}
 }
 
-func TestScanShard_StopScan(t *testing.T) {
-	var records = []*kinesis.Record{
-		{
-			Data:           []byte("firstData"),
-			SequenceNumber: aws.String("firstSeqNum"),
-		},
-		{
-			Data:           []byte("lastData"),
-			SequenceNumber: aws.String("lastSeqNum"),
-		},
-	}
-
+func TestScanShard_Cancellation(t *testing.T) {
 	var client = &kinesisClientMock{
 		getShardIteratorMock: func(input *kinesis.GetShardIteratorInput) (*kinesis.GetShardIteratorOutput, error) {
 			return &kinesis.GetShardIteratorOutput{
@@ -229,24 +189,68 @@ func TestScanShard_StopScan(t *testing.T) {
 		},
 	}
 
+	// use cancel func to signal shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+
+	var res string
+	var fn = func(r *Record) error {
+		res += string(r.Data)
+		cancel() // simulate cancellation while processing first record
+		return nil
+	}
+
 	c, err := New("myStreamName", WithClient(client))
 	if err != nil {
 		t.Fatalf("new consumer error: %v", err)
 	}
 
-	// callback fn appends record data
-	var res string
-	var fn = func(r *Record) ScanStatus {
-		res += string(r.Data)
-		return ScanStatus{StopScan: true}
-	}
-
-	if err := c.ScanShard(context.Background(), "myShard", fn); err != nil {
+	err = c.ScanShard(ctx, "myShard", fn)
+	if err != nil {
 		t.Fatalf("scan shard error: %v", err)
 	}
 
 	if res != "firstData" {
 		t.Fatalf("callback error expected %s, got %s", "firstData", res)
+	}
+}
+
+func TestScanShard_SkipCheckpoint(t *testing.T) {
+	var client = &kinesisClientMock{
+		getShardIteratorMock: func(input *kinesis.GetShardIteratorInput) (*kinesis.GetShardIteratorOutput, error) {
+			return &kinesis.GetShardIteratorOutput{
+				ShardIterator: aws.String("49578481031144599192696750682534686652010819674221576194"),
+			}, nil
+		},
+		getRecordsMock: func(input *kinesis.GetRecordsInput) (*kinesis.GetRecordsOutput, error) {
+			return &kinesis.GetRecordsOutput{
+				NextShardIterator: nil,
+				Records:           records,
+			}, nil
+		},
+	}
+
+	var cp = &fakeCheckpoint{cache: map[string]string{}}
+
+	c, err := New("myStreamName", WithClient(client), WithCheckpoint(cp))
+	if err != nil {
+		t.Fatalf("new consumer error: %v", err)
+	}
+
+	var fn = func(r *Record) error {
+		if aws.StringValue(r.SequenceNumber) == "lastSeqNum" {
+			return SkipCheckpoint
+		}
+		return nil
+	}
+
+	err = c.ScanShard(context.Background(), "myShard", fn)
+	if err != nil {
+		t.Fatalf("scan shard error: %v", err)
+	}
+
+	val, err := cp.Get("myStreamName", "myShard")
+	if err != nil && val != "firstSeqNum" {
+		t.Fatalf("checkout error expected %s, got %s", "firstSeqNum", val)
 	}
 }
 
@@ -270,11 +274,12 @@ func TestScanShard_ShardIsClosed(t *testing.T) {
 		t.Fatalf("new consumer error: %v", err)
 	}
 
-	var fn = func(r *Record) ScanStatus {
-		return ScanStatus{StopScan: true}
+	var fn = func(r *Record) error {
+		return nil
 	}
 
-	if err := c.ScanShard(context.Background(), "myShard", fn); err != nil {
+	err = c.ScanShard(context.Background(), "myShard", fn)
+	if err != nil {
 		t.Fatalf("scan shard error: %v", err)
 	}
 }
