@@ -96,29 +96,6 @@ func TestScan(t *testing.T) {
 	}
 }
 
-func TestScan_NoShardsAvailable(t *testing.T) {
-	client := &kinesisClientMock{
-		listShardsMock: func(input *kinesis.ListShardsInput) (*kinesis.ListShardsOutput, error) {
-			return &kinesis.ListShardsOutput{
-				Shards: make([]*kinesis.Shard, 0),
-			}, nil
-		},
-	}
-
-	var fn = func(r *Record) error {
-		return nil
-	}
-
-	c, err := New("myStreamName", WithClient(client))
-	if err != nil {
-		t.Fatalf("new consumer error: %v", err)
-	}
-
-	if err := c.Scan(context.Background(), fn); err == nil {
-		t.Errorf("scan shard error expected not nil. got %v", err)
-	}
-}
-
 func TestScanShard(t *testing.T) {
 	var client = &kinesisClientMock{
 		getShardIteratorMock: func(input *kinesis.GetShardIteratorInput) (*kinesis.GetShardIteratorOutput, error) {
@@ -164,7 +141,7 @@ func TestScanShard(t *testing.T) {
 		return nil
 	}
 
-	if err := c.Scan(ctx, fn); err != nil {
+	if err := c.ScanShard(ctx, "myShard", fn); err != nil {
 		t.Errorf("scan returned unexpected error %v", err)
 	}
 
@@ -269,35 +246,35 @@ func TestScanShard_SkipCheckpoint(t *testing.T) {
 	}
 }
 
-// func TestScanShard_ShardIsClosed(t *testing.T) {
-// 	var client = &kinesisClientMock{
-// 		getShardIteratorMock: func(input *kinesis.GetShardIteratorInput) (*kinesis.GetShardIteratorOutput, error) {
-// 			return &kinesis.GetShardIteratorOutput{
-// 				ShardIterator: aws.String("49578481031144599192696750682534686652010819674221576194"),
-// 			}, nil
-// 		},
-// 		getRecordsMock: func(input *kinesis.GetRecordsInput) (*kinesis.GetRecordsOutput, error) {
-// 			return &kinesis.GetRecordsOutput{
-// 				NextShardIterator: nil,
-// 				Records:           make([]*Record, 0),
-// 			}, nil
-// 		},
-// 	}
+func TestScanShard_ShardIsClosed(t *testing.T) {
+	var client = &kinesisClientMock{
+		getShardIteratorMock: func(input *kinesis.GetShardIteratorInput) (*kinesis.GetShardIteratorOutput, error) {
+			return &kinesis.GetShardIteratorOutput{
+				ShardIterator: aws.String("49578481031144599192696750682534686652010819674221576194"),
+			}, nil
+		},
+		getRecordsMock: func(input *kinesis.GetRecordsInput) (*kinesis.GetRecordsOutput, error) {
+			return &kinesis.GetRecordsOutput{
+				NextShardIterator: nil,
+				Records:           make([]*Record, 0),
+			}, nil
+		},
+	}
 
-// 	c, err := New("myStreamName", WithClient(client))
-// 	if err != nil {
-// 		t.Fatalf("new consumer error: %v", err)
-// 	}
+	c, err := New("myStreamName", WithClient(client))
+	if err != nil {
+		t.Fatalf("new consumer error: %v", err)
+	}
 
-// 	var fn = func(r *Record) error {
-// 		return nil
-// 	}
+	var fn = func(r *Record) error {
+		return nil
+	}
 
-// 	err = c.ScanShard(context.Background(), "myShard", fn)
-// 	if err != nil {
-// 		t.Fatalf("scan shard error: %v", err)
-// 	}
-// }
+	err = c.ScanShard(context.Background(), "myShard", fn)
+	if err != nil {
+		t.Fatalf("scan shard error: %v", err)
+	}
+}
 
 type kinesisClientMock struct {
 	kinesisiface.KinesisAPI

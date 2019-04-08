@@ -33,11 +33,10 @@ type broker struct {
 	shards  map[string]*kinesis.Shard
 }
 
-func (b *broker) shardLoop(ctx context.Context) {
+func (b *broker) pollShards(ctx context.Context) {
 	b.fetchShards()
 
-	// add ticker, and cancellation
-	// also add signal to re-pull?
+	// TODO: also add signal to re-poll
 
 	go func() {
 		for {

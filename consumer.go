@@ -88,7 +88,7 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 	defer cancel()
 
 	go func() {
-		broker.shardLoop(ctx)
+		broker.pollShards(ctx)
 
 		<-ctx.Done()
 		close(shardc)
