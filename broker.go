@@ -49,8 +49,8 @@ func (b *broker) pollShards(ctx context.Context) {
 }
 
 // leaseShards attempts to find new shards that need to be
-// processed; when a new shard is found it passing the shard
-// ID back to the consumer on the shard channel
+// processed; when a new shard is found it passes the shard
+// ID back to the consumer on the shardc channel
 func (b *broker) leaseShards() {
 	b.shardMu.Lock()
 	defer b.shardMu.Unlock()
