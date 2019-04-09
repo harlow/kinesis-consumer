@@ -321,8 +321,12 @@ func (fc *fakeCheckpoint) Get(streamName, shardID string) (string, error) {
 // implementation of counter
 type fakeCounter struct {
 	counter int64
+	mu      sync.Mutex
 }
 
 func (fc *fakeCounter) Add(streamName string, count int64) {
+	fc.mu.Lock()
+	defer fc.mu.Unlock()
+
 	fc.counter += count
 }
