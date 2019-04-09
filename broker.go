@@ -11,11 +11,9 @@ import (
 	"github.com/aws/aws-sdk-go/service/kinesis/kinesisiface"
 )
 
-func newBroker(
-	client kinesisiface.KinesisAPI,
-	streamName string,
-	shardc chan *kinesis.Shard,
-) *broker {
+const pollFreq = 30 * time.Second
+
+func newBroker(client kinesisiface.KinesisAPI, streamName string, shardc chan *kinesis.Shard) *broker {
 	return &broker{
 		client:     client,
 		shards:     make(map[string]*kinesis.Shard),
@@ -24,6 +22,8 @@ func newBroker(
 	}
 }
 
+// broker keeps local cache list of the shard we are already processing
+// and routinely polls the stream looking for new shards to process
 type broker struct {
 	client     kinesisiface.KinesisAPI
 	streamName string
@@ -36,14 +36,12 @@ type broker struct {
 func (b *broker) pollShards(ctx context.Context) {
 	b.fetchShards()
 
-	// TODO: also add signal to re-poll
-
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(30 * time.Second):
+			case <-time.After(pollFreq):
 				b.fetchShards()
 			}
 		}
