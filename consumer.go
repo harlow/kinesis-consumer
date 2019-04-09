@@ -81,13 +81,13 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 	var (
 		errc   = make(chan error, 1)
 		shardc = make(chan *kinesis.Shard, 1)
-		broker = newBroker(c.client, c.streamName, shardc)
+		broker = newBroker(c.client, c.streamName, shardc, c.logger)
 	)
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	go broker.pollShards(ctx)
+	go broker.start(ctx)
 
 	go func() {
 		<-ctx.Done()
@@ -105,7 +105,6 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 				default:
 					// error has already occured
 				}
-				return
 			}
 		}(aws.StringValue(shard.ShardId))
 	}
