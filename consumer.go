@@ -87,9 +87,9 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	go func() {
-		broker.pollShards(ctx)
+	go broker.pollShards(ctx)
 
+	go func() {
 		<-ctx.Done()
 		close(shardc)
 	}()
