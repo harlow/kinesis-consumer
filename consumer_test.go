@@ -86,7 +86,7 @@ func TestScan(t *testing.T) {
 		t.Errorf("callback error expected %s, got %s", "firstDatalastData", res)
 	}
 
-	if val := ctr.counter; val != 2 {
+	if val := ctr.Get(); val != 2 {
 		t.Errorf("counter error expected %d, got %d", 2, val)
 	}
 
@@ -151,7 +151,7 @@ func TestScanShard(t *testing.T) {
 	}
 
 	// increments counter
-	if val := ctr.counter; val != 2 {
+	if val := ctr.Get(); val != 2 {
 		t.Fatalf("counter error expected %d, got %d", 2, val)
 	}
 
@@ -322,6 +322,13 @@ func (fc *fakeCheckpoint) Get(streamName, shardID string) (string, error) {
 type fakeCounter struct {
 	counter int64
 	mu      sync.Mutex
+}
+
+func (fc *fakeCounter) Get() int64 {
+	fc.mu.Lock()
+	defer fc.mu.Unlock()
+
+	return fc.counter
 }
 
 func (fc *fakeCounter) Add(streamName string, count int64) {
