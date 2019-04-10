@@ -20,7 +20,9 @@ Get the package source:
 
 The consumer leverages a handler func that accepts a Kinesis record. The `Scan` method will consume all shards concurrently and call the callback func as it receives records from the stream.
 
-_Important: The default Log, Counter, and Checkpoint are no-op which means no logs, counts, or checkpoints will be emitted when scanning the stream. See the options below to override these defaults._
+_Important 1: The `Scan` func will also poll the stream to check for new shards, it will automatcially start consuming new shards added to the stream._
+
+_Important 2: The default Log, Counter, and Checkpoint are no-op which means no logs, counts, or checkpoints will be emitted when scanning the stream. See the options below to override these defaults._
 
 ```go
 import(
@@ -255,8 +257,8 @@ The package defaults to `ioutil.Discard` so swallow all logs. This can be custom
 
 ```go
 // logger
-log := &myLogger{
-	logger: log.New(os.Stdout, "consumer-example: ", log.LstdFlags)
+logger := &myLogger{
+	logger: log.New(os.Stdout, "consumer-example: ", log.LstdFlags),
 }
 
 // consumer

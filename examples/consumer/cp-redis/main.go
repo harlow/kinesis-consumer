@@ -12,6 +12,16 @@ import (
 	checkpoint "github.com/harlow/kinesis-consumer/checkpoint/redis"
 )
 
+// A myLogger provides a minimalistic logger satisfying the Logger interface.
+type myLogger struct {
+	logger *log.Logger
+}
+
+// Log logs the parameters to the stdlib logger. See log.Println.
+func (l *myLogger) Log(args ...interface{}) {
+	l.logger.Println(args...)
+}
+
 func main() {
 	var (
 		app    = flag.String("app", "", "Consumer app name")
@@ -25,9 +35,16 @@ func main() {
 		log.Fatalf("checkpoint error: %v", err)
 	}
 
+	// logger
+	logger := &myLogger{
+		logger: log.New(os.Stdout, "consumer-example: ", log.LstdFlags),
+	}
+
 	// consumer
 	c, err := consumer.New(
-		*stream, consumer.WithCheckpoint(ck),
+		*stream,
+		consumer.WithCheckpoint(ck),
+		consumer.WithLogger(logger),
 	)
 	if err != nil {
 		log.Fatalf("consumer error: %v", err)
@@ -42,6 +59,7 @@ func main() {
 
 	go func() {
 		<-signals
+		fmt.Println("caught exit signal, cancelling context!")
 		cancel()
 	}()
 

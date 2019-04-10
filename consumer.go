@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
-	"sync"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -70,7 +69,7 @@ type Consumer struct {
 // function returns the special value SkipCheckpoint.
 type ScanFunc func(*Record) error
 
-// SkipCheckpoint is used as a return value from ScanFuncs to indicate that
+// SkipCheckpoint is used as a return value from ScanFunc to indicate that
 // the current checkpoint should be skipped skipped. It is not returned
 // as an error by any function.
 var SkipCheckpoint = errors.New("skip checkpoint")
@@ -79,51 +78,44 @@ var SkipCheckpoint = errors.New("skip checkpoint")
 // is passed through to each of the goroutines and called with each message pulled from
 // the stream.
 func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
+	var (
+		errc   = make(chan error, 1)
+		shardc = make(chan *kinesis.Shard, 1)
+		broker = newBroker(c.client, c.streamName, shardc, c.logger)
+	)
+
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// get shard ids
-	shardIDs, err := c.getShardIDs(c.streamName)
-	if err != nil {
-		return fmt.Errorf("get shards error: %v", err)
-	}
+	go broker.start(ctx)
 
-	if len(shardIDs) == 0 {
-		return fmt.Errorf("no shards available")
-	}
+	go func() {
+		<-ctx.Done()
+		close(shardc)
+	}()
 
-	var (
-		wg   sync.WaitGroup
-		errc = make(chan error, 1)
-	)
-	wg.Add(len(shardIDs))
-
-	// process each shard in a separate goroutine
-	for _, shardID := range shardIDs {
+	// process each of the shards
+	for shard := range shardc {
 		go func(shardID string) {
-			defer wg.Done()
-
 			if err := c.ScanShard(ctx, shardID, fn); err != nil {
-				cancel()
-
 				select {
 				case errc <- fmt.Errorf("shard %s error: %v", shardID, err):
 					// first error to occur
+					cancel()
 				default:
 					// error has already occured
 				}
 			}
-		}(shardID)
+		}(aws.StringValue(shard.ShardId))
 	}
 
-	wg.Wait()
 	close(errc)
 
 	return <-errc
 }
 
-// ScanShard loops over records on a specific shard, calls the ScanFunc callback
-// func for each record and checkpoints the progress of scan.
+// ScanShard loops over records on a specific shard, calls the callback func
+// for each record and checkpoints the progress of scan.
 func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) error {
 	// get last seq number from checkpoint
 	lastSeqNum, err := c.checkpoint.Get(c.streamName, shardID)
@@ -137,7 +129,10 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 		return fmt.Errorf("get shard iterator error: %v", err)
 	}
 
-	c.logger.Log("scanning", shardID, lastSeqNum)
+	c.logger.Log("[START]\t", shardID, lastSeqNum)
+	defer func() {
+		c.logger.Log("[STOP]\t", shardID)
+	}()
 
 	for {
 		select {
@@ -148,8 +143,7 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 				ShardIterator: shardIterator,
 			})
 
-			// often we can recover from GetRecords error by getting a
-			// new shard iterator, else return error
+			// attempt to recover from GetRecords error by getting new shard iterator
 			if err != nil {
 				shardIterator, err = c.getShardIterator(c.streamName, shardID, lastSeqNum)
 				if err != nil {
@@ -181,6 +175,7 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 			}
 
 			if isShardClosed(resp.NextShardIterator, shardIterator) {
+				c.logger.Log("[CLOSED]\t", shardID)
 				return nil
 			}
 
@@ -191,32 +186,6 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 
 func isShardClosed(nextShardIterator, currentShardIterator *string) bool {
 	return nextShardIterator == nil || currentShardIterator == nextShardIterator
-}
-
-func (c *Consumer) getShardIDs(streamName string) ([]string, error) {
-	var ss []string
-	var listShardsInput = &kinesis.ListShardsInput{
-		StreamName: aws.String(streamName),
-	}
-
-	for {
-		resp, err := c.client.ListShards(listShardsInput)
-		if err != nil {
-			return nil, fmt.Errorf("ListShards error: %v", err)
-		}
-
-		for _, shard := range resp.Shards {
-			ss = append(ss, *shard.ShardId)
-		}
-
-		if resp.NextToken == nil {
-			return ss, nil
-		}
-
-		listShardsInput = &kinesis.ListShardsInput{
-			NextToken: resp.NextToken,
-		}
-	}
 }
 
 func (c *Consumer) getShardIterator(streamName, shardID, seqNum string) (*string, error) {

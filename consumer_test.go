@@ -63,56 +63,36 @@ func TestScan(t *testing.T) {
 		t.Fatalf("new consumer error: %v", err)
 	}
 
-	var resultData string
-	var fnCallCounter int
+	var (
+		ctx, cancel = context.WithCancel(context.Background())
+		res         string
+	)
+
 	var fn = func(r *Record) error {
-		fnCallCounter++
-		resultData += string(r.Data)
+		res += string(r.Data)
+
+		if string(r.Data) == "lastData" {
+			cancel()
+		}
+
 		return nil
 	}
 
-	if err := c.Scan(context.Background(), fn); err != nil {
-		t.Errorf("scan shard error expected nil. got %v", err)
+	if err := c.Scan(ctx, fn); err != nil {
+		t.Errorf("scan returned unexpected error %v", err)
 	}
 
-	if resultData != "firstDatalastData" {
-		t.Errorf("callback error expected %s, got %s", "FirstLast", resultData)
+	if res != "firstDatalastData" {
+		t.Errorf("callback error expected %s, got %s", "firstDatalastData", res)
 	}
 
-	if fnCallCounter != 2 {
-		t.Errorf("the callback function expects %v, got %v", 2, fnCallCounter)
-	}
-
-	if val := ctr.counter; val != 2 {
+	if val := ctr.Get(); val != 2 {
 		t.Errorf("counter error expected %d, got %d", 2, val)
 	}
 
 	val, err := cp.Get("myStreamName", "myShard")
 	if err != nil && val != "lastSeqNum" {
 		t.Errorf("checkout error expected %s, got %s", "lastSeqNum", val)
-	}
-}
-
-func TestScan_NoShardsAvailable(t *testing.T) {
-	client := &kinesisClientMock{
-		listShardsMock: func(input *kinesis.ListShardsInput) (*kinesis.ListShardsOutput, error) {
-			return &kinesis.ListShardsOutput{
-				Shards: make([]*kinesis.Shard, 0),
-			}, nil
-		},
-	}
-
-	var fn = func(r *Record) error {
-		return nil
-	}
-
-	c, err := New("myStreamName", WithClient(client))
-	if err != nil {
-		t.Fatalf("new consumer error: %v", err)
-	}
-
-	if err := c.Scan(context.Background(), fn); err == nil {
-		t.Errorf("scan shard error expected not nil. got %v", err)
 	}
 }
 
@@ -146,15 +126,23 @@ func TestScanShard(t *testing.T) {
 	}
 
 	// callback fn appends record data
-	var res string
+	var (
+		ctx, cancel = context.WithCancel(context.Background())
+		res         string
+	)
+
 	var fn = func(r *Record) error {
 		res += string(r.Data)
+
+		if string(r.Data) == "lastData" {
+			cancel()
+		}
+
 		return nil
 	}
 
-	// scan shard
-	if err := c.ScanShard(context.Background(), "myShard", fn); err != nil {
-		t.Fatalf("scan shard error: %v", err)
+	if err := c.ScanShard(ctx, "myShard", fn); err != nil {
+		t.Errorf("scan returned unexpected error %v", err)
 	}
 
 	// runs callback func
@@ -163,7 +151,7 @@ func TestScanShard(t *testing.T) {
 	}
 
 	// increments counter
-	if val := ctr.counter; val != 2 {
+	if val := ctr.Get(); val != 2 {
 		t.Fatalf("counter error expected %d, got %d", 2, val)
 	}
 
@@ -236,14 +224,18 @@ func TestScanShard_SkipCheckpoint(t *testing.T) {
 		t.Fatalf("new consumer error: %v", err)
 	}
 
+	var ctx, cancel = context.WithCancel(context.Background())
+
 	var fn = func(r *Record) error {
 		if aws.StringValue(r.SequenceNumber) == "lastSeqNum" {
+			cancel()
 			return SkipCheckpoint
 		}
+
 		return nil
 	}
 
-	err = c.ScanShard(context.Background(), "myShard", fn)
+	err = c.ScanShard(ctx, "myShard", fn)
 	if err != nil {
 		t.Fatalf("scan shard error: %v", err)
 	}
@@ -329,8 +321,19 @@ func (fc *fakeCheckpoint) Get(streamName, shardID string) (string, error) {
 // implementation of counter
 type fakeCounter struct {
 	counter int64
+	mu      sync.Mutex
+}
+
+func (fc *fakeCounter) Get() int64 {
+	fc.mu.Lock()
+	defer fc.mu.Unlock()
+
+	return fc.counter
 }
 
 func (fc *fakeCounter) Add(streamName string, count int64) {
+	fc.mu.Lock()
+	defer fc.mu.Unlock()
+
 	fc.counter += count
 }
