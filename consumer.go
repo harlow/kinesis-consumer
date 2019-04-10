@@ -26,7 +26,7 @@ func New(streamName string, opts ...Option) (*Consumer, error) {
 	// new consumer with no-op checkpoint, counter, and logger
 	c := &Consumer{
 		streamName:               streamName,
-		initialShardIteratorType: kinesis.ShardIteratorTypeTrimHorizon,
+		initialShardIteratorType: kinesis.ShardIteratorTypeLatest,
 		checkpoint:               &noopCheckpoint{},
 		counter:                  &noopCounter{},
 		logger: &noopLogger{

@@ -234,6 +234,22 @@ The [expvar package](https://golang.org/pkg/expvar/) will display consumer count
 },
 ```
 
+### Consumer starting point
+
+Kinesis allows consumers to specify where on the stream they'd like to start consuming from. The default in this library is `LATEST` (Start reading just after the most recent record in the shard).
+
+This can be adjusted by using the `WithShardIteratorType` option in the library:
+
+```go
+// override starting place on stream to use TRIM_HORIZON
+c, err := consumer.New(
+  *stream,
+  consumer.WithShardIteratorType(kinesis.ShardIteratorTypeTrimHorizon)
+)
+```
+
+[See AWS Docs for more options.](https://docs.aws.amazon.com/kinesis/latest/APIReference/API_GetShardIterator.html)
+
 ### Logging
 
 Logging supports the basic built-in logging library or use thrid party external one, so long as
