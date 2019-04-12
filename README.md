@@ -197,6 +197,34 @@ CREATE TABLE kinesis_consumer (
 
 The table name has to be the same that you specify when creating the checkpoint. The primary key composed by namespace and shard_id is mandatory in order to the checkpoint run without issues and also to ensure data integrity.
 
+### Mysql Checkpoint
+
+The Mysql checkpoint requires Table Name, App Name, Stream Name and ConnectionString (just like the Postgres checkpoint!):
+
+```go
+import checkpoint "github.com/harlow/kinesis-consumer/checkpoint/mysql"
+
+// mysql checkpoint
+ck, err := checkpoint.New(app, table, connStr)
+if err != nil {
+  log.Fatalf("new checkpoint error: %v", err)
+}
+
+```
+
+To leverage the Mysql checkpoint we'll also need to create a table:
+
+```sql
+CREATE TABLE kinesis_consumer (
+	namespace varchar(255) NOT NULL,
+	shard_id varchar(255) NOT NULL,
+	sequence_number numeric(65,0) NOT NULL,
+	CONSTRAINT kinesis_consumer_pk PRIMARY KEY (namespace, shard_id)
+);
+```
+
+The table name has to be the same that you specify when creating the checkpoint. The primary key composed by namespace and shard_id is mandatory in order to the checkpoint run without issues and also to ensure data integrity.
+
 ## Options
 
 The consumer allows the following optional overrides.
