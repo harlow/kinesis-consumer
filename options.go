@@ -39,3 +39,11 @@ func WithShardIteratorType(t string) Option {
 		c.initialShardIteratorType = t
 	}
 }
+
+// WithGroup allows user to pass in ConsumerGroups
+func WithGroup(group Group) Option {
+	return func(c *Consumer) {
+		c.group = group
+	}
+
+}

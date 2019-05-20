@@ -16,6 +16,10 @@ import (
 // Record is an alias of record returned from kinesis library
 type Record = kinesis.Record
 
+type Group interface {
+	Start(ctx context.Context, shardc chan string)
+}
+
 // New creates a kinesis consumer with default settings. Use Option to override
 // any of the optional attributes.
 func New(streamName string, opts ...Option) (*Consumer, error) {
@@ -39,13 +43,18 @@ func New(streamName string, opts ...Option) (*Consumer, error) {
 		opt(c)
 	}
 
-	// default client if none provided
+	// default client if None provided
 	if c.client == nil {
 		newSession, err := session.NewSession(aws.NewConfig())
 		if err != nil {
 			return nil, err
 		}
 		c.client = kinesis.New(newSession)
+	}
+
+	// default the group if nothing was provided
+	if c.group == nil {
+		c.group = newBroker(c.client, streamName, c.logger)
 	}
 
 	return c, nil
@@ -59,6 +68,7 @@ type Consumer struct {
 	logger                   Logger
 	checkpoint               Checkpoint
 	counter                  Counter
+	group                    Group
 }
 
 // ScanFunc is the type of the function called for each message read
@@ -80,14 +90,13 @@ var SkipCheckpoint = errors.New("skip checkpoint")
 func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 	var (
 		errc   = make(chan error, 1)
-		shardc = make(chan *kinesis.Shard, 1)
-		broker = newBroker(c.client, c.streamName, shardc, c.logger)
+		shardc = make(chan string, 1)
 	)
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	go broker.start(ctx)
+	go c.group.Start(ctx, shardc)
 
 	go func() {
 		<-ctx.Done()
@@ -106,7 +115,7 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 					// error has already occured
 				}
 			}
-		}(aws.StringValue(shard.ShardId))
+		}(shard)
 	}
 
 	close(errc)

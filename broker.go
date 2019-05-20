@@ -14,14 +14,12 @@ import (
 func newBroker(
 	client kinesisiface.KinesisAPI,
 	streamName string,
-	shardc chan *kinesis.Shard,
 	logger Logger,
 ) *broker {
 	return &broker{
 		client:     client,
 		shards:     make(map[string]*kinesis.Shard),
 		streamName: streamName,
-		shardc:     shardc,
 		logger:     logger,
 	}
 }
@@ -31,17 +29,15 @@ func newBroker(
 type broker struct {
 	client     kinesisiface.KinesisAPI
 	streamName string
-	shardc     chan *kinesis.Shard
 	logger     Logger
-
-	shardMu sync.Mutex
-	shards  map[string]*kinesis.Shard
+	shardMu    sync.Mutex
+	shards     map[string]*kinesis.Shard
 }
 
-// start is a blocking operation which will loop and attempt to find new
+// Start is a blocking operation which will loop and attempt to find new
 // shards on a regular cadence.
-func (b *broker) start(ctx context.Context) {
-	b.findNewShards()
+func (b *broker) Start(ctx context.Context, shardc chan string) {
+	b.findNewShards(shardc)
 	ticker := time.NewTicker(30 * time.Second)
 
 	// Note: while ticker is a rather naive approach to this problem,
@@ -59,7 +55,7 @@ func (b *broker) start(ctx context.Context) {
 			ticker.Stop()
 			return
 		case <-ticker.C:
-			b.findNewShards()
+			b.findNewShards(shardc)
 		}
 	}
 }
@@ -67,7 +63,7 @@ func (b *broker) start(ctx context.Context) {
 // findNewShards pulls the list of shards from the Kinesis API
 // and uses a local cache to determine if we are already processing
 // a particular shard.
-func (b *broker) findNewShards() {
+func (b *broker) findNewShards(shardc chan string) {
 	b.shardMu.Lock()
 	defer b.shardMu.Unlock()
 
@@ -84,11 +80,11 @@ func (b *broker) findNewShards() {
 			continue
 		}
 		b.shards[*shard.ShardId] = shard
-		b.shardc <- shard
+		shardc <- *shard.ShardId
 	}
 }
 
-// listShards pulls a list of shard IDs from the kinesis api
+// ListAllShards pulls a list of shard IDs from the kinesis api
 func (b *broker) listShards() ([]*kinesis.Shard, error) {
 	var ss []*kinesis.Shard
 	var listShardsInput = &kinesis.ListShardsInput{
@@ -98,7 +94,7 @@ func (b *broker) listShards() ([]*kinesis.Shard, error) {
 	for {
 		resp, err := b.client.ListShards(listShardsInput)
 		if err != nil {
-			return nil, fmt.Errorf("ListShards error: %v", err)
+			return nil, fmt.Errorf("ListAllShards error: %v", err)
 		}
 		ss = append(ss, resp.Shards...)
 
