@@ -13,12 +13,14 @@ type KinesisClient interface {
 	ListShards(*kinesis.ListShardsInput) (*kinesis.ListShardsOutput, error)
 }
 
+// Kinesis is a convenience struct that includes streamname and client
 type Kinesis struct {
 	client     KinesisClient
 	streamName string
 }
 
 // ListAllShards pulls a list of shard IDs from the kinesis api
+// this could also be used by broker.go or any other future "group" implementation that needs to get the shards.
 func (k Kinesis) ListAllShards() ([]string, error) {
 	var ss []string
 	var listShardsInput = &kinesis.ListShardsInput{

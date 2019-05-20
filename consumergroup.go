@@ -9,13 +9,27 @@ import (
 	"github.com/twinj/uuid"
 )
 
+// TODO change logging to actual logger
+
 // Lease is data for handling a lease/lock on a particular shard
 type Lease struct {
-	LeaseKey       string    `json:"leaseKey"`   // This is the partitionKey in dynamo
-	Checkpoint     string    `json:"checkpoint"` // the most updated sequenceNumber from kinesis
-	LeaseCounter   int       `json:"leaseCounter"`
-	LeaseOwner     string    `json:"leaseOwner"`
-	HeartbeatID    string    `json:"heartbeatID"`
+	// LeaseKey is the partition/primaryKey in storage and is the shardID
+	LeaseKey string `json:"leaseKey"`
+
+	// Checkpoint the most updated sequenceNumber from kinesis
+	Checkpoint string `json:"checkpoint"`
+
+	// LeaseCounter will be updated any time a lease changes owners
+	LeaseCounter int `json:"leaseCounter"`
+
+	// LeaseOwner is the client id (defaulted to a guid)
+	LeaseOwner string `json:"leaseOwner"`
+
+	// HeartbeatID is a guid that gets updated on every heartbeat.  It is used to help determine if a lease is expired.
+	// If a lease's heartbeatID hasn't been updated within the lease duration, then we assume the lease is expired
+	HeartbeatID string `json:"heartbeatID"`
+
+	// LastUpdateTime is the last time the lease has changed.  Purposely not stored in storage.  It is used with
 	LastUpdateTime time.Time `json:"-"` // purposely left out of json so it doesn't get stored in dynamo
 }
 
@@ -27,23 +41,13 @@ func (lease Lease) IsExpired(maxLeaseDuration time.Duration) bool {
 			return true
 		}
 	}
-
 	return false
-}
-
-// LeaseUpdate is a single entry from either journal - subscription or entitlement - with some state information
-type LeaseUpdate struct {
-	Checkpoint     string    `json:":cp"`
-	LeaseCounter   int       `json:":lc"`
-	LeaseOwner     string    `json:":lo"`
-	HeartbeatID    string    `json:":hb"`
-	LastUpdateTime time.Time `json:"-"`
 }
 
 // CheckpointStorage is a simple interface for abstracting away the storage functions
 type CheckpointStorage interface {
 	CreateLease(lease Lease) error
-	UpdateLease(leaseKey string, leaseUpdate LeaseUpdate) error
+	UpdateLease(originalLease, updatedLease Lease) error
 	GetLease(leaseKey string) (*Lease, error)
 	GetAllLeases() (map[string]Lease, error)
 }
@@ -91,7 +95,7 @@ func NewConsumerGroupCheckpoint(
 }
 
 // Start is a blocking call that will attempt to acquire a lease on every tick of leaseDuration
-// If a lease is successfully acquired it will be returned otherwise it will continue to retry
+// If a lease is successfully acquired it will be added to the channel otherwise it will continue to retry
 func (cgc ConsumerGroupCheckpoint) Start(ctx context.Context, shardc chan string) {
 	fmt.Printf("Starting ConsumerGroupCheckpoint for Consumer %s \n", cgc.OwnerID)
 
@@ -166,21 +170,22 @@ func (cgc ConsumerGroupCheckpoint) CreateOrGetExpiredLease(currentLeases map[str
 		for _, lease := range currentLeases {
 			// TODO add some nil checking
 			if currentLeases[lease.LeaseKey].HeartbeatID == previousLeases[lease.LeaseKey].HeartbeatID { //we assume the lease was not updated during the amount of time
-				lease.LeaseCounter = lease.LeaseCounter + 1 //update lease counter
-				if err := cgc.Storage.UpdateLease(lease.LeaseKey, LeaseUpdate{
+				updatedLease := Lease{
+					LeaseKey:       lease.LeaseKey,
 					Checkpoint:     lease.Checkpoint,
-					LeaseCounter:   lease.LeaseCounter,
+					LeaseCounter:   lease.LeaseCounter + 1,
 					LeaseOwner:     cgc.OwnerID,
 					HeartbeatID:    uuid.NewV4().String(),
 					LastUpdateTime: time.Now(),
-				}); err != nil {
+				}
+				if err := cgc.Storage.UpdateLease(lease, updatedLease); err != nil {
 					fmt.Printf("Error is happening updating the lease")
 				} else {
 					if isLeaseInvalidOrChanged(cgc, lease) {
 						return nil //should not be a valid lease at this point
 					}
 					fmt.Printf("Successfully Acquired Expired lease %v\n", lease)
-					currentLease = &lease //successfully acquired the lease
+					currentLease = &updatedLease //successfully acquired the lease
 					break
 				}
 			}
@@ -189,8 +194,10 @@ func (cgc ConsumerGroupCheckpoint) CreateOrGetExpiredLease(currentLeases map[str
 	return currentLease
 }
 
-// heartbeatLoop - this should constantly update the lease that is provided
+// heartbeatLoop should constantly update the lease that is provided
 func (cgc ConsumerGroupCheckpoint) heartbeatLoop(lease *Lease) {
+	cgc.Mutex.Lock()
+	defer cgc.Mutex.Unlock()
 	fmt.Println("Starting heartbeat loop")
 	ticker := time.NewTicker(cgc.HeartBeatDuration)
 	defer ticker.Stop()
@@ -198,23 +205,21 @@ func (cgc ConsumerGroupCheckpoint) heartbeatLoop(lease *Lease) {
 	for {
 		select {
 		case <-ticker.C:
-			//TODO also check to see if the lease is expired
-			if !isLeaseInvalidOrChanged(cgc, *lease) {
-				//TODO remove the lease from the consumer group checklist
 
+			if isLeaseInvalidOrChanged(cgc, *lease) || lease.IsExpired(cgc.LeaseDuration) {
+				delete(cgc.currentLeases, lease.LeaseKey)
 			}
-			// TODO handle error
-			heartbeatID := uuid.NewV4().String()
-			updateTime := time.Now()
-			cgc.Storage.UpdateLease(lease.LeaseKey, LeaseUpdate{
+			updatedLease := Lease{
+				LeaseKey:       lease.LeaseKey,
 				Checkpoint:     lease.Checkpoint,
 				LeaseCounter:   lease.LeaseCounter,
 				LeaseOwner:     lease.LeaseOwner,
-				HeartbeatID:    heartbeatID,
-				LastUpdateTime: updateTime,
-			})
-			lease.HeartbeatID = heartbeatID
-			lease.LastUpdateTime = updateTime
+				HeartbeatID:    uuid.NewV4().String(),
+				LastUpdateTime: time.Now(),
+			}
+			// TODO handle error
+			cgc.Storage.UpdateLease(*lease, updatedLease)
+			lease = &updatedLease
 			fmt.Printf("Sucessfully updated lease %v\n", lease)
 		case <-cgc.done:
 			return
