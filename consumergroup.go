@@ -2,6 +2,7 @@ package consumer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -10,6 +11,9 @@ import (
 )
 
 // TODO change logging to actual logger
+
+// StorageCouldNotUpdateOrCreateLease is a simple error for handling races that are lost in storage
+var StorageCouldNotUpdateOrCreateLease = errors.New("storage could not update or create lease")
 
 // Lease is data for handling a lease/lock on a particular shard
 type Lease struct {

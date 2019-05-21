@@ -11,7 +11,7 @@ require (
 	github.com/onsi/gomega v1.5.0 // indirect
 	github.com/pkg/errors v0.8.0
 	github.com/smartystreets/goconvey v0.0.0-20190330032615-68dc04aab96a // indirect
-	github.com/stretchr/testify v1.3.0 // indirect
+	github.com/stretchr/testify v1.3.0
 	github.com/twinj/uuid v1.0.0
 	golang.org/x/net v0.0.0-20190514140710-3ec191127204 // indirect
 	google.golang.org/appengine v1.6.0 // indirect

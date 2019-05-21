@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
 	"github.com/aws/aws-sdk-go/service/dynamodb/expression"
@@ -57,7 +58,11 @@ func (dynamoClient DynamoStorage) CreateLease(lease consumer.Lease) error {
 	}
 
 	if _, err := dynamoClient.Db.PutItem(input); err != nil {
-		// TODO need to handle ErrCodeConditionalCheckFailedException and repackage error as known error to client
+		if awsErr, ok := err.(awserr.Error); ok {
+			if awsErr.Code() == dynamodb.ErrCodeConditionalCheckFailedException {
+				return consumer.StorageCouldNotUpdateOrCreateLease
+			}
+		}
 		return err
 	}
 
@@ -96,7 +101,11 @@ func (dynamoClient DynamoStorage) UpdateLease(originalLease, updatedLease consum
 	}
 
 	if _, err := dynamoClient.Db.UpdateItem(input); err != nil {
-		// TODO need to handle ErrCodeConditionalCheckFailedException and repackage error as known error to client
+		if awsErr, ok := err.(awserr.Error); ok {
+			if awsErr.Code() == dynamodb.ErrCodeConditionalCheckFailedException {
+				return consumer.StorageCouldNotUpdateOrCreateLease
+			}
+		}
 		return err
 	}
 
