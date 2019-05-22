@@ -171,13 +171,7 @@ func TestDynamoStorage_GetLease(t *testing.T) {
 			"heartbeatID":  {S: &testLease1.HeartbeatID},
 		},
 	}
-	/*LeaseKey:       "000001",
-	Checkpoint:     "1234345",
-	LeaseCounter:   0,
-	LeaseOwner:     "1",
-	HeartbeatID:    "12345",
 
-	*/
 	tests := []struct {
 		name      string
 		tableName string
