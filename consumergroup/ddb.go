@@ -20,7 +20,7 @@ type DynamoDb interface {
 	Scan(*dynamodb.ScanInput) (*dynamodb.ScanOutput, error)
 }
 
-// DynamoStorage struct that implements the storage interface and uses simplified DynamoDb struct
+// DynamoStorage struct that implements the storage interface and uses simplified DynamoDb interface
 type DynamoStorage struct {
 	Db        DynamoDb
 	tableName string
