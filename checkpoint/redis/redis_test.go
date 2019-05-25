@@ -12,10 +12,10 @@ func Test_CheckpointLifecycle(t *testing.T) {
 	}
 
 	// set
-	c.Set("streamName", "shardID", "testSeqNum")
+	c.SetCheckpoint("streamName", "shardID", "testSeqNum")
 
 	// get
-	val, err := c.Get("streamName", "shardID")
+	val, err := c.GetCheckpoint("streamName", "shardID")
 	if err != nil {
 		t.Fatalf("get checkpoint error: %v", err)
 	}
@@ -30,7 +30,7 @@ func Test_SetEmptySeqNum(t *testing.T) {
 		t.Fatalf("new checkpoint error: %v", err)
 	}
 
-	err = c.Set("streamName", "shardID", "")
+	err = c.SetCheckpoint("streamName", "shardID", "")
 	if err == nil {
 		t.Fatalf("should not allow empty sequence number")
 	}
