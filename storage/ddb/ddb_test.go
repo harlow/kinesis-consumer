@@ -1,4 +1,4 @@
-package consumergroup
+package ddb
 
 import (
 	"reflect"
@@ -10,10 +10,10 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/stretchr/testify/mock"
 
-	consumer "github.com/harlow/kinesis-consumer"
+	"github.com/harlow/kinesis-consumer/storage"
 )
 
-var testLease1 = consumer.Lease{
+var testLease1 = storage.Lease{
 	LeaseKey:       "000001",
 	Checkpoint:     "1234345",
 	LeaseCounter:   0,
@@ -63,7 +63,7 @@ func TestDynamoStorage_CreateLease(t *testing.T) {
 	tests := []struct {
 		name        string
 		tableName   string
-		lease       consumer.Lease
+		lease       storage.Lease
 		dynamoErr   error
 		expectedErr error
 	}{
@@ -79,7 +79,7 @@ func TestDynamoStorage_CreateLease(t *testing.T) {
 			tableName:   "test",
 			lease:       testLease1,
 			dynamoErr:   awserr.New(dynamodb.ErrCodeConditionalCheckFailedException, "", nil),
-			expectedErr: consumer.StorageCouldNotUpdateOrCreateLease,
+			expectedErr: storage.StorageCouldNotUpdateOrCreateLease,
 		},
 		{
 			name:        "CreateLease_Expect_Error_ErrCodeInternalServerError",
@@ -113,8 +113,8 @@ func TestDynamoStorage_UpdateLease(t *testing.T) {
 		tableName string
 	}
 	type args struct {
-		originalLease consumer.Lease
-		updatedLease  consumer.Lease
+		originalLease storage.Lease
+		updatedLease  storage.Lease
 	}
 	tests := []struct {
 		name    string
@@ -141,7 +141,7 @@ func TestDynamoStorage_UpdateLease(t *testing.T) {
 
 func Test_mapLeaseToLeaseUpdate(t *testing.T) {
 	type args struct {
-		lease consumer.Lease
+		lease storage.Lease
 	}
 	tests := []struct {
 		name string
@@ -176,7 +176,7 @@ func TestDynamoStorage_GetLease(t *testing.T) {
 		name      string
 		tableName string
 		leaseKey  string
-		want      *consumer.Lease
+		want      *storage.Lease
 		dynamoOut *dynamodb.GetItemOutput
 		dynamoErr error
 		wantErr   bool
@@ -239,7 +239,7 @@ func TestDynamoStorage_GetAllLeases(t *testing.T) {
 	tests := []struct {
 		name    string
 		fields  fields
-		want    map[string]consumer.Lease
+		want    map[string]storage.Lease
 		wantErr bool
 	}{
 		// TODO: Add test cases.

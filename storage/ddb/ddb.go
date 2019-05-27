@@ -1,4 +1,4 @@
-package consumergroup
+package ddb
 
 import (
 	"time"
@@ -9,7 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
 	"github.com/aws/aws-sdk-go/service/dynamodb/expression"
 
-	consumer "github.com/harlow/kinesis-consumer"
+	"github.com/harlow/kinesis-consumer/storage"
 )
 
 // DynamoDb simple and minimal interface for DynamoDb that helps with testing
@@ -36,7 +36,7 @@ type LeaseUpdate struct {
 }
 
 // CreateLease - stores the lease in dynamo
-func (dynamoClient DynamoStorage) CreateLease(lease consumer.Lease) error {
+func (dynamoClient DynamoStorage) CreateLease(lease storage.Lease) error {
 
 	condition := expression.AttributeNotExists(
 		expression.Name("leaseKey"),
@@ -60,7 +60,7 @@ func (dynamoClient DynamoStorage) CreateLease(lease consumer.Lease) error {
 	if _, err := dynamoClient.Db.PutItem(input); err != nil {
 		if awsErr, ok := err.(awserr.Error); ok {
 			if awsErr.Code() == dynamodb.ErrCodeConditionalCheckFailedException {
-				return consumer.StorageCouldNotUpdateOrCreateLease
+				return storage.StorageCouldNotUpdateOrCreateLease
 			}
 		}
 		return err
@@ -70,7 +70,7 @@ func (dynamoClient DynamoStorage) CreateLease(lease consumer.Lease) error {
 }
 
 // UpdateLease updates the lease in dynamo
-func (dynamoClient DynamoStorage) UpdateLease(originalLease, updatedLease consumer.Lease) error {
+func (dynamoClient DynamoStorage) UpdateLease(originalLease, updatedLease storage.Lease) error {
 
 	condition := expression.And(
 		expression.Equal(expression.Name("leaseKey"), expression.Value(originalLease.LeaseKey)),
@@ -103,7 +103,7 @@ func (dynamoClient DynamoStorage) UpdateLease(originalLease, updatedLease consum
 	if _, err := dynamoClient.Db.UpdateItem(input); err != nil {
 		if awsErr, ok := err.(awserr.Error); ok {
 			if awsErr.Code() == dynamodb.ErrCodeConditionalCheckFailedException {
-				return consumer.StorageCouldNotUpdateOrCreateLease
+				return storage.StorageCouldNotUpdateOrCreateLease
 			}
 		}
 		return err
@@ -112,7 +112,7 @@ func (dynamoClient DynamoStorage) UpdateLease(originalLease, updatedLease consum
 	return nil
 }
 
-func mapLeaseToLeaseUpdate(lease consumer.Lease) LeaseUpdate {
+func mapLeaseToLeaseUpdate(lease storage.Lease) LeaseUpdate {
 	return LeaseUpdate{
 		Checkpoint:     lease.Checkpoint,
 		LeaseCounter:   lease.LeaseCounter,
@@ -125,7 +125,7 @@ func mapLeaseToLeaseUpdate(lease consumer.Lease) LeaseUpdate {
 // GetLease returns the latest stored records sorted by clockID in descending order
 // It is assumed that we won't be keeping many records per ID otherwise, this may need to be optimized
 // later (possibly to use a map)
-func (dynamoClient DynamoStorage) GetLease(leaseKey string) (*consumer.Lease, error) {
+func (dynamoClient DynamoStorage) GetLease(leaseKey string) (*storage.Lease, error) {
 
 	key := mapLeaseKeyToDdbKey(leaseKey)
 	input := &dynamodb.GetItemInput{
@@ -138,7 +138,7 @@ func (dynamoClient DynamoStorage) GetLease(leaseKey string) (*consumer.Lease, er
 		return nil, err
 	}
 
-	var lease consumer.Lease
+	var lease storage.Lease
 	if err := dynamodbattribute.UnmarshalMap(result.Item, &lease); err != nil {
 		return nil, err
 	}
@@ -153,7 +153,7 @@ func mapLeaseKeyToDdbKey(leaseKey string) map[string]*dynamodb.AttributeValue {
 }
 
 // GetAllLeases this can be used at start up (or anytime to grab all the leases)
-func (dynamoClient DynamoStorage) GetAllLeases() (map[string]consumer.Lease, error) {
+func (dynamoClient DynamoStorage) GetAllLeases() (map[string]storage.Lease, error) {
 
 	// TODO if we have a lot of shards, we might have to worry about limits here
 	input := &dynamodb.ScanInput{
@@ -165,9 +165,9 @@ func (dynamoClient DynamoStorage) GetAllLeases() (map[string]consumer.Lease, err
 		return nil, err
 	}
 
-	leases := make(map[string]consumer.Lease, len(result.Items))
+	leases := make(map[string]storage.Lease, len(result.Items))
 	for _, item := range result.Items {
-		var record consumer.Lease
+		var record storage.Lease
 		if err := dynamodbattribute.UnmarshalMap(item, &record); err != nil {
 			return nil, err
 		}
