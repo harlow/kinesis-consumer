@@ -33,7 +33,7 @@ func main() {
 	// consumer
 	c, err := consumer.New(
 		*stream,
-		consumer.WithStorage(ck),
+		consumer.WithCheckpoint(ck),
 		consumer.WithCounter(counter),
 	)
 	if err != nil {
