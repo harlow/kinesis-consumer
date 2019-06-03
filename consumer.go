@@ -23,11 +23,12 @@ func New(streamName string, opts ...Option) (*Consumer, error) {
 		return nil, fmt.Errorf("must provide stream name")
 	}
 
-	// new consumer with noop group, counter, and logger
+	// new consumer with no-op checkpoint, counter, and logger
 	c := &Consumer{
 		streamName:               streamName,
 		initialShardIteratorType: kinesis.ShardIteratorTypeLatest,
 		counter:                  &noopCounter{},
+		checkpoint:               &noopCheckpoint{},
 		logger: &noopLogger{
 			logger: log.New(ioutil.Discard, "", log.LstdFlags),
 		},
