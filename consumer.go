@@ -88,10 +88,11 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 
 	var (
 		errc   = make(chan error, 1)
-		shardc = c.group.Start(ctx)
+		shardc = make(chan *kinesis.Shard, 1)
 	)
 
 	go func() {
+		c.group.Start(ctx, shardc)
 		<-ctx.Done()
 		close(shardc)
 	}()
@@ -130,9 +131,9 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 		return fmt.Errorf("get shard iterator error: %v", err)
 	}
 
-	c.logger.Log("[START]\t", shardID, lastSeqNum)
+	c.logger.Log("[CONSUMER] start scan:", shardID, lastSeqNum)
 	defer func() {
-		c.logger.Log("[STOP]\t", shardID)
+		c.logger.Log("[CONSUMER] stop scan:", shardID)
 	}()
 
 	for {
@@ -176,7 +177,7 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 			}
 
 			if isShardClosed(resp.NextShardIterator, shardIterator) {
-				c.logger.Log("[CLOSED]\t", shardID)
+				c.logger.Log("[CONSUMER] shard closed:", shardID)
 				return nil
 			}
 

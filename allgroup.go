@@ -33,11 +33,8 @@ type AllGroup struct {
 
 // start is a blocking operation which will loop and attempt to find new
 // shards on a regular cadence.
-func (g *AllGroup) Start(ctx context.Context) chan *kinesis.Shard {
-	var (
-		shardc = make(chan *kinesis.Shard, 1)
-		ticker = time.NewTicker(30 * time.Second)
-	)
+func (g *AllGroup) Start(ctx context.Context, shardc chan *kinesis.Shard) {
+	var ticker = time.NewTicker(30 * time.Second)
 	g.findNewShards(shardc)
 
 	// Note: while ticker is a rather naive approach to this problem,
@@ -49,19 +46,15 @@ func (g *AllGroup) Start(ctx context.Context) chan *kinesis.Shard {
 	// necessarily close at the same time, so we could potentially get a
 	// thundering heard of notifications from the consumer.
 
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				ticker.Stop()
-				return
-			case <-ticker.C:
-				g.findNewShards(shardc)
-			}
+	for {
+		select {
+		case <-ctx.Done():
+			ticker.Stop()
+			return
+		case <-ticker.C:
+			g.findNewShards(shardc)
 		}
-	}()
-
-	return shardc
+	}
 }
 
 func (g *AllGroup) GetCheckpoint(streamName, shardID string) (string, error) {
@@ -83,7 +76,7 @@ func (g *AllGroup) findNewShards(shardc chan *kinesis.Shard) {
 
 	shards, err := listShards(g.ksis, g.streamName)
 	if err != nil {
-		g.logger.Log("[GROUP]", err)
+		g.logger.Log("[GROUP] error:", err)
 		return
 	}
 
