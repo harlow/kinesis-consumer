@@ -8,7 +8,7 @@ Export the required environment vars for connecting to the Kinesis stream:
 
 ```
 export AWS_PROFILE=
-export AWS_REGION_NAME=
+export AWS_REGION=
 ```
 
 ### Running the code

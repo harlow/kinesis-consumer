@@ -27,8 +27,8 @@ func New(streamName string, opts ...Option) (*Consumer, error) {
 	c := &Consumer{
 		streamName:               streamName,
 		initialShardIteratorType: kinesis.ShardIteratorTypeLatest,
-		checkpoint:               &noopCheckpoint{},
 		counter:                  &noopCounter{},
+		checkpoint:               &noopCheckpoint{},
 		logger: &noopLogger{
 			logger: log.New(ioutil.Discard, "", log.LstdFlags),
 		},
@@ -48,6 +48,11 @@ func New(streamName string, opts ...Option) (*Consumer, error) {
 		c.client = kinesis.New(newSession)
 	}
 
+	// default group if none provided
+	if c.group == nil {
+		c.group = NewAllGroup(c.client, c.checkpoint, c.streamName, c.logger)
+	}
+
 	return c, nil
 }
 
@@ -57,6 +62,7 @@ type Consumer struct {
 	initialShardIteratorType string
 	client                   kinesisiface.KinesisAPI
 	logger                   Logger
+	group                    Group
 	checkpoint               Checkpoint
 	counter                  Counter
 }
@@ -64,7 +70,6 @@ type Consumer struct {
 // ScanFunc is the type of the function called for each message read
 // from the stream. The record argument contains the original record
 // returned from the AWS Kinesis library.
-//
 // If an error is returned, scanning stops. The sole exception is when the
 // function returns the special value SkipCheckpoint.
 type ScanFunc func(*Record) error
@@ -78,18 +83,16 @@ var SkipCheckpoint = errors.New("skip checkpoint")
 // is passed through to each of the goroutines and called with each message pulled from
 // the stream.
 func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
-	var (
-		errc   = make(chan error, 1)
-		shardc = make(chan *kinesis.Shard, 1)
-		broker = newBroker(c.client, c.streamName, shardc, c.logger)
-	)
-
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	go broker.start(ctx)
+	var (
+		errc   = make(chan error, 1)
+		shardc = make(chan *kinesis.Shard, 1)
+	)
 
 	go func() {
+		c.group.Start(ctx, shardc)
 		<-ctx.Done()
 		close(shardc)
 	}()
@@ -110,7 +113,6 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 	}
 
 	close(errc)
-
 	return <-errc
 }
 
@@ -118,7 +120,7 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 // for each record and checkpoints the progress of scan.
 func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) error {
 	// get last seq number from checkpoint
-	lastSeqNum, err := c.checkpoint.Get(c.streamName, shardID)
+	lastSeqNum, err := c.group.GetCheckpoint(c.streamName, shardID)
 	if err != nil {
 		return fmt.Errorf("get checkpoint error: %v", err)
 	}
@@ -129,9 +131,9 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 		return fmt.Errorf("get shard iterator error: %v", err)
 	}
 
-	c.logger.Log("[START]\t", shardID, lastSeqNum)
+	c.logger.Log("[CONSUMER] start scan:", shardID, lastSeqNum)
 	defer func() {
-		c.logger.Log("[STOP]\t", shardID)
+		c.logger.Log("[CONSUMER] stop scan:", shardID)
 	}()
 
 	for {
@@ -164,7 +166,7 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 					}
 
 					if err != SkipCheckpoint {
-						if err := c.checkpoint.Set(c.streamName, shardID, *r.SequenceNumber); err != nil {
+						if err := c.group.SetCheckpoint(c.streamName, shardID, *r.SequenceNumber); err != nil {
 							return err
 						}
 					}
@@ -175,7 +177,7 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 			}
 
 			if isShardClosed(resp.NextShardIterator, shardIterator) {
-				c.logger.Log("[CLOSED]\t", shardID)
+				c.logger.Log("[CONSUMER] shard closed:", shardID)
 				return nil
 			}
 
