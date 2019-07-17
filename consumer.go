@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
@@ -61,6 +62,7 @@ func New(streamName string, opts ...Option) (*Consumer, error) {
 type Consumer struct {
 	streamName               string
 	initialShardIteratorType string
+	initialTimestamp         *time.Time
 	client                   kinesisiface.KinesisAPI
 	counter                  Counter
 	group                    Group
@@ -214,6 +216,9 @@ func (c *Consumer) getShardIterator(streamName, shardID, seqNum string) (*string
 	if seqNum != "" {
 		params.ShardIteratorType = aws.String(kinesis.ShardIteratorTypeAfterSequenceNumber)
 		params.StartingSequenceNumber = aws.String(seqNum)
+	} else if c.initialTimestamp != nil {
+		params.ShardIteratorType = aws.String(kinesis.ShardIteratorTypeAtTimestamp)
+		params.Timestamp = c.initialTimestamp
 	} else {
 		params.ShardIteratorType = aws.String(c.initialShardIteratorType)
 	}

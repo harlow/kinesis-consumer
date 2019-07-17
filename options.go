@@ -1,6 +1,10 @@
 package consumer
 
-import "github.com/aws/aws-sdk-go/service/kinesis/kinesisiface"
+import (
+	"time"
+
+	"github.com/aws/aws-sdk-go/service/kinesis/kinesisiface"
+)
 
 // Option is used to override defaults when creating a new Consumer
 type Option func(*Consumer)
@@ -44,5 +48,12 @@ func WithClient(client kinesisiface.KinesisAPI) Option {
 func WithShardIteratorType(t string) Option {
 	return func(c *Consumer) {
 		c.initialShardIteratorType = t
+	}
+}
+
+// Timestamp overrides the starting point for the consumer
+func WithTimestamp(t time.Time) Option {
+	return func(c *Consumer) {
+		c.initialTimestamp = &t
 	}
 }
