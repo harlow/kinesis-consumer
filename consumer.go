@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -100,22 +101,29 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 		close(shardc)
 	}()
 
+	wg := new(sync.WaitGroup)
 	// process each of the shards
 	for shard := range shardc {
+		wg.Add(1)
 		go func(shardID string) {
+			defer wg.Done()
 			if err := c.ScanShard(ctx, shardID, fn); err != nil {
 				select {
 				case errc <- fmt.Errorf("shard %s error: %v", shardID, err):
 					// first error to occur
 					cancel()
 				default:
-					// error has already occured
+					// error has already occurred
 				}
 			}
 		}(aws.StringValue(shard.ShardId))
 	}
 
-	close(errc)
+	go func() {
+		wg.Wait()
+		close(errc)
+	}()
+
 	return <-errc
 }
 
