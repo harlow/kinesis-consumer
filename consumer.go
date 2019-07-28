@@ -39,7 +39,7 @@ func New(streamName string, opts ...Option) (*Consumer, error) {
 		opt(c)
 	}
 
-	// default client if none provided
+	// default client
 	if c.client == nil {
 		newSession, err := session.NewSession(aws.NewConfig())
 		if err != nil {
@@ -48,9 +48,9 @@ func New(streamName string, opts ...Option) (*Consumer, error) {
 		c.client = kinesis.New(newSession)
 	}
 
-	// default group if none provided
+	// default group consumes all shards
 	if c.group == nil {
-		c.group = NewAllGroup(c.client, c.checkpoint, c.streamName, c.logger)
+		c.group = NewAllGroup(c.client, c.storage, streamName, c.logger)
 	}
 
 	return c, nil
@@ -61,14 +61,10 @@ type Consumer struct {
 	streamName               string
 	initialShardIteratorType string
 	client                   kinesisiface.KinesisAPI
-	logger                   Logger
-<<<<<<< HEAD
-	group                    Group
-	checkpoint               Checkpoint
-=======
-	storage                  Storage
->>>>>>> 0162c90... Introduce Storage interface
 	counter                  Counter
+	group                    Group
+	logger                   Logger
+	storage                  Storage
 }
 
 // ScanFunc is the type of the function called for each message read
@@ -124,11 +120,7 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 // for each record and checkpoints the progress of scan.
 func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) error {
 	// get last seq number from checkpoint
-<<<<<<< HEAD
 	lastSeqNum, err := c.group.GetCheckpoint(c.streamName, shardID)
-=======
-	lastSeqNum, err := c.storage.GetCheckpoint(c.streamName, shardID)
->>>>>>> 0162c90... Introduce Storage interface
 	if err != nil {
 		return fmt.Errorf("get checkpoint error: %v", err)
 	}
@@ -173,13 +165,8 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 						return err
 					}
 
-<<<<<<< HEAD
 					if err != ErrSkipCheckpoint {
 						if err := c.group.SetCheckpoint(c.streamName, shardID, *r.SequenceNumber); err != nil {
-=======
-					if err != SkipCheckpoint {
-						if err := c.storage.SetCheckpoint(c.streamName, shardID, *r.SequenceNumber); err != nil {
->>>>>>> 0162c90... Introduce Storage interface
 							return err
 						}
 					}

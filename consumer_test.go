@@ -229,7 +229,7 @@ func TestScanShard_SkipCheckpoint(t *testing.T) {
 	var fn = func(r *Record) error {
 		if aws.StringValue(r.SequenceNumber) == "lastSeqNum" {
 			cancel()
-			return SkipCheckpoint
+			return ErrSkipCheckpoint
 		}
 
 		return nil
