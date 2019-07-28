@@ -110,7 +110,7 @@ The consumer allows the following optional overrides.
 
 ### Storage
 
-To record the progress (checkpoint) of the consumer in the stream we use a storage layer to persist the last sequence number the consumer has read from a particular shard. The boolean value ErrSkipCheckpoint of consumer.ScanError determines if checkpoint will be activated. ScanError is returned by the record processing callback.
+To record the progress of the consumer in the stream (checkpoint) we use a storage layer to persist the last sequence number the consumer has read from a particular shard. The boolean value ErrSkipCheckpoint of consumer.ScanError determines if checkpoint will be activated. ScanError is returned by the record processing callback.
 
 This will allow consumers to re-launch and pick up at the position in the stream where they left off.
 
@@ -119,6 +119,15 @@ The uniq identifier for a consumer is `[appName, streamName, shardID]`
 <img width="722" alt="kinesis-checkpoints" src="https://user-images.githubusercontent.com/739782/33085867-d8336122-ce9a-11e7-8c8a-a8afeb09dff1.png">
 
 Note: The default storage is in-memory (no-op). Which means the scan will not persist any state and the consumer will start from the beginning of the stream each time it is re-started.
+
+The consumer accpets a `WithStorage` option to set the storage layer:
+
+```go
+c, err := consumer.New(*stream, consumer.WithStorage(db))
+if err != nil {
+	log.Log("consumer error: %v", err)
+}
+```
 
 To persist scan progress choose one of the following storage layers:
 
