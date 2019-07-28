@@ -71,13 +71,13 @@ type Consumer struct {
 // from the stream. The record argument contains the original record
 // returned from the AWS Kinesis library.
 // If an error is returned, scanning stops. The sole exception is when the
-// function returns the special value SkipCheckpoint.
+// function returns the special value ErrSkipCheckpoint.
 type ScanFunc func(*Record) error
 
-// SkipCheckpoint is used as a return value from ScanFunc to indicate that
+// ErrSkipCheckpoint is used as a return value from ScanFunc to indicate that
 // the current checkpoint should be skipped skipped. It is not returned
 // as an error by any function.
-var SkipCheckpoint = errors.New("skip checkpoint")
+var ErrSkipCheckpoint = errors.New("skip checkpoint")
 
 // Scan launches a goroutine to process each of the shards in the stream. The ScanFunc
 // is passed through to each of the goroutines and called with each message pulled from
@@ -161,11 +161,11 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 					return nil
 				default:
 					err := fn(r)
-					if err != nil && err != SkipCheckpoint {
+					if err != nil && err != ErrSkipCheckpoint {
 						return err
 					}
 
-					if err != SkipCheckpoint {
+					if err != ErrSkipCheckpoint {
 						if err := c.group.SetCheckpoint(c.streamName, shardID, *r.SequenceNumber); err != nil {
 							return err
 						}

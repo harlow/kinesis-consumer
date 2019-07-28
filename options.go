@@ -33,7 +33,7 @@ func WithClient(client kinesisiface.KinesisAPI) Option {
 	}
 }
 
-// ShardIteratorType overrides the starting point for the consumer
+// WithShardIteratorType overrides the starting point for the consumer
 func WithShardIteratorType(t string) Option {
 	return func(c *Consumer) {
 		c.initialShardIteratorType = t

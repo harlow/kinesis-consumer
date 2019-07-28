@@ -9,6 +9,8 @@ import (
 	"github.com/aws/aws-sdk-go/service/kinesis/kinesisiface"
 )
 
+// NewAllGroup returns an intitialized AllGroup for consuming
+// all shards on a stream
 func NewAllGroup(ksis kinesisiface.KinesisAPI, ck Checkpoint, streamName string, logger Logger) *AllGroup {
 	return &AllGroup{
 		ksis:       ksis,
@@ -31,7 +33,7 @@ type AllGroup struct {
 	shards  map[string]*kinesis.Shard
 }
 
-// start is a blocking operation which will loop and attempt to find new
+// Start is a blocking operation which will loop and attempt to find new
 // shards on a regular cadence.
 func (g *AllGroup) Start(ctx context.Context, shardc chan *kinesis.Shard) {
 	var ticker = time.NewTicker(30 * time.Second)
@@ -57,10 +59,12 @@ func (g *AllGroup) Start(ctx context.Context, shardc chan *kinesis.Shard) {
 	}
 }
 
+// GetCheckpoint returns the current checkpoint for provided stream
 func (g *AllGroup) GetCheckpoint(streamName, shardID string) (string, error) {
 	return g.checkpoint.Get(streamName, shardID)
 }
 
+// SetCheckpoint sets the current checkpoint for provided stream
 func (g *AllGroup) SetCheckpoint(streamName, shardID, sequenceNumber string) error {
 	return g.checkpoint.Set(streamName, shardID, sequenceNumber)
 }
