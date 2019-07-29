@@ -7,9 +7,8 @@ Read records from the Kinesis stream
 Export the required environment vars for connecting to the Kinesis stream:
 
 ```
-export AWS_ACCESS_KEY=
+export AWS_PROFILE=
 export AWS_REGION=
-export AWS_SECRET_KEY=
 ```
 
 ### Run the consumer

@@ -27,7 +27,7 @@ func New(streamName string, opts ...Option) (*Consumer, error) {
 	c := &Consumer{
 		streamName:               streamName,
 		initialShardIteratorType: kinesis.ShardIteratorTypeLatest,
-		storage:                  &noopStorage{},
+		store:                    &noopStore{},
 		counter:                  &noopCounter{},
 		logger: &noopLogger{
 			logger: log.New(ioutil.Discard, "", log.LstdFlags),
@@ -50,7 +50,7 @@ func New(streamName string, opts ...Option) (*Consumer, error) {
 
 	// default group consumes all shards
 	if c.group == nil {
-		c.group = NewAllGroup(c.client, c.storage, streamName, c.logger)
+		c.group = NewAllGroup(c.client, c.store, streamName, c.logger)
 	}
 
 	return c, nil
@@ -64,7 +64,7 @@ type Consumer struct {
 	counter                  Counter
 	group                    Group
 	logger                   Logger
-	storage                  Storage
+	store                    Store
 }
 
 // ScanFunc is the type of the function called for each message read

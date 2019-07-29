@@ -10,7 +10,7 @@ import (
 	"os/signal"
 
 	consumer "github.com/harlow/kinesis-consumer"
-	checkpoint "github.com/harlow/kinesis-consumer/checkpoint/postgres"
+	checkpoint "github.com/harlow/kinesis-consumer/store/postgres"
 )
 
 func main() {

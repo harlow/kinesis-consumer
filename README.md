@@ -136,7 +136,7 @@ To persist scan progress choose one of the following storage layers:
 The Redis checkpoint requries App Name, and Stream Name:
 
 ```go
-import storage "github.com/harlow/kinesis-consumer/checkpoint/redis"
+import storage "github.com/harlow/kinesis-consumer/store/redis"
 
 // redis checkpoint
 db, err := storage.New(appName)
@@ -150,7 +150,7 @@ if err != nil {
 The DynamoDB checkpoint requires Table Name, App Name, and Stream Name:
 
 ```go
-import storage "github.com/harlow/kinesis-consumer/checkpoint/ddb"
+import storage "github.com/harlow/kinesis-consumer/store/ddb"
 
 // ddb checkpoint
 db, err := storage.New(appName, tableName)
@@ -191,7 +191,7 @@ Sort key: shard_id
 The Postgres checkpoint requires Table Name, App Name, Stream Name and ConnectionString:
 
 ```go
-import storage "github.com/harlow/kinesis-consumer/checkpoint/postgres"
+import storage "github.com/harlow/kinesis-consumer/store/postgres"
 
 // postgres checkpoint
 db, err := storage.New(app, table, connStr)
@@ -219,7 +219,7 @@ The table name has to be the same that you specify when creating the checkpoint.
 The Mysql checkpoint requires Table Name, App Name, Stream Name and ConnectionString (just like the Postgres checkpoint!):
 
 ```go
-import storage "github.com/harlow/kinesis-consumer/checkpoint/mysql"
+import storage "github.com/harlow/kinesis-consumer/store/mysql"
 
 // mysql checkpoint
 db, err := storage.New(app, table, connStr)

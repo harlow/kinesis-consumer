@@ -6,9 +6,9 @@ import "github.com/aws/aws-sdk-go/service/kinesis/kinesisiface"
 type Option func(*Consumer)
 
 // WithStorage overrides the default storage
-func WithStorage(storage Storage) Option {
+func WithStorage(store Store) Option {
 	return func(c *Consumer) {
-		c.storage = storage
+		c.store = store
 	}
 }
 
