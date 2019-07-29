@@ -5,6 +5,13 @@ import "github.com/aws/aws-sdk-go/service/kinesis/kinesisiface"
 // Option is used to override defaults when creating a new Consumer
 type Option func(*Consumer)
 
+// WithGroup overrides the default storage
+func WithGroup(group Group) Option {
+	return func(c *Consumer) {
+		c.group = group
+	}
+}
+
 // WithStore overrides the default storage
 func WithStore(store Store) Option {
 	return func(c *Consumer) {
