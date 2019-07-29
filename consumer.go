@@ -23,12 +23,12 @@ func New(streamName string, opts ...Option) (*Consumer, error) {
 		return nil, fmt.Errorf("must provide stream name")
 	}
 
-	// new consumer with no-op checkpoint, counter, and logger
+	// new consumer with noop storage, counter, and logger
 	c := &Consumer{
 		streamName:               streamName,
 		initialShardIteratorType: kinesis.ShardIteratorTypeLatest,
+		store:                    &noopStore{},
 		counter:                  &noopCounter{},
-		checkpoint:               &noopCheckpoint{},
 		logger: &noopLogger{
 			logger: log.New(ioutil.Discard, "", log.LstdFlags),
 		},
@@ -39,7 +39,7 @@ func New(streamName string, opts ...Option) (*Consumer, error) {
 		opt(c)
 	}
 
-	// default client if none provided
+	// default client
 	if c.client == nil {
 		newSession, err := session.NewSession(aws.NewConfig())
 		if err != nil {
@@ -48,9 +48,9 @@ func New(streamName string, opts ...Option) (*Consumer, error) {
 		c.client = kinesis.New(newSession)
 	}
 
-	// default group if none provided
+	// default group consumes all shards
 	if c.group == nil {
-		c.group = NewAllGroup(c.client, c.checkpoint, c.streamName, c.logger)
+		c.group = NewAllGroup(c.client, c.store, streamName, c.logger)
 	}
 
 	return c, nil
@@ -61,10 +61,10 @@ type Consumer struct {
 	streamName               string
 	initialShardIteratorType string
 	client                   kinesisiface.KinesisAPI
-	logger                   Logger
-	group                    Group
-	checkpoint               Checkpoint
 	counter                  Counter
+	group                    Group
+	logger                   Logger
+	store                    Store
 }
 
 // ScanFunc is the type of the function called for each message read

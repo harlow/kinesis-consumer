@@ -10,7 +10,7 @@ import (
 	"os/signal"
 
 	consumer "github.com/harlow/kinesis-consumer"
-	checkpoint "github.com/harlow/kinesis-consumer/checkpoint/mysql"
+	checkpoint "github.com/harlow/kinesis-consumer/store/mysql"
 )
 
 func main() {
@@ -33,7 +33,7 @@ func main() {
 	// consumer
 	c, err := consumer.New(
 		*stream,
-		consumer.WithCheckpoint(ck),
+		consumer.WithStorage(ck),
 		consumer.WithCounter(counter),
 	)
 	if err != nil {

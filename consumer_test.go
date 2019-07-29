@@ -57,7 +57,7 @@ func TestScan(t *testing.T) {
 	c, err := New("myStreamName",
 		WithClient(client),
 		WithCounter(ctr),
-		WithCheckpoint(cp),
+		WithStorage(cp),
 	)
 	if err != nil {
 		t.Fatalf("new consumer error: %v", err)
@@ -90,7 +90,7 @@ func TestScan(t *testing.T) {
 		t.Errorf("counter error expected %d, got %d", 2, val)
 	}
 
-	val, err := cp.Get("myStreamName", "myShard")
+	val, err := cp.GetCheckpoint("myStreamName", "myShard")
 	if err != nil && val != "lastSeqNum" {
 		t.Errorf("checkout error expected %s, got %s", "lastSeqNum", val)
 	}
@@ -119,7 +119,7 @@ func TestScanShard(t *testing.T) {
 	c, err := New("myStreamName",
 		WithClient(client),
 		WithCounter(ctr),
-		WithCheckpoint(cp),
+		WithStorage(cp),
 	)
 	if err != nil {
 		t.Fatalf("new consumer error: %v", err)
@@ -156,7 +156,7 @@ func TestScanShard(t *testing.T) {
 	}
 
 	// sets checkpoint
-	val, err := cp.Get("myStreamName", "myShard")
+	val, err := cp.GetCheckpoint("myStreamName", "myShard")
 	if err != nil && val != "lastSeqNum" {
 		t.Fatalf("checkout error expected %s, got %s", "lastSeqNum", val)
 	}
@@ -219,7 +219,7 @@ func TestScanShard_SkipCheckpoint(t *testing.T) {
 
 	var cp = &fakeCheckpoint{cache: map[string]string{}}
 
-	c, err := New("myStreamName", WithClient(client), WithCheckpoint(cp))
+	c, err := New("myStreamName", WithClient(client), WithStorage(cp))
 	if err != nil {
 		t.Fatalf("new consumer error: %v", err)
 	}
@@ -229,7 +229,7 @@ func TestScanShard_SkipCheckpoint(t *testing.T) {
 	var fn = func(r *Record) error {
 		if aws.StringValue(r.SequenceNumber) == "lastSeqNum" {
 			cancel()
-			return SkipCheckpoint
+			return ErrSkipCheckpoint
 		}
 
 		return nil
@@ -240,7 +240,7 @@ func TestScanShard_SkipCheckpoint(t *testing.T) {
 		t.Fatalf("scan shard error: %v", err)
 	}
 
-	val, err := cp.Get("myStreamName", "myShard")
+	val, err := cp.GetCheckpoint("myStreamName", "myShard")
 	if err != nil && val != "firstSeqNum" {
 		t.Fatalf("checkout error expected %s, got %s", "firstSeqNum", val)
 	}
@@ -301,7 +301,7 @@ type fakeCheckpoint struct {
 	mu    sync.Mutex
 }
 
-func (fc *fakeCheckpoint) Set(streamName, shardID, sequenceNumber string) error {
+func (fc *fakeCheckpoint) SetCheckpoint(streamName, shardID, sequenceNumber string) error {
 	fc.mu.Lock()
 	defer fc.mu.Unlock()
 
@@ -310,7 +310,7 @@ func (fc *fakeCheckpoint) Set(streamName, shardID, sequenceNumber string) error 
 	return nil
 }
 
-func (fc *fakeCheckpoint) Get(streamName, shardID string) (string, error) {
+func (fc *fakeCheckpoint) GetCheckpoint(streamName, shardID string) (string, error) {
 	fc.mu.Lock()
 	defer fc.mu.Unlock()
 

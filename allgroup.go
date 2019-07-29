@@ -11,13 +11,13 @@ import (
 
 // NewAllGroup returns an intitialized AllGroup for consuming
 // all shards on a stream
-func NewAllGroup(ksis kinesisiface.KinesisAPI, ck Checkpoint, streamName string, logger Logger) *AllGroup {
+func NewAllGroup(ksis kinesisiface.KinesisAPI, store Store, streamName string, logger Logger) *AllGroup {
 	return &AllGroup{
 		ksis:       ksis,
 		shards:     make(map[string]*kinesis.Shard),
 		streamName: streamName,
 		logger:     logger,
-		checkpoint: ck,
+		Store:      store,
 	}
 }
 
@@ -27,7 +27,7 @@ type AllGroup struct {
 	ksis       kinesisiface.KinesisAPI
 	streamName string
 	logger     Logger
-	checkpoint Checkpoint
+	Store
 
 	shardMu sync.Mutex
 	shards  map[string]*kinesis.Shard
@@ -57,16 +57,6 @@ func (g *AllGroup) Start(ctx context.Context, shardc chan *kinesis.Shard) {
 			g.findNewShards(shardc)
 		}
 	}
-}
-
-// GetCheckpoint returns the current checkpoint for provided stream
-func (g *AllGroup) GetCheckpoint(streamName, shardID string) (string, error) {
-	return g.checkpoint.Get(streamName, shardID)
-}
-
-// SetCheckpoint sets the current checkpoint for provided stream
-func (g *AllGroup) SetCheckpoint(streamName, shardID, sequenceNumber string) error {
-	return g.checkpoint.Set(streamName, shardID, sequenceNumber)
 }
 
 // findNewShards pulls the list of shards from the Kinesis API

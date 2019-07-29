@@ -36,15 +36,15 @@ type Checkpoint struct {
 	client  *redis.Client
 }
 
-// Get fetches the checkpoint for a particular Shard.
-func (c *Checkpoint) Get(streamName, shardID string) (string, error) {
+// GetCheckpoint fetches the checkpoint for a particular Shard.
+func (c *Checkpoint) GetCheckpoint(streamName, shardID string) (string, error) {
 	val, _ := c.client.Get(c.key(streamName, shardID)).Result()
 	return val, nil
 }
 
-// Set stores a checkpoint for a shard (e.g. sequence number of last record processed by application).
+// SetCheckpoint stores a checkpoint for a shard (e.g. sequence number of last record processed by application).
 // Upon failover, record processing is resumed from this point.
-func (c *Checkpoint) Set(streamName, shardID, sequenceNumber string) error {
+func (c *Checkpoint) SetCheckpoint(streamName, shardID, sequenceNumber string) error {
 	if sequenceNumber == "" {
 		return fmt.Errorf("sequence number should not be empty")
 	}

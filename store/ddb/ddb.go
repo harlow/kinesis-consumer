@@ -87,7 +87,7 @@ type item struct {
 // Get determines if a checkpoint for a particular Shard exists.
 // Typically used to determine whether we should start processing the shard with
 // TRIM_HORIZON or AFTER_SEQUENCE_NUMBER (if checkpoint exists).
-func (c *Checkpoint) Get(streamName, shardID string) (string, error) {
+func (c *Checkpoint) GetCheckpoint(streamName, shardID string) (string, error) {
 	namespace := fmt.Sprintf("%s-%s", c.appName, streamName)
 
 	params := &dynamodb.GetItemInput{
@@ -106,7 +106,7 @@ func (c *Checkpoint) Get(streamName, shardID string) (string, error) {
 	resp, err := c.client.GetItem(params)
 	if err != nil {
 		if c.retryer.ShouldRetry(err) {
-			return c.Get(streamName, shardID)
+			return c.GetCheckpoint(streamName, shardID)
 		}
 		return "", err
 	}
@@ -116,9 +116,9 @@ func (c *Checkpoint) Get(streamName, shardID string) (string, error) {
 	return i.SequenceNumber, nil
 }
 
-// Set stores a checkpoint for a shard (e.g. sequence number of last record processed by application).
+// SetCheckpoint stores a checkpoint for a shard (e.g. sequence number of last record processed by application).
 // Upon failover, record processing is resumed from this point.
-func (c *Checkpoint) Set(streamName, shardID, sequenceNumber string) error {
+func (c *Checkpoint) SetCheckpoint(streamName, shardID, sequenceNumber string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 

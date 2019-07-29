@@ -1,4 +1,4 @@
-package postgres
+package mysql
 
 import (
 	"database/sql"
@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
-	// this is the postgres package so it makes sense to be here
-	_ "github.com/lib/pq"
+
+	_ "github.com/go-sql-driver/mysql"
 )
 
 type key struct {
@@ -36,7 +36,7 @@ type Checkpoint struct {
 	maxInterval time.Duration
 }
 
-// New returns a checkpoint that uses PostgresDB for underlying storage
+// New returns a checkpoint that uses Mysql for underlying storage
 // Using connectionStr turn it more flexible to use specific db configs
 func New(appName, tableName, connectionStr string, opts ...Option) (*Checkpoint, error) {
 	if appName == "" {
@@ -47,7 +47,7 @@ func New(appName, tableName, connectionStr string, opts ...Option) (*Checkpoint,
 		return nil, errors.New("table name not defined")
 	}
 
-	conn, err := sql.Open("postgres", connectionStr)
+	conn, err := sql.Open("mysql", connectionStr)
 
 	if err != nil {
 		return nil, err
@@ -77,14 +77,14 @@ func (c *Checkpoint) GetMaxInterval() time.Duration {
 	return c.maxInterval
 }
 
-// Get determines if a checkpoint for a particular Shard exists.
+// GetCheckpoint determines if a checkpoint for a particular Shard exists.
 // Typically used to determine whether we should start processing the shard with
 // TRIM_HORIZON or AFTER_SEQUENCE_NUMBER (if checkpoint exists).
-func (c *Checkpoint) Get(streamName, shardID string) (string, error) {
+func (c *Checkpoint) GetCheckpoint(streamName, shardID string) (string, error) {
 	namespace := fmt.Sprintf("%s-%s", c.appName, streamName)
 
 	var sequenceNumber string
-	getCheckpointQuery := fmt.Sprintf(`SELECT sequence_number FROM %s WHERE namespace=$1 AND shard_id=$2;`, c.tableName) //nolint: gas, it replaces only the table name
+	getCheckpointQuery := fmt.Sprintf(`SELECT sequence_number FROM %s WHERE namespace=? AND shard_id=?;`, c.tableName) //nolint: gas, it replaces only the table name
 	err := c.conn.QueryRow(getCheckpointQuery, namespace, shardID).Scan(&sequenceNumber)
 
 	if err != nil {
@@ -97,9 +97,9 @@ func (c *Checkpoint) Get(streamName, shardID string) (string, error) {
 	return sequenceNumber, nil
 }
 
-// Set stores a checkpoint for a shard (e.g. sequence number of last record processed by application).
+// SetCheckpoint stores a checkpoint for a shard (e.g. sequence number of last record processed by application).
 // Upon failover, record processing is resumed from this point.
-func (c *Checkpoint) Set(streamName, shardID, sequenceNumber string) error {
+func (c *Checkpoint) SetCheckpoint(streamName, shardID, sequenceNumber string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -146,12 +146,7 @@ func (c *Checkpoint) save() error {
 	defer c.mu.Unlock()
 
 	//nolint: gas, it replaces only the table name
-	upsertCheckpoint := fmt.Sprintf(`INSERT INTO %s (namespace, shard_id, sequence_number)
-					    VALUES($1, $2, $3)
-						ON CONFLICT (namespace, shard_id)
-						DO 
-						UPDATE 
-						SET sequence_number= $3;`, c.tableName)
+	upsertCheckpoint := fmt.Sprintf(`REPLACE INTO %s (namespace, shard_id, sequence_number) VALUES (?, ?, ?)`, c.tableName)
 
 	for key, sequenceNumber := range c.checkpoints {
 		if _, err := c.conn.Exec(upsertCheckpoint, fmt.Sprintf("%s-%s", c.appName, key.streamName), key.shardID, sequenceNumber); err != nil {

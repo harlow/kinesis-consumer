@@ -9,7 +9,7 @@ import (
 	"os/signal"
 
 	consumer "github.com/harlow/kinesis-consumer"
-	checkpoint "github.com/harlow/kinesis-consumer/checkpoint/redis"
+	checkpoint "github.com/harlow/kinesis-consumer/store/redis"
 )
 
 // A myLogger provides a minimalistic logger satisfying the Logger interface.
@@ -43,7 +43,7 @@ func main() {
 	// consumer
 	c, err := consumer.New(
 		*stream,
-		consumer.WithCheckpoint(ck),
+		consumer.WithStorage(ck),
 		consumer.WithLogger(logger),
 	)
 	if err != nil {

@@ -19,7 +19,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/kinesis"
 	consumer "github.com/harlow/kinesis-consumer"
-	checkpoint "github.com/harlow/kinesis-consumer/checkpoint/ddb"
+	storage "github.com/harlow/kinesis-consumer/store/ddb"
 )
 
 // kick off a server for exposing scan metrics
@@ -69,8 +69,8 @@ func main() {
 	myKsis := kinesis.New(sess)
 	myDdbClient := dynamodb.New(sess)
 
-	// ddb checkpoint
-	ck, err := checkpoint.New(*app, *table, checkpoint.WithDynamoClient(myDdbClient), checkpoint.WithRetryer(&MyRetryer{}))
+	// ddb persitance
+	ddb, err := storage.New(*app, *table, storage.WithDynamoClient(myDdbClient), storage.WithRetryer(&MyRetryer{}))
 	if err != nil {
 		log.Log("checkpoint error: %v", err)
 	}
@@ -81,7 +81,7 @@ func main() {
 	// consumer
 	c, err := consumer.New(
 		*stream,
-		consumer.WithCheckpoint(ck),
+		consumer.WithStorage(ddb),
 		consumer.WithLogger(log),
 		consumer.WithCounter(counter),
 		consumer.WithClient(myKsis),
@@ -111,17 +111,17 @@ func main() {
 		log.Log("scan error: %v", err)
 	}
 
-	if err := ck.Shutdown(); err != nil {
-		log.Log("checkpoint shutdown error: %v", err)
+	if err := ddb.Shutdown(); err != nil {
+		log.Log("storage shutdown error: %v", err)
 	}
 }
 
-// MyRetryer used for checkpointing
+// MyRetryer used for storage
 type MyRetryer struct {
-	checkpoint.Retryer
+	storage.Retryer
 }
 
-// ShouldRetry implements custom logic for when a checkpont should retry
+// ShouldRetry implements custom logic for when errors should retry
 func (r *MyRetryer) ShouldRetry(err error) bool {
 	if awsErr, ok := err.(awserr.Error); ok {
 		switch awsErr.Code() {
