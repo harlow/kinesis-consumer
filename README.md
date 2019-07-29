@@ -108,7 +108,7 @@ err := c.Scan(ctx, func(r *consumer.Record) error {
 
 The consumer allows the following optional overrides.
 
-### Storage
+### Store
 
 To record the progress of the consumer in the stream (checkpoint) we use a storage layer to persist the last sequence number the consumer has read from a particular shard. The boolean value ErrSkipCheckpoint of consumer.ScanError determines if checkpoint will be activated. ScanError is returned by the record processing callback.
 
@@ -120,10 +120,10 @@ The uniq identifier for a consumer is `[appName, streamName, shardID]`
 
 Note: The default storage is in-memory (no-op). Which means the scan will not persist any state and the consumer will start from the beginning of the stream each time it is re-started.
 
-The consumer accpets a `WithStorage` option to set the storage layer:
+The consumer accpets a `WithStore` option to set the storage layer:
 
 ```go
-c, err := consumer.New(*stream, consumer.WithStorage(db))
+c, err := consumer.New(*stream, consumer.WithStore(db))
 if err != nil {
 	log.Log("consumer error: %v", err)
 }
@@ -136,10 +136,10 @@ To persist scan progress choose one of the following storage layers:
 The Redis checkpoint requries App Name, and Stream Name:
 
 ```go
-import storage "github.com/harlow/kinesis-consumer/store/redis"
+import store "github.com/harlow/kinesis-consumer/store/redis"
 
 // redis checkpoint
-db, err := storage.New(appName)
+db, err := store.New(appName)
 if err != nil {
 	log.Fatalf("new checkpoint error: %v", err)
 }
@@ -150,10 +150,10 @@ if err != nil {
 The DynamoDB checkpoint requires Table Name, App Name, and Stream Name:
 
 ```go
-import storage "github.com/harlow/kinesis-consumer/store/ddb"
+import store "github.com/harlow/kinesis-consumer/store/ddb"
 
 // ddb checkpoint
-db, err := storage.New(appName, tableName)
+db, err := store.New(appName, tableName)
 if err != nil {
 	log.Fatalf("new checkpoint error: %v", err)
 }
@@ -167,7 +167,7 @@ myDynamoDbClient := dynamodb.New(session.New(aws.NewConfig()))
 //        Region: aws.String("us-west-2"),
 //    })
 
-db, err := storage.New(*app, *table, checkpoint.WithDynamoClient(myDynamoDbClient))
+db, err := store.New(*app, *table, checkpoint.WithDynamoClient(myDynamoDbClient))
 if err != nil {
   log.Fatalf("new checkpoint error: %v", err)
 }
@@ -191,10 +191,10 @@ Sort key: shard_id
 The Postgres checkpoint requires Table Name, App Name, Stream Name and ConnectionString:
 
 ```go
-import storage "github.com/harlow/kinesis-consumer/store/postgres"
+import store "github.com/harlow/kinesis-consumer/store/postgres"
 
 // postgres checkpoint
-db, err := storage.New(app, table, connStr)
+db, err := store.New(app, table, connStr)
 if err != nil {
   log.Fatalf("new checkpoint error: %v", err)
 }
@@ -219,10 +219,10 @@ The table name has to be the same that you specify when creating the checkpoint.
 The Mysql checkpoint requires Table Name, App Name, Stream Name and ConnectionString (just like the Postgres checkpoint!):
 
 ```go
-import storage "github.com/harlow/kinesis-consumer/store/mysql"
+import store "github.com/harlow/kinesis-consumer/store/mysql"
 
 // mysql checkpoint
-db, err := storage.New(app, table, connStr)
+db, err := store.New(app, table, connStr)
 if err != nil {
   log.Fatalf("new checkpoint error: %v", err)
 }
@@ -270,8 +270,8 @@ The [expvar package](https://golang.org/pkg/expvar/) will display consumer count
 
 ```
 "counters": {
-    "checkpoints": 3,
-    "records": 13005
+  "checkpoints": 3,
+  "records": 13005
 },
 ```
 
