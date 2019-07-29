@@ -147,6 +147,7 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 
 			// attempt to recover from GetRecords error by getting new shard iterator
 			if err != nil {
+
 				shardIterator, err = c.getShardIterator(c.streamName, shardID, lastSeqNum)
 				if err != nil {
 					return fmt.Errorf("get shard iterator error: %v", err)

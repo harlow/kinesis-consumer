@@ -57,7 +57,7 @@ func TestScan(t *testing.T) {
 	c, err := New("myStreamName",
 		WithClient(client),
 		WithCounter(ctr),
-		WithStorage(cp),
+		WithStore(cp),
 	)
 	if err != nil {
 		t.Fatalf("new consumer error: %v", err)
@@ -119,7 +119,7 @@ func TestScanShard(t *testing.T) {
 	c, err := New("myStreamName",
 		WithClient(client),
 		WithCounter(ctr),
-		WithStorage(cp),
+		WithStore(cp),
 	)
 	if err != nil {
 		t.Fatalf("new consumer error: %v", err)
@@ -219,7 +219,7 @@ func TestScanShard_SkipCheckpoint(t *testing.T) {
 
 	var cp = &fakeCheckpoint{cache: map[string]string{}}
 
-	c, err := New("myStreamName", WithClient(client), WithStorage(cp))
+	c, err := New("myStreamName", WithClient(client), WithStore(cp))
 	if err != nil {
 		t.Fatalf("new consumer error: %v", err)
 	}

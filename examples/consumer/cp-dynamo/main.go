@@ -81,7 +81,7 @@ func main() {
 	// consumer
 	c, err := consumer.New(
 		*stream,
-		consumer.WithStorage(ddb),
+		consumer.WithStore(ddb),
 		consumer.WithLogger(log),
 		consumer.WithCounter(counter),
 		consumer.WithClient(myKsis),

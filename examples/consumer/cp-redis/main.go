@@ -43,7 +43,7 @@ func main() {
 	// consumer
 	c, err := consumer.New(
 		*stream,
-		consumer.WithStorage(ck),
+		consumer.WithStore(ck),
 		consumer.WithLogger(logger),
 	)
 	if err != nil {
