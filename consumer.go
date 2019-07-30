@@ -151,7 +151,7 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 				c.logger.Log("[CONSUMER] get records error:", err.Error())
 
 				if awserr, ok := err.(awserr.Error); ok {
-					if awserr.Code() != kinesis.ErrCodeExpiredIteratorException {
+					if _, ok := retriableErrors[awserr.Code()]; !ok {
 						return fmt.Errorf("get records error: %v", awserr.Message())
 					}
 				}
@@ -194,6 +194,11 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 			shardIterator = resp.NextShardIterator
 		}
 	}
+}
+
+var retriableErrors = map[string]struct{}{
+	kinesis.ErrCodeExpiredIteratorException:               struct{}{},
+	kinesis.ErrCodeProvisionedThroughputExceededException: struct{}{},
 }
 
 func isShardClosed(nextShardIterator, currentShardIterator *string) bool {
