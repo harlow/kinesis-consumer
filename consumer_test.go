@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/service/kinesis"
 	"github.com/aws/aws-sdk-go/service/kinesis/kinesisiface"
 )
@@ -273,6 +274,40 @@ func TestScanShard_ShardIsClosed(t *testing.T) {
 	err = c.ScanShard(context.Background(), "myShard", fn)
 	if err != nil {
 		t.Fatalf("scan shard error: %v", err)
+	}
+}
+
+func TestScanShard_GetRecordsError(t *testing.T) {
+	var client = &kinesisClientMock{
+		getShardIteratorMock: func(input *kinesis.GetShardIteratorInput) (*kinesis.GetShardIteratorOutput, error) {
+			return &kinesis.GetShardIteratorOutput{
+				ShardIterator: aws.String("49578481031144599192696750682534686652010819674221576194"),
+			}, nil
+		},
+		getRecordsMock: func(input *kinesis.GetRecordsInput) (*kinesis.GetRecordsOutput, error) {
+			return &kinesis.GetRecordsOutput{
+					NextShardIterator: nil,
+					Records:           nil,
+				}, awserr.New(
+					kinesis.ErrCodeInvalidArgumentException,
+					"aws error message",
+					fmt.Errorf("error message"),
+				)
+		},
+	}
+
+	var fn = func(r *Record) error {
+		return nil
+	}
+
+	c, err := New("myStreamName", WithClient(client))
+	if err != nil {
+		t.Fatalf("new consumer error: %v", err)
+	}
+
+	err = c.ScanShard(context.Background(), "myShard", fn)
+	if err.Error() != "get records error: aws error message" {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

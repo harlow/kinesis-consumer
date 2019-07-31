@@ -8,6 +8,7 @@ import (
 	"log"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/kinesis"
 	"github.com/aws/aws-sdk-go/service/kinesis/kinesisiface"
@@ -145,13 +146,21 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 				ShardIterator: shardIterator,
 			})
 
-			// attempt to recover from GetRecords error by getting new shard iterator
+			// attempt to recover from GetRecords error when expired iterator
 			if err != nil {
+				c.logger.Log("[CONSUMER] get records error:", err.Error())
+
+				if awserr, ok := err.(awserr.Error); ok {
+					if _, ok := retriableErrors[awserr.Code()]; !ok {
+						return fmt.Errorf("get records error: %v", awserr.Message())
+					}
+				}
 
 				shardIterator, err = c.getShardIterator(c.streamName, shardID, lastSeqNum)
 				if err != nil {
 					return fmt.Errorf("get shard iterator error: %v", err)
 				}
+
 				continue
 			}
 
@@ -185,6 +194,11 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 			shardIterator = resp.NextShardIterator
 		}
 	}
+}
+
+var retriableErrors = map[string]struct{}{
+	kinesis.ErrCodeExpiredIteratorException:               struct{}{},
+	kinesis.ErrCodeProvisionedThroughputExceededException: struct{}{},
 }
 
 func isShardClosed(nextShardIterator, currentShardIterator *string) bool {
