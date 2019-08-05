@@ -10,24 +10,38 @@ import (
 const localhost = "127.0.0.1:6379"
 
 // New returns a checkpoint that uses Redis for underlying storage
-func New(appName string) (*Checkpoint, error) {
-	addr := os.Getenv("REDIS_URL")
-	if addr == "" {
-		addr = localhost
+func New(appName string, opts ...Option) (*Checkpoint, error) {
+	if appName == "" {
+		return nil, fmt.Errorf("must provide app name")
 	}
 
-	client := redis.NewClient(&redis.Options{Addr: addr})
+	c := &Checkpoint{
+		appName: appName,
+	}
+
+	// override defaults
+	for _, opt := range opts {
+		opt(c)
+	}
+
+	// default client if none provided
+	if c.client == nil {
+		addr := os.Getenv("REDIS_URL")
+		if addr == "" {
+			addr = localhost
+		}
+
+		client := redis.NewClient(&redis.Options{Addr: addr})
+		c.client = client
+	}
 
 	// verify we can ping server
-	_, err := client.Ping().Result()
+	_, err := c.client.Ping().Result()
 	if err != nil {
 		return nil, err
 	}
 
-	return &Checkpoint{
-		appName: appName,
-		client:  client,
-	}, nil
+	return c, nil
 }
 
 // Checkpoint stores and retreives the last evaluated key from a DDB scan

@@ -2,7 +2,27 @@ package redis
 
 import (
 	"testing"
+
+	"github.com/alicebob/miniredis"
+	redis "github.com/go-redis/redis"
 )
+
+func Test_CheckpointOptions(t *testing.T) {
+	s, err := miniredis.Run()
+	if err != nil {
+		panic(err)
+	}
+	defer s.Close()
+
+	client := redis.NewClient(&redis.Options{
+		Addr: s.Addr(),
+	})
+
+	_, err = New("app", WithClient(client))
+	if err != nil {
+		t.Fatalf("new checkpoint error: %v", err)
+	}
+}
 
 func Test_CheckpointLifecycle(t *testing.T) {
 	// new
