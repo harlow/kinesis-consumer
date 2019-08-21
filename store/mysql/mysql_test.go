@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
+	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/pkg/errors"
-	sqlmock "gopkg.in/DATA-DOG/go-sqlmock.v1"
 )
 
 func TestNew(t *testing.T) {
