@@ -51,7 +51,7 @@ func WithShardIteratorType(t string) Option {
 	}
 }
 
-// Timestamp overrides the starting point for the consumer
+// WithTimestamp overrides the starting point for the consumer
 func WithTimestamp(t time.Time) Option {
 	return func(c *Consumer) {
 		c.initialTimestamp = &t

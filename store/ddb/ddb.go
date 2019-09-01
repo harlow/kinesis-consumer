@@ -84,7 +84,7 @@ type item struct {
 	SequenceNumber string `json:"sequence_number"`
 }
 
-// Get determines if a checkpoint for a particular Shard exists.
+// GetCheckpoint determines if a checkpoint for a particular Shard exists.
 // Typically used to determine whether we should start processing the shard with
 // TRIM_HORIZON or AFTER_SEQUENCE_NUMBER (if checkpoint exists).
 func (c *Checkpoint) GetCheckpoint(streamName, shardID string) (string, error) {
