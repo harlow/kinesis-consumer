@@ -84,7 +84,7 @@ return consumer.SkipCheckpoint
 return errors.New("my error, exit all scans")
 ```
 
-Use context cancel to signal the scan to exit without error. For example if we wanted to gracefulloy exit the scan on interrupt.
+Use context cancel to signal the scan to exit without error. For example if we wanted to gracefully exit the scan on interrupt.
 
 ```go
 // trap SIGINT, wait to trigger shutdown
