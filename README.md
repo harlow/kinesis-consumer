@@ -269,7 +269,7 @@ c, err := consumer.New(streamName, consumer.WithCounter(counter))
 
 The [expvar package](https://golang.org/pkg/expvar/) will display consumer counts:
 
-```
+```json
 "counters": {
   "checkpoints": 3,
   "records": 13005
@@ -299,7 +299,7 @@ it implements the Logger interface.
 
 For example, to use the builtin logging package, we wrap it with myLogger structure.
 
-```
+```go
 // A myLogger provides a minimalistic logger satisfying the Logger interface.
 type myLogger struct {
 	logger *log.Logger
@@ -325,7 +325,7 @@ c, err := consumer.New(streamName, consumer.WithLogger(logger))
 
 To use a more complicated logging library, e.g. apex log
 
-```
+```go
 type myLogger struct {
 	logger *log.Logger
 }
@@ -349,7 +349,7 @@ There are example Produder and Consumer code in `/cmd` directory. These should h
 
 The examples run locally against [Kinesis Lite](https://github.com/mhart/kinesalite).
 
-    $ kinesalite &
+		$ kinesalite &
 
 Produce data to the stream:
 
