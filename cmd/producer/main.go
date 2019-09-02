@@ -13,11 +13,6 @@ import (
 	"github.com/aws/aws-sdk-go/service/kinesis"
 )
 
-const (
-	kinesisEndpoint = "http://localhost:4567"
-	awsRegion       = "us-west-2"
-)
-
 func main() {
 	var (
 		streamName      = flag.String("stream", "", "Stream name")
@@ -35,12 +30,12 @@ func main() {
 
 	var records []*kinesis.PutRecordsRequestEntry
 
-	cfg := aws.NewConfig().
-		WithEndpoint(*kinesisEndpoint).
-		WithRegion(*awsRegion).
-		WithLogLevel(3)
-
-	var client = kinesis.New(session.Must(session.NewSession(cfg)))
+	var client = kinesis.New(session.Must(session.NewSession(
+		aws.NewConfig().
+			WithEndpoint(*kinesisEndpoint).
+			WithRegion(*awsRegion).
+			WithLogLevel(3),
+	)))
 
 	// create stream if doesn't exist
 	if err := createStream(client, streamName); err != nil {
@@ -96,5 +91,6 @@ func putRecords(client *kinesis.Kinesis, streamName *string, records []*kinesis.
 	if err != nil {
 		log.Fatalf("error putting records: %v", err)
 	}
+
 	fmt.Print(".")
 }
