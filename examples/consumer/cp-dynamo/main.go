@@ -54,20 +54,27 @@ func main() {
 	}
 
 	var (
-		app    = flag.String("app", "", "Consumer app name")
-		stream = flag.String("stream", "", "Stream name")
-		table  = flag.String("table", "", "Checkpoint table name")
+		app             = flag.String("app", "", "Consumer app name")
+		stream          = flag.String("stream", "", "Stream name")
+		table           = flag.String("table", "", "Checkpoint table name")
+		kinesisEndpoint = flag.String("endpoint", "http://localhost:4567", "Kinesis endpoint")
+		awsRegion       = flag.String("region", "us-west-2", "AWS Region")
 	)
 	flag.Parse()
 
+	// New Kinesis and DynamoDB clients (if you need custom config)
 	sess, err := session.NewSession(aws.NewConfig())
 	if err != nil {
 		log.Log("new session error: %v", err)
 	}
-
-	// New Kinesis and DynamoDB clients (if you need custom config)
-	myKsis := kinesis.New(sess)
 	myDdbClient := dynamodb.New(sess)
+
+	var myKsis = kinesis.New(session.Must(session.NewSession(
+		aws.NewConfig().
+			WithEndpoint(*kinesisEndpoint).
+			WithRegion(*awsRegion).
+			WithLogLevel(3),
+	)))
 
 	// ddb persitance
 	ddb, err := storage.New(*app, *table, storage.WithDynamoClient(myDdbClient), storage.WithRetryer(&MyRetryer{}))

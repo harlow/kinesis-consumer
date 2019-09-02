@@ -1,7 +1,7 @@
 module github.com/harlow/kinesis-consumer
 
 require (
-	github.com/DATA-DOG/go-sqlmock v1.3.3 // indirect
+	github.com/DATA-DOG/go-sqlmock v1.3.3
 	github.com/alicebob/gopher-json v0.0.0-20180125190556-5a6b3ba71ee6 // indirect
 	github.com/alicebob/miniredis v2.5.0+incompatible
 	github.com/apex/log v1.0.0

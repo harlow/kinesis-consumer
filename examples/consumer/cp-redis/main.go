@@ -8,8 +8,11 @@ import (
 	"os"
 	"os/signal"
 
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/kinesis"
 	consumer "github.com/harlow/kinesis-consumer"
-	checkpoint "github.com/harlow/kinesis-consumer/store/redis"
+	store "github.com/harlow/kinesis-consumer/store/redis"
 )
 
 // A myLogger provides a minimalistic logger satisfying the Logger interface.
@@ -24,15 +27,17 @@ func (l *myLogger) Log(args ...interface{}) {
 
 func main() {
 	var (
-		app    = flag.String("app", "", "Consumer app name")
-		stream = flag.String("stream", "", "Stream name")
+		app             = flag.String("app", "", "Consumer app name")
+		stream          = flag.String("stream", "", "Stream name")
+		kinesisEndpoint = flag.String("endpoint", "http://localhost:4567", "Kinesis endpoint")
+		awsRegion       = flag.String("region", "us-west-2", "AWS Region")
 	)
 	flag.Parse()
 
-	// redis checkpoint
-	ck, err := checkpoint.New(*app)
+	// redis checkpoint store
+	store, err := store.New(*app)
 	if err != nil {
-		log.Fatalf("checkpoint error: %v", err)
+		log.Fatalf("store error: %v", err)
 	}
 
 	// logger
@@ -40,10 +45,19 @@ func main() {
 		logger: log.New(os.Stdout, "consumer-example: ", log.LstdFlags),
 	}
 
+	// client
+	cfg := aws.NewConfig().
+		WithEndpoint(*kinesisEndpoint).
+		WithRegion(*awsRegion).
+		WithLogLevel(3)
+
+	var client = kinesis.New(session.Must(session.NewSession(cfg)))
+
 	// consumer
 	c, err := consumer.New(
 		*stream,
-		consumer.WithStore(ck),
+		consumer.WithClient(client),
+		consumer.WithStore(store),
 		consumer.WithLogger(logger),
 	)
 	if err != nil {
