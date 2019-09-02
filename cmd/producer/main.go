@@ -21,13 +21,6 @@ func main() {
 	)
 	flag.Parse()
 
-	// open dummy user data
-	f, err := os.Open("users.txt")
-	if err != nil {
-		log.Fatal("Cannot open users.txt file")
-	}
-	defer f.Close()
-
 	var records []*kinesis.PutRecordsRequestEntry
 
 	var client = kinesis.New(session.Must(session.NewSession(
@@ -43,7 +36,8 @@ func main() {
 	}
 
 	// loop over file data
-	b := bufio.NewScanner(f)
+	b := bufio.NewScanner(os.Stdin)
+
 	for b.Scan() {
 		records = append(records, &kinesis.PutRecordsRequestEntry{
 			Data:         b.Bytes(),
@@ -79,8 +73,15 @@ func createStream(client *kinesis.Kinesis, streamName *string) error {
 			ShardCount: aws.Int64(2),
 		},
 	)
+	if err != nil {
+		return err
+	}
 
-	return err
+	return client.WaitUntilStreamExists(
+		&kinesis.DescribeStreamInput{
+			StreamName: streamName,
+		},
+	)
 }
 
 func putRecords(client *kinesis.Kinesis, streamName *string, records []*kinesis.PutRecordsRequestEntry) {

@@ -349,7 +349,15 @@ There are example Produder and Consumer code in `/cmd` directory. These should h
 
 The examples run locally against [Kinesis Lite](https://github.com/mhart/kinesalite).
 
-    $ kinesalite
+    $ kinesalite &
+
+Produce data to the stream:
+
+		$ cat cmd/producer/users.txt  | go run cmd/producer/main.go --stream myStream
+
+Consume data from the stream:
+
+		$ go run cmd/consumer/main.go --stream myStream
 
 ## Contributing
 
