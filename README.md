@@ -343,6 +343,14 @@ func main() {
 	}
 ```
 
+# Examples
+
+There are example Produder and Consumer code in `/cmd` directory. These should help give end-to-end examples of setting up consumers with different checkpoint strategies.
+
+The examples run locally against [Kinesis Lite](https://github.com/mhart/kinesalite).
+
+    $ kinesalite
+
 ## Contributing
 
 Please see [CONTRIBUTING.md] for more information. Thank you, [contributors]!
