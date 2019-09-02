@@ -21,8 +21,9 @@ func NewAllGroup(ksis kinesisiface.KinesisAPI, store Store, streamName string, l
 	}
 }
 
-// AllGroup caches a local list of the shards we are already processing
-// and routinely polls the stream looking for new shards to process
+// AllGroup is used to consume all shards from a single consumer. It
+// caches a local list of the shards we are already processing
+// and routinely polls the stream looking for new shards to process.
 type AllGroup struct {
 	ksis       kinesisiface.KinesisAPI
 	streamName string
