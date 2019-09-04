@@ -3,6 +3,7 @@ package consumer
 import (
 	"context"
 	"fmt"
+	"github.com/harlow/kinesis-consumer/store/memory"
 	"sync"
 	"testing"
 
@@ -52,7 +53,7 @@ func TestScan(t *testing.T) {
 		},
 	}
 	var (
-		cp  = &fakeCheckpoint{cache: map[string]string{}}
+		cp  = memory.New()
 		ctr = &fakeCounter{}
 	)
 
@@ -114,7 +115,7 @@ func TestScanShard(t *testing.T) {
 	}
 
 	var (
-		cp  = &fakeCheckpoint{cache: map[string]string{}}
+		cp  = memory.New()
 		ctr = &fakeCounter{}
 	)
 
@@ -219,7 +220,7 @@ func TestScanShard_SkipCheckpoint(t *testing.T) {
 		},
 	}
 
-	var cp = &fakeCheckpoint{cache: map[string]string{}}
+	var cp = memory.New()
 
 	c, err := New("myStreamName", WithClient(client), WithStore(cp))
 	if err != nil {
@@ -333,29 +334,6 @@ func (c *kinesisClientMock) GetShardIterator(in *kinesis.GetShardIteratorInput) 
 
 func (c *kinesisClientMock) GetShardIteratorWithContext(ctx aws.Context, in *kinesis.GetShardIteratorInput, options ...request.Option) (*kinesis.GetShardIteratorOutput, error) {
 	return c.getShardIteratorMock(in)
-}
-
-// implementation of checkpoint
-type fakeCheckpoint struct {
-	cache map[string]string
-	mu    sync.Mutex
-}
-
-func (fc *fakeCheckpoint) SetCheckpoint(streamName, shardID, sequenceNumber string) error {
-	fc.mu.Lock()
-	defer fc.mu.Unlock()
-
-	key := fmt.Sprintf("%s-%s", streamName, shardID)
-	fc.cache[key] = sequenceNumber
-	return nil
-}
-
-func (fc *fakeCheckpoint) GetCheckpoint(streamName, shardID string) (string, error) {
-	fc.mu.Lock()
-	defer fc.mu.Unlock()
-
-	key := fmt.Sprintf("%s-%s", streamName, shardID)
-	return fc.cache[key], nil
 }
 
 // implementation of counter
