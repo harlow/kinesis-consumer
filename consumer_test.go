@@ -3,7 +3,6 @@ package consumer
 import (
 	"context"
 	"fmt"
-	"github.com/harlow/kinesis-consumer/store/memory"
 	"sync"
 	"testing"
 
@@ -12,6 +11,8 @@ import (
 	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/service/kinesis"
 	"github.com/aws/aws-sdk-go/service/kinesis/kinesisiface"
+
+	"github.com/harlow/kinesis-consumer/store/memory"
 )
 
 var records = []*kinesis.Record{
@@ -53,7 +54,7 @@ func TestScan(t *testing.T) {
 		},
 	}
 	var (
-		cp  = memory.New()
+		cp  = store.New()
 		ctr = &fakeCounter{}
 	)
 
@@ -115,7 +116,7 @@ func TestScanShard(t *testing.T) {
 	}
 
 	var (
-		cp  = memory.New()
+		cp  = store.New()
 		ctr = &fakeCounter{}
 	)
 
@@ -220,7 +221,7 @@ func TestScanShard_SkipCheckpoint(t *testing.T) {
 		},
 	}
 
-	var cp = memory.New()
+	var cp = store.New()
 
 	c, err := New("myStreamName", WithClient(client), WithStore(cp))
 	if err != nil {

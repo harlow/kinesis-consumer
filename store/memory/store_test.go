@@ -1,4 +1,4 @@
-package memory_test
+package store_test
 
 import (
   "testing"
@@ -7,7 +7,7 @@ import (
 )
 
 func Test_CheckpointLifecycle(t *testing.T) {
-  c := memory.New()
+  c := store.New()
 
   // set
   c.SetCheckpoint("streamName", "shardID", "testSeqNum")
@@ -23,7 +23,7 @@ func Test_CheckpointLifecycle(t *testing.T) {
 }
 
 func Test_SetEmptySeqNum(t *testing.T) {
-  c := memory.New()
+  c := store.New()
 
   err := c.SetCheckpoint("streamName", "shardID", "")
   if err == nil || err.Error() != "sequence number should not be empty" {
