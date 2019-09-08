@@ -1,13 +1,11 @@
-package store_test
+package store
 
 import (
   "testing"
-
-  "github.com/harlow/kinesis-consumer/store/memory"
 )
 
 func Test_CheckpointLifecycle(t *testing.T) {
-  c := store.New()
+  c := New()
 
   // set
   c.SetCheckpoint("streamName", "shardID", "testSeqNum")
@@ -23,7 +21,7 @@ func Test_CheckpointLifecycle(t *testing.T) {
 }
 
 func Test_SetEmptySeqNum(t *testing.T) {
-  c := store.New()
+  c := New()
 
   err := c.SetCheckpoint("streamName", "shardID", "")
   if err == nil || err.Error() != "sequence number should not be empty" {
