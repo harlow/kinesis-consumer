@@ -57,3 +57,10 @@ func WithTimestamp(t time.Time) Option {
 		c.initialTimestamp = &t
 	}
 }
+
+// WithScanInterval overrides the scan interval for the consumer
+func WithScanInterval(d time.Duration) Option {
+	return func(c *Consumer) {
+		c.scanInterval = d
+	}
+}

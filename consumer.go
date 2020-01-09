@@ -35,6 +35,7 @@ func New(streamName string, opts ...Option) (*Consumer, error) {
 		logger: &noopLogger{
 			logger: log.New(ioutil.Discard, "", log.LstdFlags),
 		},
+		scanInterval: 250 * time.Millisecond,
 	}
 
 	// override defaults
@@ -69,6 +70,7 @@ type Consumer struct {
 	group                    Group
 	logger                   Logger
 	store                    Store
+	scanInterval             time.Duration
 }
 
 // ScanFunc is the type of the function called for each message read
@@ -146,12 +148,14 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 	defer func() {
 		c.logger.Log("[CONSUMER] stop scan:", shardID)
 	}()
+	scanTicker := time.NewTicker(c.scanInterval)
+	defer scanTicker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
-		default:
+		case <-scanTicker.C:
 			resp, err := c.client.GetRecords(&kinesis.GetRecordsInput{
 				ShardIterator: shardIterator,
 			})
