@@ -19,3 +19,5 @@ require (
 	google.golang.org/appengine v1.6.1 // indirect
 	gopkg.in/redis.v5 v5.2.9 // indirect
 )
+
+go 1.13

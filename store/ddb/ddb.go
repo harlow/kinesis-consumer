@@ -39,12 +39,10 @@ func WithRetryer(r Retryer) Option {
 
 // New returns a checkpoint that uses DynamoDB for underlying storage
 func New(appName, tableName string, opts ...Option) (*Checkpoint, error) {
-	client := dynamodb.New(session.New(aws.NewConfig()))
 
 	ck := &Checkpoint{
 		tableName:   tableName,
 		appName:     appName,
-		client:      client,
 		maxInterval: time.Duration(1 * time.Minute),
 		done:        make(chan struct{}),
 		mu:          &sync.Mutex{},
@@ -54,6 +52,15 @@ func New(appName, tableName string, opts ...Option) (*Checkpoint, error) {
 
 	for _, opt := range opts {
 		opt(ck)
+	}
+
+	// default client
+	if ck.client == nil {
+		newSession, err := session.NewSession(aws.NewConfig())
+		if err != nil {
+			return nil, err
+		}
+		ck.client = dynamodb.New(newSession)
 	}
 
 	go ck.loop()
