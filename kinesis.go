@@ -27,8 +27,7 @@ func listShards(ksis kinesisiface.KinesisAPI, streamName string) ([]*kinesis.Sha
 		}
 
 		listShardsInput = &kinesis.ListShardsInput{
-			NextToken:  resp.NextToken,
-			StreamName: aws.String(streamName),
+			NextToken: resp.NextToken,
 		}
 	}
 }
