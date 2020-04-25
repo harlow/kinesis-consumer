@@ -36,6 +36,7 @@ func New(streamName string, opts ...Option) (*Consumer, error) {
 			logger: log.New(ioutil.Discard, "", log.LstdFlags),
 		},
 		scanInterval: 250 * time.Millisecond,
+		maxRecords:   10000,
 	}
 
 	// override defaults
@@ -71,6 +72,7 @@ type Consumer struct {
 	logger                   Logger
 	store                    Store
 	scanInterval             time.Duration
+	maxRecords               int64
 }
 
 // ScanFunc is the type of the function called for each message read
@@ -157,6 +159,7 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 			return nil
 		case <-scanTicker.C:
 			resp, err := c.client.GetRecords(&kinesis.GetRecordsInput{
+				Limit:         aws.Int64(c.maxRecords),
 				ShardIterator: shardIterator,
 			})
 

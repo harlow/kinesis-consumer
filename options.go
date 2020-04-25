@@ -64,3 +64,12 @@ func WithScanInterval(d time.Duration) Option {
 		c.scanInterval = d
 	}
 }
+
+// WithMaxRecords overrides the maximum number of records to be
+// returned in a single GetRecords call for the consumer (specify a
+// value of up to 10,000)
+func WithMaxRecords(n int64) Option {
+	return func(c *Consumer) {
+		c.maxRecords = n
+	}
+}
