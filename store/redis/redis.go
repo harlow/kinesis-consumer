@@ -1,10 +1,11 @@
 package redis
 
 import (
+	"context"
 	"fmt"
 	"os"
 
-	redis "github.com/go-redis/redis"
+	redis "github.com/go-redis/redis/v8"
 )
 
 const localhost = "127.0.0.1:6379"
@@ -36,7 +37,7 @@ func New(appName string, opts ...Option) (*Checkpoint, error) {
 	}
 
 	// verify we can ping server
-	_, err := c.client.Ping().Result()
+	_, err := c.client.Ping(context.Background()).Result()
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +53,8 @@ type Checkpoint struct {
 
 // GetCheckpoint fetches the checkpoint for a particular Shard.
 func (c *Checkpoint) GetCheckpoint(streamName, shardID string) (string, error) {
-	val, _ := c.client.Get(c.key(streamName, shardID)).Result()
+	ctx := context.Background()
+	val, _ := c.client.Get(ctx, c.key(streamName, shardID)).Result()
 	return val, nil
 }
 
@@ -62,7 +64,8 @@ func (c *Checkpoint) SetCheckpoint(streamName, shardID, sequenceNumber string) e
 	if sequenceNumber == "" {
 		return fmt.Errorf("sequence number should not be empty")
 	}
-	err := c.client.Set(c.key(streamName, shardID), sequenceNumber, 0).Err()
+	ctx := context.Background()
+	err := c.client.Set(ctx, c.key(streamName, shardID), sequenceNumber, 0).Err()
 	if err != nil {
 		return err
 	}
