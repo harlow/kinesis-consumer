@@ -25,7 +25,7 @@ Get the package source:
 
 The consumer leverages a handler func that accepts a Kinesis record. The `Scan` method will consume all shards concurrently and call the callback func as it receives records from the stream.
 
-_Important 1: The `Scan` func will also poll the stream to check for new shards, it will automatcially start consuming new shards added to the stream._
+_Important 1: The `Scan` func will also poll the stream to check for new shards, it will automatically start consuming new shards added to the stream._
 
 _Important 2: The default Log, Counter, and Checkpoint are no-op which means no logs, counts, or checkpoints will be emitted when scanning the stream. See the options below to override these defaults._
 
