@@ -2,7 +2,7 @@ language: go
 services:
   - redis-server
 go:
-  - "1.12"
+  - "1.13"
 branches:
   only:
     - master
