@@ -4,30 +4,30 @@
 package store
 
 import (
-  "fmt"
-  "sync"
+	"fmt"
+	"sync"
 )
 
 func New() *Store {
-  return &Store{}
+	return &Store{}
 }
 
 type Store struct {
-  sync.Map
+	sync.Map
 }
 
 func (c *Store) SetCheckpoint(streamName, shardID, sequenceNumber string) error {
-  if sequenceNumber == "" {
-    return fmt.Errorf("sequence number should not be empty")
-  }
-  c.Store(streamName+":"+shardID, sequenceNumber)
-  return nil
+	if sequenceNumber == "" {
+		return fmt.Errorf("sequence number should not be empty")
+	}
+	c.Store(streamName+":"+shardID, sequenceNumber)
+	return nil
 }
 
 func (c *Store) GetCheckpoint(streamName, shardID string) (string, error) {
-  val, ok := c.Load(streamName + ":" + shardID)
-  if !ok {
-    return "", nil
-  }
-  return val.(string), nil
+	val, ok := c.Load(streamName + ":" + shardID)
+	if !ok {
+		return "", nil
+	}
+	return val.(string), nil
 }
