@@ -260,7 +260,7 @@ func TestScanShard_ShardIsClosed(t *testing.T) {
 		getRecordsMock: func(input *kinesis.GetRecordsInput) (*kinesis.GetRecordsOutput, error) {
 			return &kinesis.GetRecordsOutput{
 				NextShardIterator: nil,
-				Records:           make([]*Record, 0),
+				Records:           make([]*kinesis.Record, 0),
 			}, nil
 		},
 	}
