@@ -19,8 +19,8 @@ import (
 // Record wraps the record returned from the Kinesis library and
 // extends to include the shard id.
 type Record struct {
-    *kinesis.Record
-    ShardID string
+	*kinesis.Record
+	ShardID string
 }
 
 // New creates a kinesis consumer with default settings. Use Option to override
