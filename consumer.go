@@ -16,8 +16,12 @@ import (
 	"github.com/aws/aws-sdk-go/service/kinesis/kinesisiface"
 )
 
-// Record is an alias of record returned from kinesis library
-type Record = kinesis.Record
+// Record wraps the record returned from the Kinesis library and
+// extends to include the shard id.
+type Record struct {
+	*kinesis.Record
+	ShardID string
+}
 
 // New creates a kinesis consumer with default settings. Use Option to override
 // any of the optional attributes.
@@ -187,7 +191,7 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 				case <-ctx.Done():
 					return nil
 				default:
-					err := fn(r)
+					err := fn(&Record{r, shardID})
 					if err != nil && err != ErrSkipCheckpoint {
 						return err
 					}
