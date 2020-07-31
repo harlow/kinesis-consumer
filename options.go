@@ -65,6 +65,14 @@ func WithScanInterval(d time.Duration) Option {
 	}
 }
 
+// WithImmediateRescan overrides whether we wait for the next
+// scan interval if records were fetched during a poll
+func WithImmediateRescan(r bool) Option {
+	return func(c *Consumer) {
+		c.immediateRescan = r
+	}
+}
+
 // WithMaxRecords overrides the maximum number of records to be
 // returned in a single GetRecords call for the consumer (specify a
 // value of up to 10,000)

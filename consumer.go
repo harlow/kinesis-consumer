@@ -39,8 +39,9 @@ func New(streamName string, opts ...Option) (*Consumer, error) {
 		logger: &noopLogger{
 			logger: log.New(ioutil.Discard, "", log.LstdFlags),
 		},
-		scanInterval: 250 * time.Millisecond,
-		maxRecords:   10000,
+		scanInterval:    250 * time.Millisecond,
+		immediateRescan: false,
+		maxRecords:      10000,
 	}
 
 	// override defaults
@@ -76,6 +77,7 @@ type Consumer struct {
 	logger                   Logger
 	store                    Store
 	scanInterval             time.Duration
+	immediateRescan          bool
 	maxRecords               int64
 }
 
@@ -206,6 +208,10 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 			}
 
 			shardIterator = resp.NextShardIterator
+			if c.immediateRescan && len(resp.Records) > 0 && *resp.MillisBehindLatest > 0 {
+				// There appears to be additional records, so skip waiting for next tick
+				continue
+			}
 		}
 
 		// Wait for next scan
