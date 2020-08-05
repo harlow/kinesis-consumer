@@ -117,7 +117,7 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 		if err.(awserr.Error).Code() != "AccessDeniedException"  {
 			return err
 		}
-		c.logger.Log("[CONSUMER] IAM entity lacks kinesis:DescribeStream permissions, skipping extra sanity checks")
+		c.logger.Log("[CONSUMER] IAM entity lacks kinesis:DescribeStreamSummary permissions, skipping extra sanity checks")
 	} else {
 		c.retentionPeriod = *summary.StreamDescriptionSummary.RetentionPeriodHours * 3600 * 1000
 	}
