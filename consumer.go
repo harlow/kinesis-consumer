@@ -14,6 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/kinesis"
 	"github.com/aws/aws-sdk-go/service/kinesis/kinesisiface"
+	"github.com/awslabs/kinesis-aggregation/go/deaggregator"
 )
 
 // Record wraps the record returned from the Kinesis library and
@@ -78,6 +79,7 @@ type Consumer struct {
 	store                    Store
 	scanInterval             time.Duration
 	maxRecords               int64
+	isAggregated             bool
 }
 
 // ScanFunc is the type of the function called for each message read
@@ -180,7 +182,17 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 			}
 		} else {
 			// loop over records, call callback func
-			for _, r := range resp.Records {
+			var records []*kinesis.Record
+			var err error
+			if c.isAggregated {
+				records, err = deaggregator.DeaggregateRecords(resp.Records)
+				if err != nil {
+					return err
+				}
+			} else {
+				records = resp.Records
+			}
+			for _, r := range records {
 				select {
 				case <-ctx.Done():
 					return nil
