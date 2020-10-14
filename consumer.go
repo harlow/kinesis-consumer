@@ -79,7 +79,7 @@ type Consumer struct {
 	store                    Store
 	scanInterval             time.Duration
 	maxRecords               int64
-	isaggregated			 bool
+	isAggregated             bool
 }
 
 // ScanFunc is the type of the function called for each message read
@@ -184,7 +184,7 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 			// loop over records, call callback func
 			var records []*kinesis.Record
 			var err error
-			if c.isaggregated {
+			if c.isAggregated {
 				records, err = deaggregator.DeaggregateRecords(resp.Records)
 				if err != nil {
 					return err

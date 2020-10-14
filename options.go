@@ -76,6 +76,6 @@ func WithMaxRecords(n int64) Option {
 
 func WithAggregation(a bool) Option {
 	return func(c *Consumer) {
-		c.isaggregated = a
+		c.isAggregated = a
 	}
 }
