@@ -1,4 +1,4 @@
-module github.com/jregovic/kinesis-consumer
+module github.com/harlow/kinesis-consumer
 
 require (
 	github.com/DATA-DOG/go-sqlmock v1.4.1
