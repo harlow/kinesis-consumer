@@ -33,7 +33,7 @@ func main() {
 	sess := session.Must(session.NewSession(awsConfig))
 	kinesisClient := kinesis.New(sess, awsConfig)
 
-	c, err := consumer.New("tally_dev_v1", consumer.WithClient(kinesisClient), consumer.WithStore(db), consumer.WithBatchSecondInterval(10))
+	c, err := consumer.New("tally_dev_v1", consumer.WithClient(kinesisClient), consumer.WithStore(db))
 
 	if err != nil {
 		log.Fatalf("consumer error: %v", err)
@@ -41,7 +41,7 @@ func main() {
 
 	// scan
 	ctx := trap()
-	err = c.Scan(ctx, func(r []*kinesis.Record) error {
+	err = c.Scan(ctx, func(r *consumer.Record) error {
 		fmt.Println(r)
 		return nil // continue scanning
 	})

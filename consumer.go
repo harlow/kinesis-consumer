@@ -41,8 +41,9 @@ func New(streamName string, opts ...Option) (*Consumer, error) {
 		logger: &noopLogger{
 			logger: log.New(ioutil.Discard, "", log.LstdFlags),
 		},
-		scanInterval: 250 * time.Millisecond,
-		maxRecords:   10000,
+		scanInterval:  250 * time.Millisecond,
+		maxRecords:    10000,
+		batchInterval: 0,
 	}
 
 	// override defaults
@@ -88,7 +89,10 @@ type Consumer struct {
 // returned from the AWS Kinesis library.
 // If an error is returned, scanning stops. The sole exception is when the
 // function returns the special value ErrSkipCheckpoint.
-type ScanFunc func([]*kinesis.Record) error
+
+type ScanFunc func(*Record) error
+
+type ScanFuncBatch func([]*kinesis.Record) error
 
 // ErrSkipCheckpoint is used as a return value from ScanFunc to indicate that
 // the current checkpoint should be skipped skipped. It is not returned
@@ -98,8 +102,7 @@ var ErrSkipCheckpoint = errors.New("skip checkpoint")
 // Scan launches a goroutine to process each of the shards in the stream. The ScanFunc
 // is passed through to each of the goroutines and called with each message pulled from
 // the stream.
-func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
-	println("Scan function")
+func (c *Consumer) Scan(ctx context.Context, fn interface{}) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -140,9 +143,120 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 	return <-errc
 }
 
+func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn interface{}) error {
+
+	switch fn.(type) {
+
+	case func([]*kinesis.Record) error:
+		function := fn.(func([]*kinesis.Record) error)
+		return c.ScanShardWithIntervalBatching(ctx, shardID, function)
+
+	case func(*Record) error:
+		function := fn.(func(*Record) error)
+		return c.ScanShardContinous(ctx, shardID, function)
+
+	default:
+		return errors.New(fmt.Sprintf("Unexpected function type %T", fn))
+	}
+}
+
 // ScanShard loops over records on a specific shard, calls the callback func
 // for each record and checkpoints the progress of scan.
-func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) error {
+func (c *Consumer) ScanShardContinous(ctx context.Context, shardID string, fn ScanFunc) error {
+	// get last seq number from checkpoint
+	lastSeqNum, err := c.group.GetCheckpoint(c.streamName, shardID)
+	if err != nil {
+		return fmt.Errorf("get checkpoint error: %v", err)
+	}
+
+	// get shard iterator
+	shardIterator, err := c.getShardIterator(ctx, c.streamName, shardID, lastSeqNum)
+	if err != nil {
+		return fmt.Errorf("get shard iterator error: %v", err)
+	}
+
+	c.logger.Log("[CONSUMER] start scan:", shardID, lastSeqNum)
+	defer func() {
+		c.logger.Log("[CONSUMER] stop scan:", shardID)
+	}()
+	scanTicker := time.NewTicker(c.scanInterval)
+	defer scanTicker.Stop()
+
+	for {
+		resp, err := c.client.GetRecords(&kinesis.GetRecordsInput{
+			Limit:         aws.Int64(c.maxRecords),
+			ShardIterator: shardIterator,
+		})
+
+		// attempt to recover from GetRecords error when expired iterator
+		if err != nil {
+			c.logger.Log("[CONSUMER] get records error:", err.Error())
+
+			if awserr, ok := err.(awserr.Error); ok {
+				if _, ok := retriableErrors[awserr.Code()]; !ok {
+					return fmt.Errorf("get records error: %v", awserr.Message())
+				}
+			}
+
+			shardIterator, err = c.getShardIterator(ctx, c.streamName, shardID, lastSeqNum)
+			if err != nil {
+				return fmt.Errorf("get shard iterator error: %v", err)
+			}
+		} else {
+			// loop over records, call callback func
+			var records []*kinesis.Record
+			var err error
+			if c.isAggregated {
+				records, err = deaggregator.DeaggregateRecords(resp.Records)
+				if err != nil {
+					return err
+				}
+			} else {
+				records = resp.Records
+			}
+			for _, r := range records {
+				select {
+				case <-ctx.Done():
+					return nil
+				default:
+					err := fn(&Record{r, shardID, resp.MillisBehindLatest})
+					if err != nil && err != ErrSkipCheckpoint {
+						return err
+					}
+
+					if err != ErrSkipCheckpoint {
+						if err := c.group.SetCheckpoint(c.streamName, shardID, *r.SequenceNumber); err != nil {
+							return err
+						}
+					}
+
+					c.counter.Add("records", 1)
+					lastSeqNum = *r.SequenceNumber
+				}
+			}
+
+			if isShardClosed(resp.NextShardIterator, shardIterator) {
+				c.logger.Log("[CONSUMER] shard closed:", shardID)
+				return nil
+			}
+
+			shardIterator = resp.NextShardIterator
+		}
+
+		// Wait for next scan
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-scanTicker.C:
+			continue
+		}
+	}
+}
+
+// ScanShardWithIntervalBatching waits for a specific second time interval to occur and then performs a batch fetch with specific shard, calls the callback func
+// with an array of records and checkpoints the scans
+
+func (c *Consumer) ScanShardWithIntervalBatching(ctx context.Context, shardID string, fn ScanFuncBatch) error {
 	// get last seq number from checkpoint
 
 	lastSeqNum, err := c.group.GetCheckpoint(c.streamName, shardID)
@@ -203,7 +317,6 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 			}
 
 			records_length := len(records)
-			println("Length of records --->", len(records))
 
 			if records_length == 0 {
 				err = fn(nil)
@@ -226,25 +339,6 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 			}
 
 			c.counter.Add("records", int64(records_length))
-			// for _, r := range records {
-			// 	select {
-			// 	case <-ctx.Done():
-			// 		return nil
-			// 	default:
-			// 		//Where we get records from
-			// 		err := fn(&Record{r, shardID, resp.MillisBehindLatest})
-			// 		if err != nil && err != ErrSkipCheckpoint {
-			// 			return err
-			// 		}
-
-			// 		if err != ErrSkipCheckpoint {
-			// 			if err := c.group.SetCheckpoint(c.streamName, shardID, *r.SequenceNumber); err != nil {
-			// 				return err
-			// 			}
-			// 		}
-
-			// 	}
-			// }
 
 			if isShardClosed(resp.NextShardIterator, shardIterator) {
 				c.logger.Log("[CONSUMER] shard closed:", shardID)
