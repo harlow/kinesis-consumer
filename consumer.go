@@ -87,7 +87,7 @@ type Consumer struct {
 // returned from the AWS Kinesis library.
 // If an error is returned, scanning stops. The sole exception is when the
 // function returns the special value ErrSkipCheckpoint.
-type ScanFunc func(*Record) error
+type ScanFunc func([]*kinesis.Record) error
 
 // ErrSkipCheckpoint is used as a return value from ScanFunc to indicate that
 // the current checkpoint should be skipped skipped. It is not returned
@@ -98,6 +98,7 @@ var ErrSkipCheckpoint = errors.New("skip checkpoint")
 // is passed through to each of the goroutines and called with each message pulled from
 // the stream.
 func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
+	println("Scan function")
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -142,6 +143,7 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 // for each record and checkpoints the progress of scan.
 func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) error {
 	// get last seq number from checkpoint
+
 	lastSeqNum, err := c.group.GetCheckpoint(c.streamName, shardID)
 	if err != nil {
 		return fmt.Errorf("get checkpoint error: %v", err)
@@ -159,8 +161,24 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 	}()
 	scanTicker := time.NewTicker(c.scanInterval)
 	defer scanTicker.Stop()
-
+	seen := false
 	for {
+		curr_second := time.Now().Second()
+
+		if ctx.Done(){ 
+			return nil 
+		}
+		
+
+		if curr_second%30 != 0 || seen {
+			continue
+		}
+
+		if curr_second%30 == 0 {
+			seen = false
+		}
+
+		seen = true
 		resp, err := c.client.GetRecords(&kinesis.GetRecordsInput{
 			Limit:         aws.Int64(c.maxRecords),
 			ShardIterator: shardIterator,
@@ -192,26 +210,41 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 			} else {
 				records = resp.Records
 			}
-			for _, r := range records {
-				select {
-				case <-ctx.Done():
-					return nil
-				default:
-					err := fn(&Record{r, shardID, resp.MillisBehindLatest})
-					if err != nil && err != ErrSkipCheckpoint {
-						return err
-					}
 
-					if err != ErrSkipCheckpoint {
-						if err := c.group.SetCheckpoint(c.streamName, shardID, *r.SequenceNumber); err != nil {
-							return err
-						}
-					}
+			last_record := records[batch_length -1]
+			println("Length of records --->", len(records))
+			err = fn(records)
 
-					c.counter.Add("records", 1)
-					lastSeqNum = *r.SequenceNumber
-				}
+			if err != nil && err != ErrSkipCheckpoint {
+				return err
 			}
+			lastSeqNum = *last_record.SequenceNumber
+
+			if err != ErrSkipCheckpoint {
+				if err := c.group.SetCheckpoint(c.streamName, shardID, *last_record.SequenceNumber); err != nil {
+					return err
+				}
+
+			c.counter.Add("records", len(records))
+			// for _, r := range records {
+			// 	select {
+			// 	case <-ctx.Done():
+			// 		return nil
+			// 	default:
+			// 		//Where we get records from
+			// 		err := fn(&Record{r, shardID, resp.MillisBehindLatest})
+			// 		if err != nil && err != ErrSkipCheckpoint {
+			// 			return err
+			// 		}
+
+			// 		if err != ErrSkipCheckpoint {
+			// 			if err := c.group.SetCheckpoint(c.streamName, shardID, *r.SequenceNumber); err != nil {
+			// 				return err
+			// 			}
+			// 		}
+
+			// 	}
+			// }
 
 			if isShardClosed(resp.NextShardIterator, shardIterator) {
 				c.logger.Log("[CONSUMER] shard closed:", shardID)
