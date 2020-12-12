@@ -92,6 +92,11 @@ type Consumer struct {
 
 type ScanFunc func(*Record) error
 
+//ScanFuncBatch is the type of function called for read on a slice of records
+//from the steram.  The Record argument contains the batch of the last unseen records 
+// If an error is returned, scanning stops. The sole exception is when the
+// function returns the special value ErrSkipCheckpoint.
+
 type ScanFuncBatch func([]*kinesis.Record) error
 
 // ErrSkipCheckpoint is used as a return value from ScanFunc to indicate that
@@ -145,6 +150,7 @@ func (c *Consumer) Scan(ctx context.Context, fn interface{}) error {
 
 func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn interface{}) error {
 
+	//Determining scan option based on interface type 
 	switch fn.(type) {
 
 	case func([]*kinesis.Record) error:
@@ -153,16 +159,16 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn interface{}
 
 	case func(*Record) error:
 		function := fn.(func(*Record) error)
-		return c.ScanShardContinous(ctx, shardID, function)
+		return c.ScanShardContinuous(ctx, shardID, function)
 
 	default:
 		return errors.New(fmt.Sprintf("Unexpected function type %T", fn))
 	}
 }
 
-// ScanShard loops over records on a specific shard, calls the callback func
+// ScanShardContinuous loops over records on a specific shard, calls the callback func
 // for each record and checkpoints the progress of scan.
-func (c *Consumer) ScanShardContinous(ctx context.Context, shardID string, fn ScanFunc) error {
+func (c *Consumer) ScanShardContinuous(ctx context.Context, shardID string, fn ScanFunc) error {
 	// get last seq number from checkpoint
 	lastSeqNum, err := c.group.GetCheckpoint(c.streamName, shardID)
 	if err != nil {

@@ -80,6 +80,7 @@ func WithAggregation(a bool) Option {
 	}
 }
 
+//WithBatchSecondInterval overrides the batch retrieval interval for the consumer
 func WithBatchSecondInterval(k int64) Option {
 	return func(c *Consumer) {
 		c.batchInterval = k
