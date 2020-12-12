@@ -79,3 +79,9 @@ func WithAggregation(a bool) Option {
 		c.isAggregated = a
 	}
 }
+
+func WithBatchSecondInterval(k int64) Option {
+	return func(c *Consumer) {
+		c.batchInterval = k
+	}
+}

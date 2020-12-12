@@ -80,6 +80,7 @@ type Consumer struct {
 	scanInterval             time.Duration
 	maxRecords               int64
 	isAggregated             bool
+	batchInterval            int64
 }
 
 // ScanFunc is the type of the function called for each message read
@@ -161,24 +162,14 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 	}()
 	scanTicker := time.NewTicker(c.scanInterval)
 	defer scanTicker.Stop()
-	seen := false
+	time_start := time.Now()
 	for {
-		curr_second := time.Now().Second()
 
-		if ctx.Done(){ 
-			return nil 
-		}
-		
-
-		if curr_second%30 != 0 || seen {
+		if time_elapsed := time.Since(time_start); int64(time_elapsed.Seconds()) <= c.batchInterval {
 			continue
 		}
 
-		if curr_second%30 == 0 {
-			seen = false
-		}
-
-		seen = true
+		time_start = time.Now()
 		resp, err := c.client.GetRecords(&kinesis.GetRecordsInput{
 			Limit:         aws.Int64(c.maxRecords),
 			ShardIterator: shardIterator,
@@ -211,9 +202,17 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 				records = resp.Records
 			}
 
-			last_record := records[batch_length -1]
+			records_length := len(records)
 			println("Length of records --->", len(records))
-			err = fn(records)
+
+			if records_length == 0 {
+				err = fn(nil)
+				continue
+
+			} else {
+				err = fn(records)
+			}
+			last_record := records[records_length-1]
 
 			if err != nil && err != ErrSkipCheckpoint {
 				return err
@@ -224,8 +223,9 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 				if err := c.group.SetCheckpoint(c.streamName, shardID, *last_record.SequenceNumber); err != nil {
 					return err
 				}
+			}
 
-			c.counter.Add("records", len(records))
+			c.counter.Add("records", int64(records_length))
 			// for _, r := range records {
 			// 	select {
 			// 	case <-ctx.Done():

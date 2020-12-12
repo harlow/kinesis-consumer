@@ -19,7 +19,7 @@ import (
 func main() {
 
 	// postgres checkpoint
-	db, err := store.New("test", "kinesis_consumer", "host=localhost port=5432 user=postgres password= dbname=temp_db sslmode=disable")
+	db, err := store.New("test", "kinesis_consumer", "host=localhost port=5432 user=postgres password= dbname=postgres sslmode=disable")
 	if err != nil {
 		log.Fatalf("new checkpoint error: %v", err)
 	}
@@ -33,7 +33,7 @@ func main() {
 	sess := session.Must(session.NewSession(awsConfig))
 	kinesisClient := kinesis.New(sess, awsConfig)
 
-	c, err := consumer.New("tally_dev_v1", consumer.WithClient(kinesisClient), consumer.WithStore(db))
+	c, err := consumer.New("tally_dev_v1", consumer.WithClient(kinesisClient), consumer.WithStore(db), consumer.WithBatchSecondInterval(10))
 
 	if err != nil {
 		log.Fatalf("consumer error: %v", err)
@@ -58,6 +58,7 @@ func trap() context.Context {
 	go func() {
 		sig := <-sigs
 		log.Printf("received %s", sig)
+		os.Exit(0)
 		cancel()
 	}()
 
