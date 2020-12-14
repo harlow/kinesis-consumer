@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -12,47 +11,38 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/kinesis"
+
 	consumer "github.com/harlow/kinesis-consumer"
+	store "github.com/harlow/kinesis-consumer/store/postgres"
 )
 
-// A myLogger provides a minimalistic logger satisfying the Logger interface.
-type myLogger struct {
-	logger *log.Logger
-}
-
-// Log logs the parameters to the stdlib logger. See log.Println.
-func (l *myLogger) Log(args ...interface{}) {
-	l.logger.Println(args...)
-}
-
 func main() {
-	var (
-		stream          = flag.String("stream", "", "Stream name")
-		kinesisEndpoint = flag.String("endpoint", "http://localhost:4567", "Kinesis endpoint")
-		awsRegion       = flag.String("region", "us-west-2", "AWS Region")
-	)
-	flag.Parse()
 
-	// client
-	var client = kinesis.New(session.Must(session.NewSession(
-		aws.NewConfig().
-			WithEndpoint(*kinesisEndpoint).
-			WithRegion(*awsRegion),
-	)))
+	// postgres checkpoint
+	db, err := store.New("test", "kinesis_consumer", "host=localhost port=5432 user=postgres password= dbname=postgres sslmode=disable")
+	if err != nil {
+		log.Fatalf("new checkpoint error: %v", err)
+	}
 
-	// consumer
-	c, err := consumer.New(
-		*stream,
-		consumer.WithClient(client),
-	)
+	awsConfig := &aws.Config{
+		Region:                        aws.String("us-east-1"),
+		CredentialsChainVerboseErrors: aws.Bool(true),
+	}
+	awsConfig.Endpoint = aws.String("http://localhost:4567")
+
+	sess := session.Must(session.NewSession(awsConfig))
+	kinesisClient := kinesis.New(sess, awsConfig)
+
+	c, err := consumer.New("tally_dev_v1", consumer.WithClient(kinesisClient), consumer.WithStore(db), consumer.WithBatchSecondInterval(10))
+
 	if err != nil {
 		log.Fatalf("consumer error: %v", err)
 	}
 
 	// scan
 	ctx := trap()
-	err = c.Scan(ctx, func(r *consumer.Record) error {
-		fmt.Println(string(r.Data))
+	err = c.ScanBatch(ctx, func(r []*kinesis.Record) error {
+		fmt.Println(r)
 		return nil // continue scanning
 	})
 	if err != nil {
@@ -68,8 +58,10 @@ func trap() context.Context {
 	go func() {
 		sig := <-sigs
 		log.Printf("received %s", sig)
+		os.Exit(0)
 		cancel()
 	}()
 
 	return ctx
+
 }
