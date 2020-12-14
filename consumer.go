@@ -93,7 +93,7 @@ type Consumer struct {
 type ScanFunc func(*Record) error
 
 //ScanFuncBatch is the type of function called for read on a slice of records
-//from the steram.  The Record argument contains the batch of the last unseen records 
+//from the steram.  The Record argument contains the batch of the last unseen records
 // If an error is returned, scanning stops. The sole exception is when the
 // function returns the special value ErrSkipCheckpoint.
 
@@ -107,7 +107,7 @@ var ErrSkipCheckpoint = errors.New("skip checkpoint")
 // Scan launches a goroutine to process each of the shards in the stream. The ScanFunc
 // is passed through to each of the goroutines and called with each message pulled from
 // the stream.
-func (c *Consumer) Scan(ctx context.Context, fn interface{}) error {
+func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -128,7 +128,7 @@ func (c *Consumer) Scan(ctx context.Context, fn interface{}) error {
 		wg.Add(1)
 		go func(shardID string) {
 			defer wg.Done()
-			if err := c.ScanShard(ctx, shardID, fn); err != nil {
+			if err := c.ScanShardContinuous(ctx, shardID, fn); err != nil {
 				select {
 				case errc <- fmt.Errorf("shard %s error: %v", shardID, err):
 					// first error to occur
@@ -148,22 +148,46 @@ func (c *Consumer) Scan(ctx context.Context, fn interface{}) error {
 	return <-errc
 }
 
-func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn interface{}) error {
+//ScanBatch performs scan function using intereval batching for invoking callback function
+func (c *Consumer) ScanBatch(ctx context.Context, fn ScanFuncBatch) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
-	//Determining scan option based on interface type 
-	switch fn.(type) {
+	var (
+		errc   = make(chan error, 1)
+		shardc = make(chan *kinesis.Shard, 1)
+	)
 
-	case func([]*kinesis.Record) error:
-		function := fn.(func([]*kinesis.Record) error)
-		return c.ScanShardWithIntervalBatching(ctx, shardID, function)
+	go func() {
+		c.group.Start(ctx, shardc)
+		<-ctx.Done()
+		close(shardc)
+	}()
 
-	case func(*Record) error:
-		function := fn.(func(*Record) error)
-		return c.ScanShardContinuous(ctx, shardID, function)
-
-	default:
-		return errors.New(fmt.Sprintf("Unexpected function type %T", fn))
+	wg := new(sync.WaitGroup)
+	// process each of the shards
+	for shard := range shardc {
+		wg.Add(1)
+		go func(shardID string) {
+			defer wg.Done()
+			if err := c.ScanShardWithIntervalBatching(ctx, shardID, fn); err != nil {
+				select {
+				case errc <- fmt.Errorf("shard %s error: %v", shardID, err):
+					// first error to occur
+					cancel()
+				default:
+					// error has already occurred
+				}
+			}
+		}(aws.StringValue(shard.ShardId))
 	}
+
+	go func() {
+		wg.Wait()
+		close(errc)
+	}()
+
+	return <-errc
 }
 
 // ScanShardContinuous loops over records on a specific shard, calls the callback func
