@@ -128,7 +128,7 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 		wg.Add(1)
 		go func(shardID string) {
 			defer wg.Done()
-			if err := c.ScanShardContinuous(ctx, shardID, fn); err != nil {
+			if err := c.ScanShard(ctx, shardID, fn); err != nil {
 				select {
 				case errc <- fmt.Errorf("shard %s error: %v", shardID, err):
 					// first error to occur
@@ -192,7 +192,7 @@ func (c *Consumer) ScanBatch(ctx context.Context, fn ScanFuncBatch) error {
 
 // ScanShardContinuous loops over records on a specific shard, calls the callback func
 // for each record and checkpoints the progress of scan.
-func (c *Consumer) ScanShardContinuous(ctx context.Context, shardID string, fn ScanFunc) error {
+func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) error {
 	// get last seq number from checkpoint
 	lastSeqNum, err := c.group.GetCheckpoint(c.streamName, shardID)
 	if err != nil {
