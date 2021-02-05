@@ -29,7 +29,7 @@ type Record struct {
 // any of the optional attributes.
 func New(streamName string, opts ...Option) (*Consumer, error) {
 	if streamName == "" {
-		return nil, fmt.Errorf("must provide stream name")
+		return nil, errors.New("must provide stream name")
 	}
 
 	// new consumer with noop storage, counter, and logger
@@ -120,7 +120,7 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 			defer wg.Done()
 			if err := c.ScanShard(ctx, shardID, fn); err != nil {
 				select {
-				case errc <- fmt.Errorf("shard %s error: %v", shardID, err):
+				case errc <- fmt.Errorf("shard %s error: %w", shardID, err):
 					// first error to occur
 					cancel()
 				default:
@@ -144,13 +144,13 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 	// get last seq number from checkpoint
 	lastSeqNum, err := c.group.GetCheckpoint(c.streamName, shardID)
 	if err != nil {
-		return fmt.Errorf("get checkpoint error: %v", err)
+		return fmt.Errorf("get checkpoint error: %w", err)
 	}
 
 	// get shard iterator
 	shardIterator, err := c.getShardIterator(ctx, c.streamName, shardID, lastSeqNum)
 	if err != nil {
-		return fmt.Errorf("get shard iterator error: %v", err)
+		return fmt.Errorf("get shard iterator error: %w", err)
 	}
 
 	c.logger.Log("[CONSUMER] start scan:", shardID, lastSeqNum)
@@ -178,7 +178,7 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 
 			shardIterator, err = c.getShardIterator(ctx, c.streamName, shardID, lastSeqNum)
 			if err != nil {
-				return fmt.Errorf("get shard iterator error: %v", err)
+				return fmt.Errorf("get shard iterator error: %w", err)
 			}
 		} else {
 			// loop over records, call callback func

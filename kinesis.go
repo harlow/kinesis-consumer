@@ -18,7 +18,7 @@ func listShards(ksis kinesisiface.KinesisAPI, streamName string) ([]*kinesis.Sha
 	for {
 		resp, err := ksis.ListShards(listShardsInput)
 		if err != nil {
-			return nil, fmt.Errorf("ListShards error: %v", err)
+			return nil, fmt.Errorf("ListShards error: %w", err)
 		}
 		ss = append(ss, resp.Shards...)
 
