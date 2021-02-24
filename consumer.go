@@ -234,6 +234,7 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 var retriableErrors = map[string]struct{}{
 	kinesis.ErrCodeExpiredIteratorException:               struct{}{},
 	kinesis.ErrCodeProvisionedThroughputExceededException: struct{}{},
+	kinesis.ErrCodeInternalFailureException:               struct{}{},
 }
 
 func isShardClosed(nextShardIterator, currentShardIterator *string) bool {
