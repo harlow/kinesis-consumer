@@ -280,6 +280,39 @@ func TestScanShard_ShardIsClosed(t *testing.T) {
 	}
 }
 
+func TestScanShard_ShardIsClosed_ShardClosedHandler(t *testing.T) {
+	var client = &kinesisClientMock{
+		getShardIteratorMock: func(input *kinesis.GetShardIteratorInput) (*kinesis.GetShardIteratorOutput, error) {
+			return &kinesis.GetShardIteratorOutput{
+				ShardIterator: aws.String("49578481031144599192696750682534686652010819674221576194"),
+			}, nil
+		},
+		getRecordsMock: func(input *kinesis.GetRecordsInput) (*kinesis.GetRecordsOutput, error) {
+			return &kinesis.GetRecordsOutput{
+				NextShardIterator: nil,
+				Records:           make([]*kinesis.Record, 0),
+			}, nil
+		},
+	}
+
+	var fn = func(r *Record) error {
+		return nil
+	}
+
+	c, err := New("myStreamName", WithClient(client), WithStore(fakeStore{shardClosedErr: fmt.Errorf("closed shard error")}))
+	if err != nil {
+		t.Fatalf("new consumer error: %v", err)
+	}
+
+	err = c.ScanShard(context.Background(), "myShard", fn)
+	if err == nil {
+		t.Fatal("expected an error but didn't get one")
+	}
+	if err.Error() != "shard closed handler error: closed shard error" {
+		t.Fatalf("unexpected error: %s", err.Error())
+	}
+}
+
 func TestScanShard_GetRecordsError(t *testing.T) {
 	var client = &kinesisClientMock{
 		getShardIteratorMock: func(input *kinesis.GetShardIteratorInput) (*kinesis.GetShardIteratorOutput, error) {
@@ -355,4 +388,20 @@ func (fc *fakeCounter) Add(streamName string, count int64) {
 	defer fc.mu.Unlock()
 
 	fc.counter += count
+}
+
+type fakeStore struct {
+	shardClosedErr error
+}
+
+func (store fakeStore) GetCheckpoint(streamName, shardID string) (string, error) {
+	return "", nil
+}
+
+func (store fakeStore) SetCheckpoint(streamName, shardID, sequenceNumber string) error {
+	return nil
+}
+
+func (store fakeStore) ShardClosed(streamName, shardID string) error {
+	return store.shardClosedErr
 }

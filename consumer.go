@@ -215,6 +215,12 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 
 			if isShardClosed(resp.NextShardIterator, shardIterator) {
 				c.logger.Log("[CONSUMER] shard closed:", shardID)
+				if shardClosedHandler, ok := c.store.(ShardClosedHandler); ok {
+					err := shardClosedHandler.ShardClosed(c.streamName, shardID)
+					if err != nil {
+						return fmt.Errorf("shard closed handler error: %w", err)
+					}
+				}
 				return nil
 			}
 
