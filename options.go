@@ -79,3 +79,17 @@ func WithAggregation(a bool) Option {
 		c.isAggregated = a
 	}
 }
+
+// ShardClosedHandler is a handler that will be called when the consumer has reached the end of a closed shard.
+// No more records for that shard will be provided by the consumer.
+type ShardClosedHandler interface {
+	// ShardClosed signals that the consumer has reached the end of a closed shard
+	// An error can be returned to stop the consumer
+	ShardClosed(streamName, shardID string) error
+}
+
+func WithShardClosedHandler(h ShardClosedHandler) Option {
+	return func(c *Consumer) {
+		c.onClosedShard = h
+	}
+}
