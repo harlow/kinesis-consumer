@@ -301,7 +301,9 @@ func TestScanShard_ShardIsClosed_WithShardClosedHandler(t *testing.T) {
 
 	c, err := New("myStreamName",
 		WithClient(client),
-		WithShardClosedHandler(mockShardClosedHandler{err: fmt.Errorf("closed shard error")}))
+		WithShardClosedHandler(func(streamName, shardID string) error {
+			return fmt.Errorf("closed shard error")
+		}))
 	if err != nil {
 		t.Fatalf("new consumer error: %v", err)
 	}
@@ -390,12 +392,4 @@ func (fc *fakeCounter) Add(streamName string, count int64) {
 	defer fc.mu.Unlock()
 
 	fc.counter += count
-}
-
-type mockShardClosedHandler struct {
-	err error
-}
-
-func (handler mockShardClosedHandler) ShardClosed(streamName, shardID string) error {
-	return handler.err
 }

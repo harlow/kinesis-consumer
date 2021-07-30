@@ -80,7 +80,7 @@ type Consumer struct {
 	scanInterval             time.Duration
 	maxRecords               int64
 	isAggregated             bool
-	onClosedShard            ShardClosedHandler
+	shardClosedHandler       ShardClosedHandler
 }
 
 // ScanFunc is the type of the function called for each message read
@@ -216,8 +216,8 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 
 			if isShardClosed(resp.NextShardIterator, shardIterator) {
 				c.logger.Log("[CONSUMER] shard closed:", shardID)
-				if c.onClosedShard != nil {
-					err := c.onClosedShard.ShardClosed(c.streamName, shardID)
+				if c.shardClosedHandler != nil {
+					err := c.shardClosedHandler(c.streamName, shardID)
 					if err != nil {
 						return fmt.Errorf("shard closed handler error: %w", err)
 					}
