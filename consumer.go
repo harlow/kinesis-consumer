@@ -203,7 +203,7 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 						return err
 					}
 
-					if err != ErrSkipCheckpoint {
+					if err == ErrSkipCheckpoint {
 						if err := c.group.SetCheckpoint(c.streamName, shardID, *r.SequenceNumber); err != nil {
 							return err
 						}
