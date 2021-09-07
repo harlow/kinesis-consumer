@@ -3,7 +3,8 @@ package consumer
 import (
 	"time"
 
-	"github.com/aws/aws-sdk-go/service/kinesis/kinesisiface"
+	"github.com/aws/aws-sdk-go-v2/service/kinesis"
+	"github.com/aws/aws-sdk-go-v2/service/kinesis/types"
 )
 
 // Option is used to override defaults when creating a new Consumer
@@ -38,7 +39,7 @@ func WithCounter(counter Counter) Option {
 }
 
 // WithClient overrides the default client
-func WithClient(client kinesisiface.KinesisAPI) Option {
+func WithClient(client *kinesis.Client) Option {
 	return func(c *Consumer) {
 		c.client = client
 	}
@@ -47,7 +48,7 @@ func WithClient(client kinesisiface.KinesisAPI) Option {
 // WithShardIteratorType overrides the starting point for the consumer
 func WithShardIteratorType(t string) Option {
 	return func(c *Consumer) {
-		c.initialShardIteratorType = t
+		c.initialShardIteratorType = types.ShardIteratorType(t)
 	}
 }
 

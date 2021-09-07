@@ -13,11 +13,10 @@ import (
 
 	alog "github.com/apex/log"
 	"github.com/apex/log/handlers/text"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/awserr"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/dynamodb"
-	"github.com/aws/aws-sdk-go/service/kinesis"
+	"github.com/aws/aws-sdk-go-v2/aws/awserr"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/kinesis"
 	consumer "github.com/harlow/kinesis-consumer"
 	storage "github.com/harlow/kinesis-consumer/store/ddb"
 )
@@ -63,18 +62,18 @@ func main() {
 	flag.Parse()
 
 	// New Kinesis and DynamoDB clients (if you need custom config)
-	sess, err := session.NewSession(aws.NewConfig())
+	cfg, err := config.LoadDefaultConfig(
+		context.TODO(),
+		config.WithRegion(*awsRegion),
+		config.WithEndpoint(*kinesisEndpoint),
+		config.WithLogLevel(3),
+	)
 	if err != nil {
-		log.Log("new session error: %v", err)
+		log.Fatalf("unable to load SDK config, %v", err)
 	}
-	myDdbClient := dynamodb.New(sess)
 
-	var myKsis = kinesis.New(session.Must(session.NewSession(
-		aws.NewConfig().
-			WithEndpoint(*kinesisEndpoint).
-			WithRegion(*awsRegion).
-			WithLogLevel(3),
-	)))
+	myDdbClient := dynamodb.NewFromConfig(cfg)
+	var myKsis = kinesis.NewFromConfig(cfg)
 
 	// ddb persitance
 	ddb, err := storage.New(*app, *table, storage.WithDynamoClient(myDdbClient), storage.WithRetryer(&MyRetryer{}))

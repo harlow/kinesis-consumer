@@ -9,9 +9,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/kinesis"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/kinesis"
 	consumer "github.com/harlow/kinesis-consumer"
 )
 
@@ -33,12 +32,12 @@ func main() {
 	)
 	flag.Parse()
 
-	// client
-	var client = kinesis.New(session.Must(session.NewSession(
-		aws.NewConfig().
-			WithEndpoint(*kinesisEndpoint).
-			WithRegion(*awsRegion),
-	)))
+	// client and config
+	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(*awsRegion), config.WithEndpoint(*kinesisEndpoint))
+	if err != nil {
+		log.Fatalf("unable to load SDK config, %v", err)
+	}
+	var client = kinesis.NewFromConfig(cfg)
 
 	// consumer
 	c, err := consumer.New(

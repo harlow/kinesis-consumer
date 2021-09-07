@@ -6,16 +6,16 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/awserr"
-	"github.com/aws/aws-sdk-go/aws/request"
-	"github.com/aws/aws-sdk-go/service/kinesis"
-	"github.com/aws/aws-sdk-go/service/kinesis/kinesisiface"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/awserr"
+	"github.com/aws/aws-sdk-go-v2/service/kinesis"
+	"github.com/aws/aws-sdk-go-v2/service/kinesis/kinesisiface"
+	"github.com/aws/aws-sdk-go-v2/service/kinesis/types"
 
-	"github.com/harlow/kinesis-consumer/store/memory"
+	store "github.com/harlow/kinesis-consumer/store/memory"
 )
 
-var records = []*kinesis.Record{
+var records = []types.Record{
 	{
 		Data:           []byte("firstData"),
 		SequenceNumber: aws.String("firstSeqNum"),
@@ -47,7 +47,7 @@ func TestScan(t *testing.T) {
 		},
 		listShardsMock: func(input *kinesis.ListShardsInput) (*kinesis.ListShardsOutput, error) {
 			return &kinesis.ListShardsOutput{
-				Shards: []*kinesis.Shard{
+				Shards: []types.Shard{
 					{ShardId: aws.String("myShard")},
 				},
 			}, nil
@@ -231,7 +231,7 @@ func TestScanShard_SkipCheckpoint(t *testing.T) {
 	var ctx, cancel = context.WithCancel(context.Background())
 
 	var fn = func(r *Record) error {
-		if aws.StringValue(r.SequenceNumber) == "lastSeqNum" {
+		if aws.ToString(r.SequenceNumber) == "lastSeqNum" {
 			cancel()
 			return ErrSkipCheckpoint
 		}
@@ -260,7 +260,7 @@ func TestScanShard_ShardIsClosed(t *testing.T) {
 		getRecordsMock: func(input *kinesis.GetRecordsInput) (*kinesis.GetRecordsOutput, error) {
 			return &kinesis.GetRecordsOutput{
 				NextShardIterator: nil,
-				Records:           make([]*kinesis.Record, 0),
+				Records:           make([]types.Record, 0),
 			}, nil
 		},
 	}
@@ -290,7 +290,7 @@ func TestScanShard_ShardIsClosed_WithShardClosedHandler(t *testing.T) {
 		getRecordsMock: func(input *kinesis.GetRecordsInput) (*kinesis.GetRecordsOutput, error) {
 			return &kinesis.GetRecordsOutput{
 				NextShardIterator: nil,
-				Records:           make([]*kinesis.Record, 0),
+				Records:           make([]types.Record, 0),
 			}, nil
 		},
 	}
@@ -329,7 +329,7 @@ func TestScanShard_GetRecordsError(t *testing.T) {
 					NextShardIterator: nil,
 					Records:           nil,
 				}, awserr.New(
-					kinesis.ErrCodeInvalidArgumentException,
+					types.InvalidArgumentException,
 					"aws error message",
 					fmt.Errorf("error message"),
 				)
@@ -366,11 +366,7 @@ func (c *kinesisClientMock) GetRecords(in *kinesis.GetRecordsInput) (*kinesis.Ge
 	return c.getRecordsMock(in)
 }
 
-func (c *kinesisClientMock) GetShardIterator(in *kinesis.GetShardIteratorInput) (*kinesis.GetShardIteratorOutput, error) {
-	return c.getShardIteratorMock(in)
-}
-
-func (c *kinesisClientMock) GetShardIteratorWithContext(ctx aws.Context, in *kinesis.GetShardIteratorInput, options ...request.Option) (*kinesis.GetShardIteratorOutput, error) {
+func (c *kinesisClientMock) GetShardIterator(ctx context.Context, in *kinesis.GetShardIteratorInput) (*kinesis.GetShardIteratorOutput, error) {
 	return c.getShardIteratorMock(in)
 }
 
