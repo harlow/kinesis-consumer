@@ -1,9 +1,7 @@
 # Golang Kinesis Consumer
 
-
-__Note:__ This repo is under active development adding [Consumer Groups #42](https://github.com/harlow/kinesis-consumer/issues/42). Master should always be deployable, but there may be interface changes in master over the next few months.
-
-Latest stable release https://github.com/harlow/kinesis-consumer/releases/tag/v0.3.2
+Note: This repo has been upgraded to use AWS SDK v2. If you are still using
+AWS SDK V1: https://github.com/harlow/kinesis-consumer/releases/tag/v0.3.5
 
 ![technology Go](https://img.shields.io/badge/technology-go-blue.svg) [![Build Status](https://travis-ci.com/harlow/kinesis-consumer.svg?branch=master)](https://travis-ci.com/harlow/kinesis-consumer) [![GoDoc](https://godoc.org/github.com/harlow/kinesis-consumer?status.svg)](https://godoc.org/github.com/harlow/kinesis-consumer) [![GoReportCard](https://goreportcard.com/badge/github.com/harlow/kinesis-consumer)](https://goreportcard.com/report/harlow/kinesis-consumer)
 
