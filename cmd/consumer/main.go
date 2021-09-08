@@ -11,6 +11,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/kinesis"
 	consumer "github.com/harlow/kinesis-consumer"
 )
@@ -25,16 +26,6 @@ func (l *myLogger) Log(args ...interface{}) {
 	l.logger.Println(args...)
 }
 
-// EndpointResolverFunc wraps a function to satisfy the EndpointResolver interface.
-type EndpointResolver struct {
-	endpoint string
-}
-
-// ResolveEndpoint calls the wrapped function and returns the results.
-func (e EndpointResolver) ResolveEndpoint(service, region string) (aws.Endpoint, error) {
-	return aws.Endpoint{URL: e.endpoint}, nil
-}
-
 func main() {
 	var (
 		stream          = flag.String("stream", "", "Stream name")
@@ -43,13 +34,20 @@ func main() {
 	)
 	flag.Parse()
 
-	resolver := EndpointResolver{*kinesisEndpoint}
+	resolver := aws.EndpointResolverFunc(func(service, region string) (aws.Endpoint, error) {
+		return aws.Endpoint{
+			PartitionID:   "aws",
+			URL:           *kinesisEndpoint,
+			SigningRegion: *awsRegion,
+		}, nil
+	})
 
 	// client
 	cfg, err := config.LoadDefaultConfig(
 		context.TODO(),
 		config.WithRegion(*awsRegion),
 		config.WithEndpointResolver(resolver),
+		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("user", "pass", "token")),
 	)
 	if err != nil {
 		log.Fatalf("unable to load SDK config, %v", err)
