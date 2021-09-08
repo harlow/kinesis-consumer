@@ -3,7 +3,6 @@ package consumer
 import (
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/service/kinesis"
 	"github.com/aws/aws-sdk-go-v2/service/kinesis/types"
 )
 
@@ -39,7 +38,7 @@ func WithCounter(counter Counter) Option {
 }
 
 // WithClient overrides the default client
-func WithClient(client *kinesis.Client) Option {
+func WithClient(client kinesisClient) Option {
 	return func(c *Consumer) {
 		c.client = client
 	}

@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/kinesis"
 	consumer "github.com/harlow/kinesis-consumer"
@@ -24,6 +25,16 @@ func (l *myLogger) Log(args ...interface{}) {
 	l.logger.Println(args...)
 }
 
+// EndpointResolverFunc wraps a function to satisfy the EndpointResolver interface.
+type EndpointResolver struct {
+	endpoint string
+}
+
+// ResolveEndpoint calls the wrapped function and returns the results.
+func (e EndpointResolver) ResolveEndpoint(service, region string) (aws.Endpoint, error) {
+	return aws.Endpoint{URL: e.endpoint}, nil
+}
+
 func main() {
 	var (
 		stream          = flag.String("stream", "", "Stream name")
@@ -32,8 +43,14 @@ func main() {
 	)
 	flag.Parse()
 
-	// client and config
-	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(*awsRegion), config.WithEndpoint(*kinesisEndpoint))
+	resolver := EndpointResolver{*kinesisEndpoint}
+
+	// client
+	cfg, err := config.LoadDefaultConfig(
+		context.TODO(),
+		config.WithRegion(*awsRegion),
+		config.WithEndpointResolver(resolver),
+	)
 	if err != nil {
 		log.Fatalf("unable to load SDK config, %v", err)
 	}

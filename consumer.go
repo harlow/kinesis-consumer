@@ -70,9 +70,9 @@ type Consumer struct {
 	streamName               string
 	initialShardIteratorType types.ShardIteratorType
 	initialTimestamp         *time.Time
-	client                   *kinesis.Client
+	client                   kinesisClient
 	counter                  Counter
-	group                    *Group
+	group                    Group
 	logger                   Logger
 	store                    Store
 	scanInterval             time.Duration
@@ -102,7 +102,7 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 
 	var (
 		errc   = make(chan error, 1)
-		shardc = make(chan *types.Shard, 1)
+		shardc = make(chan types.Shard, 1)
 	)
 
 	go func() {
@@ -141,7 +141,7 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 // for each record and checkpoints the progress of scan.
 func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) error {
 	// get last seq number from checkpoint
-	lastSeqNum, err := c.group.GetCheckpoint(c.streamName, shardID)
+	lastSeqNum, err := c.store.GetCheckpoint(c.streamName, shardID)
 	if err != nil {
 		return fmt.Errorf("get checkpoint error: %w", err)
 	}
@@ -203,7 +203,7 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 					}
 
 					if err != ErrSkipCheckpoint {
-						if err := c.group.SetCheckpoint(c.streamName, shardID, *r.SequenceNumber); err != nil {
+						if err := c.store.SetCheckpoint(c.streamName, shardID, *r.SequenceNumber); err != nil {
 							return err
 						}
 					}

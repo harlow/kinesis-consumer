@@ -9,7 +9,7 @@ import (
 	"os/signal"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/aws/session"
+	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/kinesis"
 	consumer "github.com/harlow/kinesis-consumer"
 	store "github.com/harlow/kinesis-consumer/store/redis"
@@ -23,6 +23,16 @@ type myLogger struct {
 // Log logs the parameters to the stdlib logger. See log.Println.
 func (l *myLogger) Log(args ...interface{}) {
 	l.logger.Println(args...)
+}
+
+// EndpointResolverFunc wraps a function to satisfy the EndpointResolver interface.
+type EndpointResolver struct {
+	endpoint string
+}
+
+// ResolveEndpoint calls the wrapped function and returns the results.
+func (e EndpointResolver) ResolveEndpoint(service, region string) (aws.Endpoint, error) {
+	return aws.Endpoint{URL: e.endpoint}, nil
 }
 
 func main() {
@@ -45,13 +55,18 @@ func main() {
 		logger: log.New(os.Stdout, "consumer-example: ", log.LstdFlags),
 	}
 
-	// client
-	cfg := aws.NewConfig().
-		WithEndpoint(*kinesisEndpoint).
-		WithRegion(*awsRegion).
-		WithLogLevel(3)
+	resolver := EndpointResolver{*kinesisEndpoint}
 
-	var client = kinesis.New(session.Must(session.NewSession(cfg)))
+	// client
+	cfg, err := config.LoadDefaultConfig(
+		context.TODO(),
+		config.WithRegion(*awsRegion),
+		config.WithEndpointResolver(resolver),
+	)
+	if err != nil {
+		log.Fatalf("unable to load SDK config, %v", err)
+	}
+	var client = kinesis.NewFromConfig(cfg)
 
 	// consumer
 	c, err := consumer.New(

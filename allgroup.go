@@ -5,13 +5,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/service/kinesis"
 	"github.com/aws/aws-sdk-go-v2/service/kinesis/types"
 )
 
 // NewAllGroup returns an intitialized AllGroup for consuming
 // all shards on a stream
-func NewAllGroup(ksis *kinesis.Client, store Store, streamName string, logger Logger) *AllGroup {
+func NewAllGroup(ksis kinesisClient, store Store, streamName string, logger Logger) *AllGroup {
 	return &AllGroup{
 		ksis:       ksis,
 		shards:     make(map[string]types.Shard),
@@ -25,7 +24,7 @@ func NewAllGroup(ksis *kinesis.Client, store Store, streamName string, logger Lo
 // caches a local list of the shards we are already processing
 // and routinely polls the stream looking for new shards to process.
 type AllGroup struct {
-	ksis       *kinesis.Client
+	ksis       kinesisClient
 	streamName string
 	logger     Logger
 	Store
