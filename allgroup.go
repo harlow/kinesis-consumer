@@ -59,6 +59,14 @@ func (g *AllGroup) Start(ctx context.Context, shardc chan types.Shard) {
 	}
 }
 
+// func (g *AllGroup) GetCheckpoint(streamName, shardID string) (string, error) {
+// 	return g.Store.GetCheckpoint(streamName, shardID)
+// }
+
+// func (g *AllGroup) SetCheckpoint(streamName, shardID, sequenceNumber string) error {
+// 	return g.Store.SetCheckpoint(streamName, shardID, sequenceNumber)
+// }
+
 // findNewShards pulls the list of shards from the Kinesis API
 // and uses a local cache to determine if we are already processing
 // a particular shard.

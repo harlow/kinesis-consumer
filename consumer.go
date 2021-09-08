@@ -141,7 +141,7 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 // for each record and checkpoints the progress of scan.
 func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) error {
 	// get last seq number from checkpoint
-	lastSeqNum, err := c.store.GetCheckpoint(c.streamName, shardID)
+	lastSeqNum, err := c.group.GetCheckpoint(c.streamName, shardID)
 	if err != nil {
 		return fmt.Errorf("get checkpoint error: %w", err)
 	}
@@ -203,7 +203,7 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 					}
 
 					if err != ErrSkipCheckpoint {
-						if err := c.store.SetCheckpoint(c.streamName, shardID, *r.SequenceNumber); err != nil {
+						if err := c.group.SetCheckpoint(c.streamName, shardID, *r.SequenceNumber); err != nil {
 							return err
 						}
 					}
