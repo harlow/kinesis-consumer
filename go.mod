@@ -20,6 +20,7 @@ require (
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/lib/pq v1.7.0
 	github.com/pkg/errors v0.9.1
+	github.com/stretchr/testify v1.7.0 // indirect
 	github.com/yuin/gopher-lua v0.0.0-20200603152657-dc2b0ca8b37e // indirect
 	google.golang.org/protobuf v1.27.1 // indirect
 )

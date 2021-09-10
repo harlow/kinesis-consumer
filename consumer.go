@@ -13,6 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/kinesis"
 	"github.com/aws/aws-sdk-go-v2/service/kinesis/types"
+	"github.com/harlow/kinesis-consumer/internal/deaggregator"
 )
 
 // Record wraps the record returned from the Kinesis library and
@@ -180,19 +181,19 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 			}
 		} else {
 			// loop over records, call callback func
-			// var records []types.Record
+			var records []types.Record
 
-			// TODO(hw): need a aws-sdk-v2 deaggregate
-			// if c.isAggregated {
-			// 	records, err = deaggregator.DeaggregateRecords(resp.Records)
-			// 	if err != nil {
-			// 		return err
-			// 	}
-			// } else {
-			// 	records = resp.Records
-			// }
+			// deaggregate records
+			if c.isAggregated {
+				records, err = deaggregateRecords(resp.Records)
+				if err != nil {
+					return err
+				}
+			} else {
+				records = resp.Records
+			}
 
-			for _, r := range resp.Records {
+			for _, r := range records {
 				select {
 				case <-ctx.Done():
 					return nil
@@ -237,6 +238,25 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 			continue
 		}
 	}
+}
+
+// temporary conversion func of []types.Record -> DeaggregateRecords([]*types.Record) -> []types.Record
+func deaggregateRecords(in []types.Record) ([]types.Record, error) {
+	var recs []*types.Record
+	for _, rec := range in {
+		recs = append(recs, &rec)
+	}
+
+	deagg, err := deaggregator.DeaggregateRecords(recs)
+	if err != nil {
+		return nil, err
+	}
+
+	var out []types.Record
+	for _, rec := range deagg {
+		out = append(out, *rec)
+	}
+	return out, nil
 }
 
 func (c *Consumer) getShardIterator(ctx context.Context, streamName, shardID, seqNum string) (*string, error) {
