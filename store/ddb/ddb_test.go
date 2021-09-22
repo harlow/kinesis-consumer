@@ -1,12 +1,13 @@
 package ddb
 
 import (
+	"context"
+	"log"
 	"testing"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 )
 
 type fakeRetryer struct {
@@ -42,11 +43,12 @@ func TestCheckpointSetting(t *testing.T) {
 	setRetryer(ckPtr)
 
 	// Test WithDyanmoDBClient
-	var fakeDbClient = dynamodb.New(
-		session.New(aws.NewConfig()), &aws.Config{
-			Region: aws.String("us-west-2"),
-		},
-	)
+	cfg, err := config.LoadDefaultConfig(context.TODO())
+	if err != nil {
+		log.Fatalf("unable to load SDK config, %v", err)
+	}
+	var fakeDbClient = dynamodb.NewFromConfig(cfg)
+
 	setDDBClient := WithDynamoClient(fakeDbClient)
 	setDDBClient(ckPtr)
 
@@ -70,11 +72,12 @@ func TestNewCheckpointWithOptions(t *testing.T) {
 	setRetryer := WithRetryer(&r)
 
 	// Test WithDyanmoDBClient
-	var fakeDbClient = dynamodb.New(
-		session.New(aws.NewConfig()), &aws.Config{
-			Region: aws.String("us-west-2"),
-		},
-	)
+	cfg, err := config.LoadDefaultConfig(context.TODO())
+	if err != nil {
+		log.Fatalf("unable to load SDK config, %v", err)
+	}
+	var fakeDbClient = dynamodb.NewFromConfig(cfg)
+
 	setDDBClient := WithDynamoClient(fakeDbClient)
 
 	ckPtr, err := New("testapp", "testtable", setInterval, setRetryer, setDDBClient)

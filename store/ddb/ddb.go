@@ -1,16 +1,17 @@
 package ddb
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"sync"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/dynamodb"
-	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
-	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbiface"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
 // Option is used to override defaults when creating a new Checkpoint
@@ -24,7 +25,7 @@ func WithMaxInterval(maxInterval time.Duration) Option {
 }
 
 // WithDynamoClient sets the dynamoDb client
-func WithDynamoClient(svc dynamodbiface.DynamoDBAPI) Option {
+func WithDynamoClient(svc *dynamodb.Client) Option {
 	return func(c *Checkpoint) {
 		c.client = svc
 	}
@@ -39,7 +40,6 @@ func WithRetryer(r Retryer) Option {
 
 // New returns a checkpoint that uses DynamoDB for underlying storage
 func New(appName, tableName string, opts ...Option) (*Checkpoint, error) {
-
 	ck := &Checkpoint{
 		tableName:   tableName,
 		appName:     appName,
@@ -56,11 +56,11 @@ func New(appName, tableName string, opts ...Option) (*Checkpoint, error) {
 
 	// default client
 	if ck.client == nil {
-		newSession, err := session.NewSession(aws.NewConfig())
+		cfg, err := config.LoadDefaultConfig(context.TODO())
 		if err != nil {
-			return nil, err
+			log.Fatalf("unable to load SDK config, %v", err)
 		}
-		ck.client = dynamodb.New(newSession)
+		ck.client = dynamodb.NewFromConfig(cfg)
 	}
 
 	go ck.loop()
@@ -72,7 +72,7 @@ func New(appName, tableName string, opts ...Option) (*Checkpoint, error) {
 type Checkpoint struct {
 	tableName   string
 	appName     string
-	client      dynamodbiface.DynamoDBAPI
+	client      *dynamodb.Client
 	maxInterval time.Duration
 	mu          *sync.Mutex // protects the checkpoints
 	checkpoints map[key]string
@@ -81,8 +81,8 @@ type Checkpoint struct {
 }
 
 type key struct {
-	streamName string
-	shardID    string
+	streamName string `json:"stream_name"`
+	shardID    string `json:"shard_id"`
 }
 
 type item struct {
@@ -100,17 +100,17 @@ func (c *Checkpoint) GetCheckpoint(streamName, shardID string) (string, error) {
 	params := &dynamodb.GetItemInput{
 		TableName:      aws.String(c.tableName),
 		ConsistentRead: aws.Bool(true),
-		Key: map[string]*dynamodb.AttributeValue{
-			"namespace": &dynamodb.AttributeValue{
-				S: aws.String(namespace),
+		Key: map[string]types.AttributeValue{
+			"namespace": &types.AttributeValueMemberS{
+				Value: namespace,
 			},
-			"shard_id": &dynamodb.AttributeValue{
-				S: aws.String(shardID),
+			"shard_id": &types.AttributeValueMemberS{
+				Value: shardID,
 			},
 		},
 	}
 
-	resp, err := c.client.GetItem(params)
+	resp, err := c.client.GetItem(context.Background(), params)
 	if err != nil {
 		if c.retryer.ShouldRetry(err) {
 			return c.GetCheckpoint(streamName, shardID)
@@ -119,7 +119,7 @@ func (c *Checkpoint) GetCheckpoint(streamName, shardID string) (string, error) {
 	}
 
 	var i item
-	dynamodbattribute.UnmarshalMap(resp.Item, &i)
+	attributevalue.UnmarshalMap(resp.Item, &i)
 	return i.SequenceNumber, nil
 }
 
@@ -168,7 +168,7 @@ func (c *Checkpoint) save() error {
 	defer c.mu.Unlock()
 
 	for key, sequenceNumber := range c.checkpoints {
-		item, err := dynamodbattribute.MarshalMap(item{
+		item, err := attributevalue.MarshalMap(item{
 			Namespace:      fmt.Sprintf("%s-%s", c.appName, key.streamName),
 			ShardID:        key.shardID,
 			SequenceNumber: sequenceNumber,
@@ -178,10 +178,12 @@ func (c *Checkpoint) save() error {
 			return nil
 		}
 
-		_, err = c.client.PutItem(&dynamodb.PutItemInput{
-			TableName: aws.String(c.tableName),
-			Item:      item,
-		})
+		_, err = c.client.PutItem(
+			context.TODO(),
+			&dynamodb.PutItemInput{
+				TableName: aws.String(c.tableName),
+				Item:      item,
+			})
 		if err != nil {
 			if !c.retryer.ShouldRetry(err) {
 				return err

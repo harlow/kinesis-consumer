@@ -9,9 +9,10 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/kinesis"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/kinesis"
 	consumer "github.com/harlow/kinesis-consumer"
 	store "github.com/harlow/kinesis-consumer/store/mysql"
 )
@@ -35,13 +36,25 @@ func main() {
 
 	var counter = expvar.NewMap("counters")
 
-	// client
-	cfg := aws.NewConfig().
-		WithEndpoint(*kinesisEndpoint).
-		WithRegion(*awsRegion).
-		WithLogLevel(3)
+	resolver := aws.EndpointResolverFunc(func(service, region string) (aws.Endpoint, error) {
+		return aws.Endpoint{
+			PartitionID:   "aws",
+			URL:           *kinesisEndpoint,
+			SigningRegion: *awsRegion,
+		}, nil
+	})
 
-	var client = kinesis.New(session.Must(session.NewSession(cfg)))
+	// client
+	cfg, err := config.LoadDefaultConfig(
+		context.TODO(),
+		config.WithRegion(*awsRegion),
+		config.WithEndpointResolver(resolver),
+		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("user", "pass", "token")),
+	)
+	if err != nil {
+		log.Fatalf("unable to load SDK config, %v", err)
+	}
+	var client = kinesis.NewFromConfig(cfg)
 
 	// consumer
 	c, err := consumer.New(

@@ -13,11 +13,12 @@ import (
 
 	alog "github.com/apex/log"
 	"github.com/apex/log/handlers/text"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/awserr"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/dynamodb"
-	"github.com/aws/aws-sdk-go/service/kinesis"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/kinesis"
+	"github.com/aws/aws-sdk-go-v2/service/kinesis/types"
 	consumer "github.com/harlow/kinesis-consumer"
 	storage "github.com/harlow/kinesis-consumer/store/ddb"
 )
@@ -46,7 +47,7 @@ func (l *myLogger) Log(args ...interface{}) {
 
 func main() {
 	// Wrap myLogger around  apex logger
-	log := &myLogger{
+	mylog := &myLogger{
 		logger: alog.Logger{
 			Handler: text.New(os.Stdout),
 			Level:   alog.DebugLevel,
@@ -62,24 +63,34 @@ func main() {
 	)
 	flag.Parse()
 
-	// New Kinesis and DynamoDB clients (if you need custom config)
-	sess, err := session.NewSession(aws.NewConfig())
-	if err != nil {
-		log.Log("new session error: %v", err)
-	}
-	myDdbClient := dynamodb.New(sess)
+	resolver := aws.EndpointResolverFunc(func(service, region string) (aws.Endpoint, error) {
+		return aws.Endpoint{
+			PartitionID:   "aws",
+			URL:           *kinesisEndpoint,
+			SigningRegion: *awsRegion,
+		}, nil
+	})
 
-	var myKsis = kinesis.New(session.Must(session.NewSession(
-		aws.NewConfig().
-			WithEndpoint(*kinesisEndpoint).
-			WithRegion(*awsRegion).
-			WithLogLevel(3),
-	)))
+	// client
+	cfg, err := config.LoadDefaultConfig(
+		context.TODO(),
+		config.WithRegion(*awsRegion),
+		config.WithEndpointResolver(resolver),
+		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("user", "pass", "token")),
+	)
+	if err != nil {
+		log.Fatalf("unable to load SDK config, %v", err)
+	}
+
+	var (
+		myDdbClient = dynamodb.NewFromConfig(cfg)
+		myKsis      = kinesis.NewFromConfig(cfg)
+	)
 
 	// ddb persitance
 	ddb, err := storage.New(*app, *table, storage.WithDynamoClient(myDdbClient), storage.WithRetryer(&MyRetryer{}))
 	if err != nil {
-		log.Log("checkpoint error: %v", err)
+		log.Fatalf("checkpoint error: %v", err)
 	}
 
 	// expvar counter
@@ -89,12 +100,12 @@ func main() {
 	c, err := consumer.New(
 		*stream,
 		consumer.WithStore(ddb),
-		consumer.WithLogger(log),
+		consumer.WithLogger(mylog),
 		consumer.WithCounter(counter),
 		consumer.WithClient(myKsis),
 	)
 	if err != nil {
-		log.Log("consumer error: %v", err)
+		log.Fatalf("consumer error: %v", err)
 	}
 
 	// use cancel func to signal shutdown
@@ -115,11 +126,11 @@ func main() {
 		return nil // continue scanning
 	})
 	if err != nil {
-		log.Log("scan error: %v", err)
+		log.Fatalf("scan error: %v", err)
 	}
 
 	if err := ddb.Shutdown(); err != nil {
-		log.Log("storage shutdown error: %v", err)
+		log.Fatalf("storage shutdown error: %v", err)
 	}
 }
 
@@ -130,13 +141,9 @@ type MyRetryer struct {
 
 // ShouldRetry implements custom logic for when errors should retry
 func (r *MyRetryer) ShouldRetry(err error) bool {
-	if awsErr, ok := err.(awserr.Error); ok {
-		switch awsErr.Code() {
-		case dynamodb.ErrCodeProvisionedThroughputExceededException, dynamodb.ErrCodeLimitExceededException:
-			return true
-		default:
-			return false
-		}
+	switch err.(type) {
+	case *types.ProvisionedThroughputExceededException, *types.LimitExceededException:
+		return true
 	}
 	return false
 }

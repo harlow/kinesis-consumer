@@ -2,15 +2,18 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/kinesis"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/kinesis"
+	"github.com/aws/aws-sdk-go-v2/service/kinesis/types"
 )
 
 func main() {
@@ -21,17 +24,29 @@ func main() {
 	)
 	flag.Parse()
 
-	var records []*kinesis.PutRecordsRequestEntry
+	var records []types.PutRecordsRequestEntry
 
-	var client = kinesis.New(session.Must(session.NewSession(
-		aws.NewConfig().
-			WithEndpoint(*kinesisEndpoint).
-			WithRegion(*awsRegion).
-			WithLogLevel(3),
-	)))
+	resolver := aws.EndpointResolverFunc(func(service, region string) (aws.Endpoint, error) {
+		return aws.Endpoint{
+			PartitionID:   "aws",
+			URL:           *kinesisEndpoint,
+			SigningRegion: *awsRegion,
+		}, nil
+	})
+
+	cfg, err := config.LoadDefaultConfig(
+		context.TODO(),
+		config.WithRegion(*awsRegion),
+		config.WithEndpointResolver(resolver),
+		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("user", "pass", "token")),
+	)
+	if err != nil {
+		log.Fatalf("unable to load SDK config, %v", err)
+	}
+	var client = kinesis.NewFromConfig(cfg)
 
 	// create stream if doesn't exist
-	if err := createStream(client, streamName); err != nil {
+	if err := createStream(client, *streamName); err != nil {
 		log.Fatalf("create stream error: %v", err)
 	}
 
@@ -39,7 +54,7 @@ func main() {
 	b := bufio.NewScanner(os.Stdin)
 
 	for b.Scan() {
-		records = append(records, &kinesis.PutRecordsRequestEntry{
+		records = append(records, types.PutRecordsRequestEntry{
 			Data:         b.Bytes(),
 			PartitionKey: aws.String(time.Now().Format(time.RFC3339Nano)),
 		})
@@ -55,37 +70,41 @@ func main() {
 	}
 }
 
-func createStream(client *kinesis.Kinesis, streamName *string) error {
-	resp, err := client.ListStreams(&kinesis.ListStreamsInput{})
+func createStream(client *kinesis.Client, streamName string) error {
+	resp, err := client.ListStreams(context.Background(), &kinesis.ListStreamsInput{})
 	if err != nil {
 		return fmt.Errorf("list streams error: %v", err)
 	}
 
 	for _, val := range resp.StreamNames {
-		if *streamName == *val {
+		if streamName == val {
 			return nil
 		}
 	}
 
 	_, err = client.CreateStream(
+		context.Background(),
 		&kinesis.CreateStreamInput{
-			StreamName: streamName,
-			ShardCount: aws.Int64(2),
+			StreamName: aws.String(streamName),
+			ShardCount: aws.Int32(2),
 		},
 	)
 	if err != nil {
 		return err
 	}
 
-	return client.WaitUntilStreamExists(
+	waiter := kinesis.NewStreamExistsWaiter(client)
+	return waiter.Wait(
+		context.Background(),
 		&kinesis.DescribeStreamInput{
-			StreamName: streamName,
+			StreamName: aws.String(streamName),
 		},
+		30*time.Second,
 	)
 }
 
-func putRecords(client *kinesis.Kinesis, streamName *string, records []*kinesis.PutRecordsRequestEntry) {
-	_, err := client.PutRecords(&kinesis.PutRecordsInput{
+func putRecords(client *kinesis.Client, streamName *string, records []types.PutRecordsRequestEntry) {
+	_, err := client.PutRecords(context.Background(), &kinesis.PutRecordsInput{
 		StreamName: streamName,
 		Records:    records,
 	})
