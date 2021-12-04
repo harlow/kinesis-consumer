@@ -81,8 +81,8 @@ type Checkpoint struct {
 }
 
 type key struct {
-	StreamName string `json:"stream_name" dynamodbav:"stream_name"`
-	ShardID    string `json:"shard_id" dynamodbav:"shard_id"`
+	StreamName string
+	ShardID    string
 }
 
 type item struct {
