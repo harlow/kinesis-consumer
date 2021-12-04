@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"time"
 
 	alog "github.com/apex/log"
 	"github.com/apex/log/handlers/text"
@@ -17,6 +18,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	ddbtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/aws/aws-sdk-go-v2/service/kinesis"
 	"github.com/aws/aws-sdk-go-v2/service/kinesis/types"
 	consumer "github.com/harlow/kinesis-consumer"
@@ -57,38 +59,33 @@ func main() {
 	var (
 		app             = flag.String("app", "", "Consumer app name")
 		stream          = flag.String("stream", "", "Stream name")
-		table           = flag.String("table", "", "Checkpoint table name")
-		kinesisEndpoint = flag.String("endpoint", "http://localhost:4567", "Kinesis endpoint")
+		tableName       = flag.String("table", "", "Checkpoint table name")
+		ddbEndpoint     = flag.String("ddb-endpoint", "http://localhost:8000", "DynamoDB endpoint")
+		kinesisEndpoint = flag.String("ksis-endpoint", "http://localhost:4567", "Kinesis endpoint")
 		awsRegion       = flag.String("region", "us-west-2", "AWS Region")
 	)
 	flag.Parse()
 
-	resolver := aws.EndpointResolverFunc(func(service, region string) (aws.Endpoint, error) {
-		return aws.Endpoint{
-			PartitionID:   "aws",
-			URL:           *kinesisEndpoint,
-			SigningRegion: *awsRegion,
-		}, nil
-	})
-
-	// client
-	cfg, err := config.LoadDefaultConfig(
-		context.TODO(),
-		config.WithRegion(*awsRegion),
-		config.WithEndpointResolver(resolver),
-		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("user", "pass", "token")),
-	)
+	// set up clients
+	kcfg, err := newConfig(*kinesisEndpoint, *awsRegion)
 	if err != nil {
-		log.Fatalf("unable to load SDK config, %v", err)
+		log.Fatalf("new kinesis config error: %v", err)
+	}
+	var myKsis = kinesis.NewFromConfig(kcfg)
+
+	dcfg, err := newConfig(*ddbEndpoint, *awsRegion)
+	if err != nil {
+		log.Fatalf("new ddb config error: %v", err)
+	}
+	var myDdbClient = dynamodb.NewFromConfig(dcfg)
+
+	// ddb checkpoint table
+	if err := createTable(myDdbClient, *tableName); err != nil {
+		log.Fatalf("create ddb table error: %v", err)
 	}
 
-	var (
-		myDdbClient = dynamodb.NewFromConfig(cfg)
-		myKsis      = kinesis.NewFromConfig(cfg)
-	)
-
 	// ddb persitance
-	ddb, err := storage.New(*app, *table, storage.WithDynamoClient(myDdbClient), storage.WithRetryer(&MyRetryer{}))
+	ddb, err := storage.New(*app, *tableName, storage.WithDynamoClient(myDdbClient), storage.WithRetryer(&MyRetryer{}))
 	if err != nil {
 		log.Fatalf("checkpoint error: %v", err)
 	}
@@ -134,6 +131,50 @@ func main() {
 	}
 }
 
+func createTable(client *dynamodb.Client, tableName string) error {
+	resp, err := client.ListTables(context.Background(), &dynamodb.ListTablesInput{})
+	if err != nil {
+		return fmt.Errorf("list streams error: %v", err)
+	}
+
+	for _, val := range resp.TableNames {
+		if tableName == val {
+			return nil
+		}
+	}
+
+	_, err = client.CreateTable(
+		context.Background(),
+		&dynamodb.CreateTableInput{
+			TableName: aws.String(tableName),
+			AttributeDefinitions: []ddbtypes.AttributeDefinition{
+				{AttributeName: aws.String("namespace"), AttributeType: "S"},
+				{AttributeName: aws.String("shard_id"), AttributeType: "S"},
+			},
+			KeySchema: []ddbtypes.KeySchemaElement{
+				{AttributeName: aws.String("namespace"), KeyType: ddbtypes.KeyTypeHash},
+				{AttributeName: aws.String("shard_id"), KeyType: ddbtypes.KeyTypeRange},
+			},
+			ProvisionedThroughput: &ddbtypes.ProvisionedThroughput{
+				ReadCapacityUnits:  aws.Int64(1),
+				WriteCapacityUnits: aws.Int64(1),
+			},
+		},
+	)
+	if err != nil {
+		return err
+	}
+
+	waiter := dynamodb.NewTableExistsWaiter(client)
+	return waiter.Wait(
+		context.Background(),
+		&dynamodb.DescribeTableInput{
+			TableName: aws.String(tableName),
+		},
+		5*time.Second,
+	)
+}
+
 // MyRetryer used for storage
 type MyRetryer struct {
 	storage.Retryer
@@ -146,4 +187,21 @@ func (r *MyRetryer) ShouldRetry(err error) bool {
 		return true
 	}
 	return false
+}
+
+func newConfig(url, region string) (aws.Config, error) {
+	resolver := aws.EndpointResolverFunc(func(service, region string) (aws.Endpoint, error) {
+		return aws.Endpoint{
+			PartitionID:   "aws",
+			URL:           url,
+			SigningRegion: region,
+		}, nil
+	})
+
+	return config.LoadDefaultConfig(
+		context.TODO(),
+		config.WithRegion(region),
+		config.WithEndpointResolver(resolver),
+		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("user", "pass", "token")),
+	)
 }

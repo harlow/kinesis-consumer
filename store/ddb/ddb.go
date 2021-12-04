@@ -81,14 +81,14 @@ type Checkpoint struct {
 }
 
 type key struct {
-	streamName string `json:"stream_name"`
-	shardID    string `json:"shard_id"`
+	StreamName string
+	ShardID    string
 }
 
 type item struct {
-	Namespace      string `json:"namespace"`
-	ShardID        string `json:"shard_id"`
-	SequenceNumber string `json:"sequence_number"`
+	Namespace      string `json:"namespace" dynamodbav:"namespace"`
+	ShardID        string `json:"shard_id" dynamodbav:"shard_id"`
+	SequenceNumber string `json:"sequence_number" dynamodbav:"sequence_number"`
 }
 
 // GetCheckpoint determines if a checkpoint for a particular Shard exists.
@@ -101,12 +101,8 @@ func (c *Checkpoint) GetCheckpoint(streamName, shardID string) (string, error) {
 		TableName:      aws.String(c.tableName),
 		ConsistentRead: aws.Bool(true),
 		Key: map[string]types.AttributeValue{
-			"namespace": &types.AttributeValueMemberS{
-				Value: namespace,
-			},
-			"shard_id": &types.AttributeValueMemberS{
-				Value: shardID,
-			},
+			"namespace": &types.AttributeValueMemberS{Value: namespace},
+			"shard_id":  &types.AttributeValueMemberS{Value: shardID},
 		},
 	}
 
@@ -134,8 +130,8 @@ func (c *Checkpoint) SetCheckpoint(streamName, shardID, sequenceNumber string) e
 	}
 
 	key := key{
-		streamName: streamName,
-		shardID:    shardID,
+		StreamName: streamName,
+		ShardID:    shardID,
 	}
 	c.checkpoints[key] = sequenceNumber
 
@@ -169,8 +165,8 @@ func (c *Checkpoint) save() error {
 
 	for key, sequenceNumber := range c.checkpoints {
 		item, err := attributevalue.MarshalMap(item{
-			Namespace:      fmt.Sprintf("%s-%s", c.appName, key.streamName),
-			ShardID:        key.shardID,
+			Namespace:      fmt.Sprintf("%s-%s", c.appName, key.StreamName),
+			ShardID:        key.ShardID,
 			SequenceNumber: sequenceNumber,
 		})
 		if err != nil {
