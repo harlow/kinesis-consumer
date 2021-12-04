@@ -343,7 +343,7 @@ func main() {
 
 # Examples
 
-There are example Produder and Consumer code in `/cmd` directory. These should help give end-to-end examples of setting up consumers with different checkpoint strategies.
+There are examples of producer and comsumer in the `/examples` directory. These should help give end-to-end examples of setting up consumers with different checkpoint strategies.
 
 The examples run locally against [Kinesis Lite](https://github.com/mhart/kinesalite).
 
@@ -351,11 +351,11 @@ The examples run locally against [Kinesis Lite](https://github.com/mhart/kinesal
 
 Produce data to the stream:
 
-	$ cat cmd/producer/users.txt  | go run cmd/producer/main.go --stream myStream
+	$ cat examples/producer/users.txt  | go run examples/producer/main.go --stream myStream
 
 Consume data from the stream:
 
-	$ go run cmd/consumer/main.go --stream myStream
+	$ go run examples/consumer/main.go --stream myStream
 
 ## Contributing
 
