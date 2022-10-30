@@ -2,9 +2,11 @@ package consumer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/kinesis"
@@ -95,6 +97,42 @@ func TestScan(t *testing.T) {
 	val, err := cp.GetCheckpoint("myStreamName", "myShard")
 	if err != nil && val != "lastSeqNum" {
 		t.Errorf("checkout error expected %s, got %s", "lastSeqNum", val)
+	}
+}
+
+func TestScan_GetShardIteratorError(t *testing.T) {
+	mockError := errors.New("mock get shard iterator error")
+	client := &kinesisClientMock{
+		listShardsMock: func(ctx context.Context, params *kinesis.ListShardsInput, optFns ...func(*kinesis.Options)) (*kinesis.ListShardsOutput, error) {
+			return &kinesis.ListShardsOutput{
+				Shards: []types.Shard{
+					{ShardId: aws.String("myShard")},
+				},
+			}, nil
+		},
+		getShardIteratorMock: func(ctx context.Context, params *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {
+			return nil, mockError
+		},
+	}
+
+	// use cancel func to signal shutdown
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+
+	var res string
+	var fn = func(r *Record) error {
+		res += string(r.Data)
+		cancel() // simulate cancellation while processing first record
+		return nil
+	}
+
+	c, err := New("myStreamName", WithClient(client))
+	if err != nil {
+		t.Fatalf("new consumer error: %v", err)
+	}
+
+	err = c.Scan(ctx, fn)
+	if !errors.Is(err, mockError) {
+		t.Errorf("expected an error from getShardIterator, but instead got %v", err)
 	}
 }
 
