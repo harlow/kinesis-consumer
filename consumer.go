@@ -107,7 +107,11 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 	)
 
 	go func() {
-		c.group.Start(ctx, shardc)
+		err := c.group.Start(ctx, shardc)
+		if err != nil {
+			errc <- fmt.Errorf("error starting scan: %w", err)
+			cancel()
+		}
 		<-ctx.Done()
 		close(shardc)
 	}()
