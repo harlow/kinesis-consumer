@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/alicebob/miniredis"
-	redis "github.com/go-redis/redis/v8"
+	redis "github.com/go-redis/redis/v9"
 )
 
 func Test_CheckpointOptions(t *testing.T) {
