@@ -35,7 +35,7 @@ type AllGroup struct {
 
 // Start is a blocking operation which will loop and attempt to find new
 // shards on a regular cadence.
-func (g *AllGroup) Start(ctx context.Context, shardc chan types.Shard) {
+func (g *AllGroup) Start(ctx context.Context, shardc chan types.Shard) error {
 	// Note: while ticker is a rather naive approach to this problem,
 	// it actually simplifies a few things. i.e. If we miss a new shard
 	// while AWS is resharding we'll pick it up max 30 seconds later.
@@ -48,12 +48,16 @@ func (g *AllGroup) Start(ctx context.Context, shardc chan types.Shard) {
 	var ticker = time.NewTicker(30 * time.Second)
 
 	for {
-		g.findNewShards(ctx, shardc)
+		err := g.findNewShards(ctx, shardc)
+		if err != nil {
+			ticker.Stop()
+			return err
+		}
 
 		select {
 		case <-ctx.Done():
 			ticker.Stop()
-			return
+			return nil
 		case <-ticker.C:
 		}
 	}
@@ -62,7 +66,7 @@ func (g *AllGroup) Start(ctx context.Context, shardc chan types.Shard) {
 // findNewShards pulls the list of shards from the Kinesis API
 // and uses a local cache to determine if we are already processing
 // a particular shard.
-func (g *AllGroup) findNewShards(ctx context.Context, shardc chan types.Shard) {
+func (g *AllGroup) findNewShards(ctx context.Context, shardc chan types.Shard) error {
 	g.shardMu.Lock()
 	defer g.shardMu.Unlock()
 
@@ -71,7 +75,7 @@ func (g *AllGroup) findNewShards(ctx context.Context, shardc chan types.Shard) {
 	shards, err := listShards(ctx, g.ksis, g.streamName)
 	if err != nil {
 		g.logger.Log("[GROUP] error:", err)
-		return
+		return err
 	}
 
 	for _, shard := range shards {
@@ -81,4 +85,5 @@ func (g *AllGroup) findNewShards(ctx context.Context, shardc chan types.Shard) {
 		g.shards[*shard.ShardId] = shard
 		shardc <- shard
 	}
+	return nil
 }
