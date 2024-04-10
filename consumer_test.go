@@ -10,7 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/kinesis"
 	"github.com/aws/aws-sdk-go-v2/service/kinesis/types"
 
-	store "github.com/harlow/kinesis-consumer/store/memory"
+	store "github.com/alexgridx/kinesis-consumer/store/memory"
 )
 
 var records = []types.Record{

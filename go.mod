@@ -1,4 +1,4 @@
-module github.com/harlow/kinesis-consumer
+module github.com/alexgridx/kinesis-consumer
 
 go 1.22
 
