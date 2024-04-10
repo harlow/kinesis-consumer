@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"sync"
 	"time"
@@ -13,6 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/kinesis"
 	"github.com/aws/aws-sdk-go-v2/service/kinesis/types"
+
 	"github.com/harlow/kinesis-consumer/internal/deaggregator"
 )
 
@@ -38,7 +39,7 @@ func New(streamName string, opts ...Option) (*Consumer, error) {
 		store:                    &noopStore{},
 		counter:                  &noopCounter{},
 		logger: &noopLogger{
-			logger: log.New(ioutil.Discard, "", log.LstdFlags),
+			logger: log.New(io.Discard, "", log.LstdFlags),
 		},
 		scanInterval: 250 * time.Millisecond,
 		maxRecords:   10000,
@@ -90,7 +91,7 @@ type Consumer struct {
 type ScanFunc func(*Record) error
 
 // ErrSkipCheckpoint is used as a return value from ScanFunc to indicate that
-// the current checkpoint should be skipped skipped. It is not returned
+// the current checkpoint should be skipped. It is not returned
 // as an error by any function.
 var ErrSkipCheckpoint = errors.New("skip checkpoint")
 
@@ -183,9 +184,9 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 			// loop over records, call callback func
 			var records []types.Record
 
-			// deaggregate records
+			// desegregate records
 			if c.isAggregated {
-				records, err = deaggregateRecords(resp.Records)
+				records, err = disaggregateRecords(resp.Records)
 				if err != nil {
 					return err
 				}
@@ -199,11 +200,11 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 					return nil
 				default:
 					err := fn(&Record{r, shardID, resp.MillisBehindLatest})
-					if err != nil && err != ErrSkipCheckpoint {
+					if err != nil && !errors.Is(err, ErrSkipCheckpoint) {
 						return err
 					}
 
-					if err != ErrSkipCheckpoint {
+					if !errors.Is(err, ErrSkipCheckpoint) {
 						if err := c.group.SetCheckpoint(c.streamName, shardID, *r.SequenceNumber); err != nil {
 							return err
 						}
@@ -240,14 +241,14 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 	}
 }
 
-// temporary conversion func of []types.Record -> DeaggregateRecords([]*types.Record) -> []types.Record
-func deaggregateRecords(in []types.Record) ([]types.Record, error) {
+// temporary conversion func of []types.Record -> DesegregateRecords([]*types.Record) -> []types.Record
+func disaggregateRecords(in []types.Record) ([]types.Record, error) {
 	var recs []*types.Record
 	for _, rec := range in {
 		recs = append(recs, &rec)
 	}
 
-	deagg, err := deaggregator.DeaggregateRecords(recs)
+	deagg, err := deaggregator.DisaggregatedRecords(recs)
 	if err != nil {
 		return nil, err
 	}
@@ -272,7 +273,7 @@ func (c *Consumer) getShardIterator(ctx context.Context, streamName, shardID, se
 		params.ShardIteratorType = types.ShardIteratorTypeAtTimestamp
 		params.Timestamp = c.initialTimestamp
 	} else {
-		params.ShardIteratorType = types.ShardIteratorType(c.initialShardIteratorType)
+		params.ShardIteratorType = c.initialShardIteratorType
 	}
 
 	res, err := c.client.GetShardIterator(ctx, params)
