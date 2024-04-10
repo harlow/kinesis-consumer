@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	rec "github.com/awslabs/kinesis-aggregation/go/records"
+
 	deagg "github.com/harlow/kinesis-consumer/internal/deaggregator"
 )
 
@@ -81,7 +82,7 @@ func TestSmallLengthReturnsCorrectNumberOfDeaggregatedRecords(t *testing.T) {
 	smallByte := []byte("No")
 	kr = generateKinesisRecord(smallByte)
 	krs = append(krs, kr)
-	dars, err := deagg.DeaggregateRecords(krs)
+	dars, err := deagg.DisaggregatedRecords(krs)
 	if err != nil {
 		panic(err)
 	}
@@ -108,7 +109,7 @@ func TestNonMatchingMagicHeaderReturnsSingleRecord(t *testing.T) {
 
 	krs = append(krs, kr)
 
-	dars, err := deagg.DeaggregateRecords(krs)
+	dars, err := deagg.DisaggregatedRecords(krs)
 	if err != nil {
 		panic(err)
 	}
@@ -118,7 +119,7 @@ func TestNonMatchingMagicHeaderReturnsSingleRecord(t *testing.T) {
 	assert.Equal(t, 1, len(dars), "Mismatch magic header test should return length of 1.")
 }
 
-// This function tests that the DeaggregateRecords function returns the correct number of
+// This function tests that the DisaggregatedRecords function returns the correct number of
 // deaggregated records from a single aggregated record.
 func TestVariableLengthRecordsReturnsCorrectNumberOfDeaggregatedRecords(t *testing.T) {
 	var err error
@@ -133,7 +134,7 @@ func TestVariableLengthRecordsReturnsCorrectNumberOfDeaggregatedRecords(t *testi
 	kr = generateKinesisRecord(aggData)
 	krs = append(krs, kr)
 
-	dars, err := deagg.DeaggregateRecords(krs)
+	dars, err := deagg.DisaggregatedRecords(krs)
 	if err != nil {
 		panic(err)
 	}
@@ -162,13 +163,13 @@ func TestRecordAfterMagicHeaderWithLengthLessThanDigestSizeReturnsSingleRecord(t
 
 	krs = append(krs, kr)
 
-	dars, err := deagg.DeaggregateRecords(krs)
+	dars, err := deagg.DisaggregatedRecords(krs)
 	if err != nil {
 		panic(err)
 	}
 
 	// A byte record with length less than 16 after the magic header should return
-	// a single record from DeaggregateRecords
+	// a single record from DisaggregatedRecords
 	assert.Equal(t, 1, len(dars), "Digest size test should return length of 1.")
 }
 
@@ -191,7 +192,7 @@ func TestRecordWithMismatchMd5SumReturnsSingleRecord(t *testing.T) {
 
 	krs = append(krs, kr)
 
-	dars, err := deagg.DeaggregateRecords(krs)
+	dars, err := deagg.DisaggregatedRecords(krs)
 	if err != nil {
 		panic(err)
 	}

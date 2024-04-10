@@ -12,7 +12,7 @@ import (
 	rec "github.com/awslabs/kinesis-aggregation/go/records"
 )
 
-// Magic File Header for a KPL Aggregated Record
+// KplMagicHeader Magic File Header for a KPL Aggregated Record
 var KplMagicHeader = fmt.Sprintf("%q", []byte("\xf3\x89\x9a\xc2"))
 
 const (
@@ -20,9 +20,9 @@ const (
 	DigestSize  = 16 // MD5 Message size for protobuf.
 )
 
-// DeaggregateRecords takes an array of Kinesis records and expands any Protobuf
+// DisaggregatedRecords takes an array of Kinesis records and expands any Protobuf
 // records within that array, returning an array of all records
-func DeaggregateRecords(records []*types.Record) ([]*types.Record, error) {
+func DisaggregatedRecords(records []*types.Record) ([]*types.Record, error) {
 	var isAggregated bool
 	allRecords := make([]*types.Record, 0)
 	for _, record := range records {
@@ -79,7 +79,7 @@ func DeaggregateRecords(records []*types.Record) ([]*types.Record, error) {
 }
 
 // createUserRecord takes in the partitionKeys of the aggregated record, the individual
-// deaggregated record, and the original aggregated record builds a kinesis.Record and
+// disaggregated record, and the original aggregated record builds a kinesis.Record and
 // returns it
 func createUserRecord(partitionKeys []string, aggRec *rec.Record, record *types.Record) *types.Record {
 	partitionKey := partitionKeys[*aggRec.PartitionKeyIndex]
