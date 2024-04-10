@@ -21,8 +21,9 @@ import (
 	ddbtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/aws/aws-sdk-go-v2/service/kinesis"
 	"github.com/aws/aws-sdk-go-v2/service/kinesis/types"
-	consumer "github.com/harlow/kinesis-consumer"
-	storage "github.com/harlow/kinesis-consumer/store/ddb"
+
+	consumer "github.com/alexgridx/kinesis-consumer"
+	storage "github.com/alexgridx/kinesis-consumer/store/ddb"
 )
 
 // kick off a server for exposing scan metrics
