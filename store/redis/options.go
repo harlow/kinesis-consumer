@@ -1,6 +1,6 @@
 package redis
 
-import redis "github.com/go-redis/redis/v9"
+import "github.com/redis/go-redis/v9"
 
 // Option is used to override defaults when creating a new Redis checkpoint
 type Option func(*Checkpoint)
