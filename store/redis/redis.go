@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	redis "github.com/redis/go-redis/v9"
+	"github.com/redis/go-redis/v9"
 )
 
 const localhost = "127.0.0.1:6379"
