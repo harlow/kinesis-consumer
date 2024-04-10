@@ -30,9 +30,6 @@ _testmain.go
 .DS_Store
 tags*
 
-# Vendored files
-vendor/**
-
 # Benchmark files
 prof.cpu
 prof.mem
