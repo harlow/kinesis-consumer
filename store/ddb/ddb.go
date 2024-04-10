@@ -43,7 +43,7 @@ func New(appName, tableName string, opts ...Option) (*Checkpoint, error) {
 	ck := &Checkpoint{
 		tableName:   tableName,
 		appName:     appName,
-		maxInterval: time.Duration(1 * time.Minute),
+		maxInterval: 1 * time.Minute,
 		done:        make(chan struct{}),
 		mu:          &sync.Mutex{},
 		checkpoints: map[key]string{},
@@ -68,7 +68,7 @@ func New(appName, tableName string, opts ...Option) (*Checkpoint, error) {
 	return ck, nil
 }
 
-// Checkpoint stores and retreives the last evaluated key from a DDB scan
+// Checkpoint stores and retrieves the last evaluated key from a DDB scan
 type Checkpoint struct {
 	tableName   string
 	appName     string
@@ -115,12 +115,12 @@ func (c *Checkpoint) GetCheckpoint(streamName, shardID string) (string, error) {
 	}
 
 	var i item
-	attributevalue.UnmarshalMap(resp.Item, &i)
+	_ = attributevalue.UnmarshalMap(resp.Item, &i)
 	return i.SequenceNumber, nil
 }
 
 // SetCheckpoint stores a checkpoint for a shard (e.g. sequence number of last record processed by application).
-// Upon failover, record processing is resumed from this point.
+// Upon fail over, record processing is resumed from this point.
 func (c *Checkpoint) SetCheckpoint(streamName, shardID, sequenceNumber string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -152,7 +152,7 @@ func (c *Checkpoint) loop() {
 	for {
 		select {
 		case <-tick.C:
-			c.save()
+			_ = c.save()
 		case <-c.done:
 			return
 		}

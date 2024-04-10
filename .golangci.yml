@@ -1,0 +1,33 @@
+output:
+  # sorts results by: filepath, line and column
+  sort-results: true
+
+linters:
+  enable:
+    - revive # general purpose linter, drop-in replacement for golint + some extra
+    - whitespace # checks for unnecessary newlines and trailing spaces
+    - unconvert # check for unnecessary type conversions
+    - promlinter # checks that prometheus metrics follow prometheus naming conventions, see https://prometheus.io/docs/practices/naming/
+    - nilerr # checks for cases where a nil value is returned even though a checked error is non-nil
+    - gofmt # basic gofmt + the simplification flag "-s"
+    - unparam # reports unused function parameters
+    - goimports # checks import statements are formatted according to the 'goimport' command
+
+linters-settings:
+  errcheck:
+    ignore: Close
+
+issues:
+  exclude-use-default: false
+  exclude-rules:
+    - linters:
+        - revive
+      text: package-comments
+
+run:
+
+  build-tags:
+    - unit
+    - integration
+
+  timeout: 2m

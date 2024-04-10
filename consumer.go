@@ -243,20 +243,16 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 
 // temporary conversion func of []types.Record -> DesegregateRecords([]*types.Record) -> []types.Record
 func disaggregateRecords(in []types.Record) ([]types.Record, error) {
-	var recs []*types.Record
-	for _, rec := range in {
-		recs = append(recs, &rec)
-	}
+	var recs []types.Record
+	recs = append(recs, in...)
 
-	deagg, err := deaggregator.DisaggregatedRecords(recs)
+	deagg, err := deaggregator.DeaggregateRecords(recs)
 	if err != nil {
 		return nil, err
 	}
 
 	var out []types.Record
-	for _, rec := range deagg {
-		out = append(out, *rec)
-	}
+	out = append(out, deagg...)
 	return out, nil
 }
 
