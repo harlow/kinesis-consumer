@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	// this is the mysql package, so it makes sense to be here
 	_ "github.com/go-sql-driver/mysql"
 )
 
@@ -84,11 +85,11 @@ func (c *Checkpoint) GetCheckpoint(streamName, shardID string) (string, error) {
 	namespace := fmt.Sprintf("%s-%s", c.appName, streamName)
 
 	var sequenceNumber string
-	getCheckpointQuery := fmt.Sprintf(`SELECT sequence_number FROM %s WHERE namespace=? AND shard_id=?;`, c.tableName) //nolint: gas, it replaces only the table name
+	getCheckpointQuery := fmt.Sprintf(`SELECT sequence_number FROM %s WHERE namespace=? AND shard_id=?;`, c.tableName) // nolint: gas, it replaces only the table name
 	err := c.conn.QueryRow(getCheckpointQuery, namespace, shardID).Scan(&sequenceNumber)
 
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return "", nil
 		}
 		return "", err
@@ -98,7 +99,7 @@ func (c *Checkpoint) GetCheckpoint(streamName, shardID string) (string, error) {
 }
 
 // SetCheckpoint stores a checkpoint for a shard (e.g. sequence number of last record processed by application).
-// Upon failover, record processing is resumed from this point.
+// Upon fail over, record processing is resumed from this point.
 func (c *Checkpoint) SetCheckpoint(streamName, shardID, sequenceNumber string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -134,7 +135,7 @@ func (c *Checkpoint) loop() {
 	for {
 		select {
 		case <-tick.C:
-			c.save()
+			_ = c.save()
 		case <-c.done:
 			return
 		}
@@ -145,7 +146,7 @@ func (c *Checkpoint) save() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	//nolint: gas, it replaces only the table name
+	// nolint: gas, it replaces only the table name
 	upsertCheckpoint := fmt.Sprintf(`REPLACE INTO %s (namespace, shard_id, sequence_number) VALUES (?, ?, ?)`, c.tableName)
 
 	for key, sequenceNumber := range c.checkpoints {

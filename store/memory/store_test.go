@@ -8,7 +8,7 @@ func Test_CheckpointLifecycle(t *testing.T) {
 	c := New()
 
 	// set
-	c.SetCheckpoint("streamName", "shardID", "testSeqNum")
+	_ = c.SetCheckpoint("streamName", "shardID", "testSeqNum")
 
 	// get
 	val, err := c.GetCheckpoint("streamName", "shardID")

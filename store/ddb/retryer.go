@@ -14,7 +14,7 @@ type DefaultRetryer struct {
 	Retryer
 }
 
-// ShouldRetry when error occured
+// ShouldRetry when error occurred
 func (r *DefaultRetryer) ShouldRetry(err error) bool {
 	switch err.(type) {
 	case *types.ProvisionedThroughputExceededException:

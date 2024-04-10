@@ -14,7 +14,7 @@ type fakeRetryer struct {
 	Name string
 }
 
-func (r *fakeRetryer) ShouldRetry(err error) bool {
+func (r *fakeRetryer) ShouldRetry(_ error) bool {
 	r.Name = "fakeRetryer"
 	return false
 }
@@ -34,7 +34,7 @@ func TestCheckpointSetting(t *testing.T) {
 	ckPtr := &ck
 
 	// Test WithMaxInterval
-	setInterval := WithMaxInterval(time.Duration(2 * time.Minute))
+	setInterval := WithMaxInterval(2 * time.Minute)
 	setInterval(ckPtr)
 
 	// Test WithRetryer
@@ -52,7 +52,7 @@ func TestCheckpointSetting(t *testing.T) {
 	setDDBClient := WithDynamoClient(fakeDbClient)
 	setDDBClient(ckPtr)
 
-	if ckPtr.maxInterval != time.Duration(2*time.Minute) {
+	if ckPtr.maxInterval != 2*time.Minute {
 		t.Errorf("new checkpoint maxInterval expected 2 minute. got %v", ckPtr.maxInterval)
 	}
 	if ckPtr.retryer.ShouldRetry(nil) != false {
@@ -65,7 +65,7 @@ func TestCheckpointSetting(t *testing.T) {
 
 func TestNewCheckpointWithOptions(t *testing.T) {
 	// Test WithMaxInterval
-	setInterval := WithMaxInterval(time.Duration(2 * time.Minute))
+	setInterval := WithMaxInterval(2 * time.Minute)
 
 	// Test WithRetryer
 	var r fakeRetryer
@@ -94,7 +94,7 @@ func TestNewCheckpointWithOptions(t *testing.T) {
 		t.Errorf("new checkpoint table expected %v. got %v", "testtable", ckPtr.maxInterval)
 	}
 
-	if ckPtr.maxInterval != time.Duration(2*time.Minute) {
+	if ckPtr.maxInterval != 2*time.Minute {
 		t.Errorf("new checkpoint maxInterval expected 2 minute. got %v", ckPtr.maxInterval)
 	}
 	if ckPtr.retryer.ShouldRetry(nil) != false {
@@ -103,5 +103,4 @@ func TestNewCheckpointWithOptions(t *testing.T) {
 	if ckPtr.client != fakeDbClient {
 		t.Errorf("new checkpoint dynamodb client reference should be  %p. got %v", &fakeDbClient, ckPtr.client)
 	}
-
 }

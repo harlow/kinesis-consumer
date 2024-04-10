@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	sqlmock "github.com/DATA-DOG/go-sqlmock"
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/pkg/errors"
 )
 
@@ -22,7 +22,7 @@ func TestNew(t *testing.T) {
 	if err != nil {
 		t.Errorf("expected error equals nil, but got %v", err)
 	}
-	ck.Shutdown()
+	_ = ck.Shutdown()
 }
 
 func TestNew_AppNameEmpty(t *testing.T) {
@@ -69,7 +69,7 @@ func TestNew_WithMaxIntervalOption(t *testing.T) {
 	if err != nil {
 		t.Errorf("expected error equals nil, but got %v", err)
 	}
-	ck.Shutdown()
+	_ = ck.Shutdown()
 }
 
 func TestCheckpoint_GetCheckpoint(t *testing.T) {
@@ -109,7 +109,7 @@ func TestCheckpoint_GetCheckpoint(t *testing.T) {
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("there were unfulfilled expectations: %s", err)
 	}
-	ck.Shutdown()
+	_ = ck.Shutdown()
 }
 
 func TestCheckpoint_Get_NoRows(t *testing.T) {
@@ -145,7 +145,7 @@ func TestCheckpoint_Get_NoRows(t *testing.T) {
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("there were unfulfilled expectations: %s", err)
 	}
-	ck.Shutdown()
+	_ = ck.Shutdown()
 }
 
 func TestCheckpoint_Get_QueryError(t *testing.T) {
@@ -181,7 +181,7 @@ func TestCheckpoint_Get_QueryError(t *testing.T) {
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("there were unfulfilled expectations: %s", err)
 	}
-	ck.Shutdown()
+	_ = ck.Shutdown()
 }
 
 func TestCheckpoint_SetCheckpoint(t *testing.T) {
@@ -202,7 +202,7 @@ func TestCheckpoint_SetCheckpoint(t *testing.T) {
 	if err != nil {
 		t.Errorf("expected error equals nil, but got %v", err)
 	}
-	ck.Shutdown()
+	_ = ck.Shutdown()
 }
 
 func TestCheckpoint_Set_SequenceNumberEmpty(t *testing.T) {
@@ -223,7 +223,7 @@ func TestCheckpoint_Set_SequenceNumberEmpty(t *testing.T) {
 	if err == nil {
 		t.Errorf("expected error equals not nil, but got %v", err)
 	}
-	ck.Shutdown()
+	_ = ck.Shutdown()
 }
 
 func TestCheckpoint_Shutdown(t *testing.T) {
