@@ -9,8 +9,6 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/kinesis"
 
@@ -30,38 +28,26 @@ func main() {
 	flag.Parse()
 
 	// postgres checkpoint
-	store, err := store.New(*app, *table, *connStr)
+	checkpointStore, err := store.New(*app, *table, *connStr)
 	if err != nil {
 		log.Fatalf("checkpoint error: %v", err)
 	}
 
 	var counter = expvar.NewMap("counters")
 
-	resolver := aws.EndpointResolverFunc(func(service, region string) (aws.Endpoint, error) {
-		return aws.Endpoint{
-			PartitionID:   "aws",
-			URL:           *kinesisEndpoint,
-			SigningRegion: *awsRegion,
-		}, nil
-	})
-
 	// client
-	cfg, err := config.LoadDefaultConfig(
-		context.TODO(),
-		config.WithRegion(*awsRegion),
-		config.WithEndpointResolver(resolver),
-		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("user", "pass", "token")),
-	)
-	if err != nil {
-		log.Fatalf("unable to load SDK config, %v", err)
-	}
-	var client = kinesis.NewFromConfig(cfg)
+	var client = kinesis.New(
+		kinesis.Options{
+			BaseEndpoint: kinesisEndpoint,
+			Region:       *awsRegion,
+			Credentials:  credentials.NewStaticCredentialsProvider("user", "pass", "token"),
+		})
 
 	// consumer
 	c, err := consumer.New(
 		*stream,
 		consumer.WithClient(client),
-		consumer.WithStore(store),
+		consumer.WithStore(checkpointStore),
 		consumer.WithCounter(counter),
 	)
 	if err != nil {
@@ -90,7 +76,7 @@ func main() {
 		log.Fatalf("scan error: %v", err)
 	}
 
-	if err := store.Shutdown(); err != nil {
+	if err := checkpointStore.Shutdown(); err != nil {
 		log.Fatalf("store shutdown error: %v", err)
 	}
 }
