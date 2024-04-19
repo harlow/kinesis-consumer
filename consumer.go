@@ -276,10 +276,12 @@ func (c *Consumer) getShardIterator(ctx context.Context, streamName, shardID, se
 }
 
 func isRetriableError(err error) bool {
-	switch err.(type) {
-	case *types.ExpiredIteratorException:
+	var expiredIteratorException *types.ExpiredIteratorException
+	var provisionedThroughputExceededException *types.ProvisionedThroughputExceededException
+	switch {
+	case errors.As(err, &expiredIteratorException):
 		return true
-	case *types.ProvisionedThroughputExceededException:
+	case errors.As(err, &provisionedThroughputExceededException):
 		return true
 	}
 	return false
