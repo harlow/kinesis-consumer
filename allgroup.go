@@ -2,6 +2,7 @@ package consumer
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -10,12 +11,12 @@ import (
 
 // NewAllGroup returns an initialized AllGroup for consuming
 // all shards on a stream
-func NewAllGroup(ksis kinesisClient, store Store, streamName string, logger Logger) *AllGroup {
+func NewAllGroup(kinesis kinesisClient, store Store, streamName string, logger *slog.Logger) *AllGroup {
 	return &AllGroup{
-		ksis:       ksis,
+		kinesis:    kinesis,
 		shards:     make(map[string]types.Shard),
 		streamName: streamName,
-		logger:     logger,
+		slog:       logger,
 		Store:      store,
 	}
 }
@@ -24,9 +25,9 @@ func NewAllGroup(ksis kinesisClient, store Store, streamName string, logger Logg
 // caches a local list of the shards we are already processing
 // and routinely polls the stream looking for new shards to process.
 type AllGroup struct {
-	ksis       kinesisClient
+	kinesis    kinesisClient
 	streamName string
-	logger     Logger
+	slog       *slog.Logger
 	Store
 
 	shardMu sync.Mutex
@@ -66,11 +67,11 @@ func (g *AllGroup) findNewShards(ctx context.Context, shardc chan types.Shard) {
 	g.shardMu.Lock()
 	defer g.shardMu.Unlock()
 
-	g.logger.Log("[GROUP]", "fetching shards")
+	g.slog.DebugContext(ctx, "fetch shards")
 
-	shards, err := listShards(ctx, g.ksis, g.streamName)
+	shards, err := listShards(ctx, g.kinesis, g.streamName)
 	if err != nil {
-		g.logger.Log("[GROUP] error:", err)
+		g.slog.ErrorContext(ctx, "list shards", slog.String("error", err.Error()))
 		return
 	}
 

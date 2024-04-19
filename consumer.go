@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -38,11 +39,9 @@ func New(streamName string, opts ...Option) (*Consumer, error) {
 		initialShardIteratorType: types.ShardIteratorTypeLatest,
 		store:                    &noopStore{},
 		counter:                  &noopCounter{},
-		logger: &noopLogger{
-			logger: log.New(io.Discard, "", log.LstdFlags),
-		},
-		scanInterval: 250 * time.Millisecond,
-		maxRecords:   10000,
+		logger:                   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		scanInterval:             250 * time.Millisecond,
+		maxRecords:               10000,
 	}
 
 	// override defaults
@@ -75,7 +74,7 @@ type Consumer struct {
 	client                   kinesisClient
 	counter                  Counter
 	group                    Group
-	logger                   Logger
+	logger                   *slog.Logger
 	store                    Store
 	scanInterval             time.Duration
 	maxRecords               int64
@@ -154,9 +153,9 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 		return fmt.Errorf("get shard iterator error: %w", err)
 	}
 
-	c.logger.Log("[CONSUMER] start scan:", shardID, lastSeqNum)
+	c.logger.DebugContext(ctx, "start scan", slog.String("shard-id", shardID), slog.String("last-sequence-number", lastSeqNum))
 	defer func() {
-		c.logger.Log("[CONSUMER] stop scan:", shardID)
+		c.logger.DebugContext(ctx, "stop scan", slog.String("shard-id", shardID))
 	}()
 
 	scanTicker := time.NewTicker(c.scanInterval)
@@ -170,11 +169,11 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 
 		// attempt to recover from GetRecords error
 		if err != nil {
-			c.logger.Log("[CONSUMER] get records error:", err.Error())
-
 			if !isRetriableError(err) {
 				return fmt.Errorf("get records error: %v", err.Error())
 			}
+
+			c.logger.WarnContext(ctx, "get records", slog.String("error", err.Error()))
 
 			shardIterator, err = c.getShardIterator(ctx, c.streamName, shardID, lastSeqNum)
 			if err != nil {
@@ -216,7 +215,7 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 			}
 
 			if isShardClosed(resp.NextShardIterator, shardIterator) {
-				c.logger.Log("[CONSUMER] shard closed:", shardID)
+				c.logger.DebugContext(ctx, "shard closed", slog.String("shard-id", shardID))
 
 				if c.shardClosedHandler != nil {
 					err := c.shardClosedHandler(c.streamName, shardID)
