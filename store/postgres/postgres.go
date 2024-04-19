@@ -26,6 +26,13 @@ func WithMaxInterval(maxInterval time.Duration) Option {
 	}
 }
 
+// WithConnection overwrites the default sql.DB
+func WithConnection(connection *sql.DB) Option {
+	return func(c *Checkpoint) {
+		c.conn = connection
+	}
+}
+
 // Checkpoint stores and retrieves the last evaluated key from a DDB scan
 type Checkpoint struct {
 	appName     string
