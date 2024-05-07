@@ -1,0 +1,10 @@
+version: 2
+updates:
+- package-ecosystem: gomod
+  directory: "/"
+  allow:
+    - dependency-type: "all"
+  schedule:
+    interval: daily
+  rebase-strategy: auto
+  open-pull-requests-limit: 10
