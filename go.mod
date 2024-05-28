@@ -42,7 +42,7 @@ require (
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/gomodule/redigo v2.0.0+incompatible // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
-	github.com/prometheus/client_model v0.5.0 // indirect
+	github.com/prometheus/client_model v0.6.1 // indirect
 	github.com/prometheus/common v0.48.0 // indirect
 	github.com/prometheus/procfs v0.12.0 // indirect
 	github.com/stretchr/testify v1.9.0 // indirect
