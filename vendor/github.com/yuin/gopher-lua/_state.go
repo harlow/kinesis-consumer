@@ -3,7 +3,6 @@ package lua
 import (
 	"context"
 	"fmt"
-	"github.com/yuin/gopher-lua/parse"
 	"io"
 	"math"
 	"os"
@@ -12,6 +11,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/yuin/gopher-lua/parse"
 )
 
 const MultRet = -1
@@ -397,17 +398,18 @@ func (rg *registry) forceResize(newSize int) {
 	copy(newSlice, rg.array[:rg.top]) // should we copy the area beyond top? there shouldn't be any valid values there so it shouldn't be necessary.
 	rg.array = newSlice
 }
-func (rg *registry) SetTop(top int) {
-	// +inline-call rg.checkSize top
-	oldtop := rg.top
-	rg.top = top
-	for i := oldtop; i < rg.top; i++ {
+
+func (rg *registry) SetTop(topi int) { // +inline-start
+	// +inline-call rg.checkSize topi
+	oldtopi := rg.top
+	rg.top = topi
+	for i := oldtopi; i < rg.top; i++ {
 		rg.array[i] = LNil
 	}
 	// values beyond top don't need to be valid LValues, so setting them to nil is fine
 	// setting them to nil rather than LNil lets us invoke the golang memclr opto
-	if rg.top < oldtop {
-		nilRange := rg.array[rg.top:oldtop]
+	if rg.top < oldtopi {
+		nilRange := rg.array[rg.top:oldtopi]
 		for i := range nilRange {
 			nilRange[i] = nil
 		}
@@ -415,7 +417,7 @@ func (rg *registry) SetTop(top int) {
 	//for i := rg.top; i < oldtop; i++ {
 	//	rg.array[i] = LNil
 	//}
-}
+} // +inline-end
 
 func (rg *registry) Top() int {
 	return rg.top
@@ -497,34 +499,34 @@ func (rg *registry) FillNil(regm, n int) { // +inline-start
 func (rg *registry) Insert(value LValue, reg int) {
 	top := rg.Top()
 	if reg >= top {
-		rg.Set(reg, value)
+		// +inline-call rg.Set reg value
 		return
 	}
 	top--
 	for ; top >= reg; top-- {
 		// FIXME consider using copy() here if Insert() is called enough
-		rg.Set(top+1, rg.Get(top))
+		// +inline-call rg.Set top+1 rg.Get(top)
 	}
-	rg.Set(reg, value)
+	// +inline-call rg.Set reg value
 }
 
-func (rg *registry) Set(reg int, val LValue) {
-	newSize := reg + 1
+func (rg *registry) Set(regi int, vali LValue) { // +inline-start
+	newSize := regi + 1
 	// +inline-call rg.checkSize newSize
-	rg.array[reg] = val
-	if reg >= rg.top {
-		rg.top = reg + 1
+	rg.array[regi] = vali
+	if regi >= rg.top {
+		rg.top = regi + 1
 	}
-}
+} // +inline-end
 
-func (rg *registry) SetNumber(reg int, val LNumber) {
-	newSize := reg + 1
+func (rg *registry) SetNumber(regi int, vali LNumber) { // +inline-start
+	newSize := regi + 1
 	// +inline-call rg.checkSize newSize
-	rg.array[reg] = rg.alloc.LNumber2I(val)
-	if reg >= rg.top {
-		rg.top = reg + 1
+	rg.array[regi] = rg.alloc.LNumber2I(vali)
+	if regi >= rg.top {
+		rg.top = regi + 1
 	}
-}
+} // +inline-end
 
 func (rg *registry) IsFull() bool {
 	return rg.top >= cap(rg.array)
@@ -768,6 +770,9 @@ func (ls *LState) isStarted() bool {
 
 func (ls *LState) kill() {
 	ls.Dead = true
+	if ls.ctxCancelFn != nil {
+		ls.ctxCancelFn()
+	}
 }
 
 func (ls *LState) indexToReg(idx int) int {
@@ -935,18 +940,22 @@ func (ls *LState) initCallFrame(cf *callFrame) { // +inline-start
 		proto := cf.Fn.Proto
 		nargs := cf.NArgs
 		np := int(proto.NumParameters)
-		newSize := cf.LocalBase + np
-		// +inline-call ls.reg.checkSize newSize
-		for i := nargs; i < np; i++ {
-			ls.reg.array[cf.LocalBase+i] = LNil
+		if nargs < np {
+			// default any missing arguments to nil
+			newSize := cf.LocalBase + np
+			// +inline-call ls.reg.checkSize newSize
+			for i := nargs; i < np; i++ {
+				ls.reg.array[cf.LocalBase+i] = LNil
+			}
 			nargs = np
+			ls.reg.top = newSize
 		}
 
 		if (proto.IsVarArg & VarArgIsVarArg) == 0 {
 			if nargs < int(proto.NumUsedRegisters) {
 				nargs = int(proto.NumUsedRegisters)
 			}
-			newSize = cf.LocalBase + nargs
+			newSize := cf.LocalBase + nargs
 			// +inline-call ls.reg.checkSize newSize
 			for i := np; i < nargs; i++ {
 				ls.reg.array[cf.LocalBase+i] = LNil
@@ -1212,6 +1221,10 @@ func NewState(opts ...Options) *LState {
 	return ls
 }
 
+func (ls *LState) IsClosed() bool {
+	return ls.stack == nil
+}
+
 func (ls *LState) Close() {
 	atomic.AddInt32(&ls.stop, 1)
 	for _, file := range ls.G.tempFiles {
@@ -1393,6 +1406,7 @@ func (ls *LState) NewThread() (*LState, context.CancelFunc) {
 	if ls.ctx != nil {
 		thread.mainLoop = mainLoopWithContext
 		thread.ctx, f = context.WithCancel(ls.ctx)
+		thread.ctxCancelFn = f
 	}
 	return thread, f
 }
@@ -1842,6 +1856,9 @@ func (ls *LState) PCall(nargs, nret int, errfunc *LFunction) (err error) {
 							err = rcv.(*ApiError)
 							err.(*ApiError).StackTrace = ls.stackTrace(0)
 						}
+						ls.stack.SetSp(sp)
+						ls.currentFrame = ls.stack.Last()
+						ls.reg.SetTop(base)
 					}
 				}()
 				ls.Call(1, 1)
@@ -2016,7 +2033,7 @@ func (ls *LState) SetMx(mx int) {
 	go func() {
 		limit := uint64(mx * 1024 * 1024) //MB
 		var s runtime.MemStats
-		for ls.stop == 0 {
+		for atomic.LoadInt32(&ls.stop) == 0 {
 			runtime.ReadMemStats(&s)
 			if s.Alloc >= limit {
 				fmt.Println("out of memory")
