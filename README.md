@@ -258,20 +258,26 @@ c, err := consumer.New(streamName, consumer.WithClient(client))
 Add optional counter for exposing counts for checkpoints and records processed:
 
 ```go
-// counter
-counter := expvar.NewMap("counters")
+// registry
+registry, ok := prometheus.DefaultRegisterer.(*prometheus.Registry)
+if !ok {
+    // handle error
+}
 
 // consumer
-c, err := consumer.New(streamName, consumer.WithCounter(counter))
+c, err := consumer.New(streamName, consumer.WithMetricRegistry(registry))
 ```
 
-The [expvar package](https://golang.org/pkg/expvar/) will display consumer counts:
+Prometheus will then have the following metrics available.
 
-```json
-"counters": {
-  "checkpoints": 3,
-  "records": 13005
-},
+```
+# TYPE net_kinesis_checkpoints_written_count_total counter
+net_kinesis_checkpoints_written_count_total{shard_id="***",stream_name="***"} 1
+# TYPE net_kinesis_events_consumed_count_total counter
+net_kinesis_events_consumed_count_total{shard_id="***",stream_name="***"} 1
+# TYPE net_kinesis_milliseconds_behind_latest summary
+net_kinesis_milliseconds_behind_latest_sum{shard_id="***",stream_name="***"} 1.0
+net_kinesis_milliseconds_behind_latest_count{shard_id="***",stream_name="***"} 1
 ```
 
 ### Consumer starting point

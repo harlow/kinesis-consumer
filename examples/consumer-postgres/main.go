@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"expvar"
 	"flag"
 	"fmt"
 	"log"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/kinesis"
+	"github.com/prometheus/client_golang/prometheus"
 
 	consumer "github.com/alexgridx/kinesis-consumer"
 	store "github.com/alexgridx/kinesis-consumer/store/postgres"
@@ -33,7 +33,10 @@ func main() {
 		log.Fatalf("checkpoint error: %v", err)
 	}
 
-	var counter = expvar.NewMap("counters")
+	registry, ok := prometheus.DefaultRegisterer.(*prometheus.Registry)
+	if !ok {
+		log.Fatalf("could not get default prometheus registry")
+	}
 
 	// client
 	var client = kinesis.New(
@@ -48,7 +51,7 @@ func main() {
 		*stream,
 		consumer.WithClient(client),
 		consumer.WithStore(checkpointStore),
-		consumer.WithCounter(counter),
+		consumer.WithMetricRegistry(registry),
 	)
 	if err != nil {
 		log.Fatalf("consumer error: %v", err)

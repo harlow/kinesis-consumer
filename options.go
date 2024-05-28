@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/kinesis/types"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // Option is used to override defaults when creating a new Consumer
@@ -31,10 +32,18 @@ func WithLogger(logger *slog.Logger) Option {
 	}
 }
 
-// WithCounter overrides the default counter
+// WithCounter overrides the default counter.
+// Deprecated. Will be removed in favor of WithMetricRegistry in a future release.
 func WithCounter(counter Counter) Option {
 	return func(c *Consumer) {
 		c.counter = counter
+	}
+}
+
+// WithMetricRegistry specifies a registry to add the prometheus metrics to. Defaults to nil.
+func WithMetricRegistry(registry prometheus.Registerer) Option {
+	return func(c *Consumer) {
+		c.metricRegistry = registry
 	}
 }
 

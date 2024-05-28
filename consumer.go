@@ -14,8 +14,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/kinesis"
 	"github.com/aws/aws-sdk-go-v2/service/kinesis/types"
-
 	"github.com/awslabs/kinesis-aggregation/go/v2/deaggregator"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // Record wraps the record returned from the Kinesis library and
@@ -42,6 +42,7 @@ func New(streamName string, opts ...Option) (*Consumer, error) {
 		logger:                   slog.New(slog.NewTextHandler(io.Discard, nil)),
 		scanInterval:             250 * time.Millisecond,
 		maxRecords:               10000,
+		metricRegistry:           nil,
 	}
 
 	// override defaults
@@ -63,6 +64,16 @@ func New(streamName string, opts ...Option) (*Consumer, error) {
 		c.group = NewAllGroup(c.client, c.store, streamName, c.logger)
 	}
 
+	if c.metricRegistry != nil {
+		var err error
+		errors.Join(err, c.metricRegistry.Register(collectorMillisBehindLatest))
+		errors.Join(err, c.metricRegistry.Register(counterEventsConsumed))
+		errors.Join(err, c.metricRegistry.Register(counterCheckpointsWritten))
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return c, nil
 }
 
@@ -72,14 +83,16 @@ type Consumer struct {
 	initialShardIteratorType types.ShardIteratorType
 	initialTimestamp         *time.Time
 	client                   kinesisClient
-	counter                  Counter
-	group                    Group
-	logger                   *slog.Logger
-	store                    Store
-	scanInterval             time.Duration
-	maxRecords               int64
-	isAggregated             bool
-	shardClosedHandler       ShardClosedHandler
+	// Deprecated. Will be removed in favor of prometheus in a future release.
+	counter            Counter
+	group              Group
+	logger             *slog.Logger
+	metricRegistry     prometheus.Registerer
+	store              Store
+	scanInterval       time.Duration
+	maxRecords         int64
+	isAggregated       bool
+	shardClosedHandler ShardClosedHandler
 }
 
 // ScanFunc is the type of the function called for each message read
@@ -199,6 +212,12 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 					return nil
 				default:
 					err := fn(&Record{r, shardID, resp.MillisBehindLatest})
+
+					secondsBehindLatest := float64(time.Duration(*resp.MillisBehindLatest)*time.Millisecond) / float64(time.Second)
+					collectorMillisBehindLatest.
+						With(prometheus.Labels{labelStreamName: c.streamName, labelShardID: shardID}).
+						Observe(secondsBehindLatest)
+
 					if err != nil && !errors.Is(err, ErrSkipCheckpoint) {
 						return err
 					}
@@ -207,8 +226,11 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 						if err := c.group.SetCheckpoint(c.streamName, shardID, *r.SequenceNumber); err != nil {
 							return err
 						}
+						c.counter.Add("checkpoint", 1)
+						counterCheckpointsWritten.With(prometheus.Labels{labelStreamName: c.streamName, labelShardID: shardID}).Inc()
 					}
 
+					counterEventsConsumed.With(prometheus.Labels{labelStreamName: c.streamName, labelShardID: shardID}).Inc()
 					c.counter.Add("records", 1)
 					lastSeqNum = *r.SequenceNumber
 				}
