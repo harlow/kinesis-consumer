@@ -181,8 +181,8 @@ github.com/redis/go-redis/v9/internal/rand
 github.com/redis/go-redis/v9/internal/util
 # github.com/stretchr/testify v1.9.0
 ## explicit; go 1.17
-# github.com/yuin/gopher-lua v0.0.0-20200603152657-dc2b0ca8b37e
-## explicit
+# github.com/yuin/gopher-lua v1.1.1
+## explicit; go 1.17
 github.com/yuin/gopher-lua
 github.com/yuin/gopher-lua/ast
 github.com/yuin/gopher-lua/parse
