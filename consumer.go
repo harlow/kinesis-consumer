@@ -107,7 +107,11 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 	)
 
 	go func() {
-		c.group.Start(ctx, shardc)
+		err := c.group.Start(ctx, shardc)
+		if err != nil {
+			errc <- fmt.Errorf("error starting scan: %w", err)
+			cancel()
+		}
 		<-ctx.Done()
 		close(shardc)
 	}()
@@ -284,7 +288,10 @@ func (c *Consumer) getShardIterator(ctx context.Context, streamName, shardID, se
 	}
 
 	res, err := c.client.GetShardIterator(ctx, params)
-	return res.ShardIterator, err
+	if err != nil {
+		return nil, err
+	}
+	return res.ShardIterator, nil
 }
 
 func isRetriableError(err error) bool {
