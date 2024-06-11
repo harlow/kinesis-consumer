@@ -120,7 +120,11 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 	)
 
 	go func() {
-		c.group.Start(ctx, shardc)
+		err := c.group.Start(ctx, shardc)
+		if err != nil {
+			errc <- fmt.Errorf("error starting scan: %w", err)
+			cancel()
+		}
 		<-ctx.Done()
 		close(shardc)
 	}()
@@ -131,13 +135,19 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 		wg.Add(1)
 		go func(shardID string) {
 			defer wg.Done()
-			if err := c.ScanShard(ctx, shardID, fn); err != nil {
+			var err error
+			if err = c.ScanShard(ctx, shardID, fn); err != nil {
+				err = fmt.Errorf("shard %s error: %w", shardID, err)
+			} else if closeable, ok := c.group.(CloseableGroup); !ok {
+				// group doesn't allow closure, skip calling CloseShard
+			} else if err = closeable.CloseShard(ctx, shardID); err != nil {
+				err = fmt.Errorf("shard closed CloseableGroup error: %w", err)
+			}
+			if err != nil {
 				select {
 				case errc <- fmt.Errorf("shard %s error: %w", shardID, err):
-					// first error to occur
 					cancel()
 				default:
-					// error has already occurred
 				}
 			}
 		}(aws.ToString(shard.ShardId))
@@ -149,6 +159,10 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 	}()
 
 	return <-errc
+}
+
+func (c *Consumer) scanSingleShard(ctx context.Context, shardID string, fn ScanFunc) error {
+	return nil
 }
 
 // ScanShard loops over records on a specific shard, calls the callback func
@@ -240,9 +254,7 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 				c.logger.DebugContext(ctx, "shard closed", slog.String("shard-id", shardID))
 
 				if c.shardClosedHandler != nil {
-					err := c.shardClosedHandler(c.streamName, shardID)
-
-					if err != nil {
+					if err := c.shardClosedHandler(c.streamName, shardID); err != nil {
 						return fmt.Errorf("shard closed handler error: %w", err)
 					}
 				}
@@ -294,7 +306,10 @@ func (c *Consumer) getShardIterator(ctx context.Context, streamName, shardID, se
 	}
 
 	res, err := c.client.GetShardIterator(ctx, params)
-	return res.ShardIterator, err
+	if err != nil {
+		return nil, err
+	}
+	return res.ShardIterator, nil
 }
 
 func isRetriableError(err error) bool {
