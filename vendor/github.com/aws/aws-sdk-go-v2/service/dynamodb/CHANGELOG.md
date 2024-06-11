@@ -1,3 +1,16 @@
+# v1.32.8 (2024-06-07)
+
+* **Bug Fix**: Add clock skew correction on all service clients
+* **Dependency Update**: Updated to the latest SDK module versions
+
+# v1.32.7 (2024-06-03)
+
+* **Dependency Update**: Updated to the latest SDK module versions
+
+# v1.32.6 (2024-05-28)
+
+* **Documentation**: Doc-only update for DynamoDB. Specified the IAM actions needed to authorize a user to create a table with a resource-based policy.
+
 # v1.32.5 (2024-05-24)
 
 * **Documentation**: Documentation only updates for DynamoDB.

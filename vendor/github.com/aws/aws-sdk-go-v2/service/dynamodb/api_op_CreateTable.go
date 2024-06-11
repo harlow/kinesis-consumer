@@ -206,6 +206,9 @@ type CreateTableInput struct {
 	// limit. For a full list of all considerations that apply for resource-based
 	// policies, see [Resource-based policy considerations].
 	//
+	// You need to specify the CreateTable and PutResourcePolicy IAM actions for
+	// authorizing a user to create a table with a resource-based policy.
+	//
 	// [Resource-based policy considerations]: https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/rbac-considerations.html
 	ResourcePolicy *string
 
@@ -314,6 +317,9 @@ func (c *Client) addOperationCreateTableMiddlewares(stack *middleware.Stack, opt
 		return err
 	}
 	if err = addSetLegacyContextSigningOptionsMiddleware(stack); err != nil {
+		return err
+	}
+	if err = addTimeOffsetBuild(stack, c); err != nil {
 		return err
 	}
 	if err = addOpCreateTableValidationMiddleware(stack); err != nil {
