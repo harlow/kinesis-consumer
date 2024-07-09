@@ -49,6 +49,7 @@ type UpdateStreamModeInput struct {
 }
 
 func (in *UpdateStreamModeInput) bindEndpointParams(p *EndpointParameters) {
+
 	p.StreamARN = in.StreamARN
 	p.OperationType = ptr.String("control")
 }
@@ -113,6 +114,12 @@ func (c *Client) addOperationUpdateStreamModeMiddlewares(stack *middleware.Stack
 		return err
 	}
 	if err = addSetLegacyContextSigningOptionsMiddleware(stack); err != nil {
+		return err
+	}
+	if err = addTimeOffsetBuild(stack, c); err != nil {
+		return err
+	}
+	if err = addUserAgentRetryMode(stack, options); err != nil {
 		return err
 	}
 	if err = addOpUpdateStreamModeValidationMiddleware(stack); err != nil {

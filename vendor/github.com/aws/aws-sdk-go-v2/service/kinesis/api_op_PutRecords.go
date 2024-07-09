@@ -115,6 +115,7 @@ type PutRecordsInput struct {
 }
 
 func (in *PutRecordsInput) bindEndpointParams(p *EndpointParameters) {
+
 	p.StreamARN = in.StreamARN
 	p.OperationType = ptr.String("data")
 }
@@ -201,6 +202,12 @@ func (c *Client) addOperationPutRecordsMiddlewares(stack *middleware.Stack, opti
 		return err
 	}
 	if err = addSetLegacyContextSigningOptionsMiddleware(stack); err != nil {
+		return err
+	}
+	if err = addTimeOffsetBuild(stack, c); err != nil {
+		return err
+	}
+	if err = addUserAgentRetryMode(stack, options); err != nil {
 		return err
 	}
 	if err = addOpPutRecordsValidationMiddleware(stack); err != nil {

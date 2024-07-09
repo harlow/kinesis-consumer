@@ -75,6 +75,7 @@ type SubscribeToShardInput struct {
 }
 
 func (in *SubscribeToShardInput) bindEndpointParams(p *EndpointParameters) {
+
 	p.ConsumerARN = in.ConsumerARN
 	p.OperationType = ptr.String("data")
 }
@@ -143,6 +144,12 @@ func (c *Client) addOperationSubscribeToShardMiddlewares(stack *middleware.Stack
 		return err
 	}
 	if err = addSetLegacyContextSigningOptionsMiddleware(stack); err != nil {
+		return err
+	}
+	if err = addTimeOffsetBuild(stack, c); err != nil {
+		return err
+	}
+	if err = addUserAgentRetryMode(stack, options); err != nil {
 		return err
 	}
 	if err = addOpSubscribeToShardValidationMiddleware(stack); err != nil {

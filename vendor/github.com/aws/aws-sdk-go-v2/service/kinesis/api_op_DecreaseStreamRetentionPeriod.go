@@ -56,6 +56,7 @@ type DecreaseStreamRetentionPeriodInput struct {
 }
 
 func (in *DecreaseStreamRetentionPeriodInput) bindEndpointParams(p *EndpointParameters) {
+
 	p.StreamARN = in.StreamARN
 	p.OperationType = ptr.String("control")
 }
@@ -120,6 +121,12 @@ func (c *Client) addOperationDecreaseStreamRetentionPeriodMiddlewares(stack *mid
 		return err
 	}
 	if err = addSetLegacyContextSigningOptionsMiddleware(stack); err != nil {
+		return err
+	}
+	if err = addTimeOffsetBuild(stack, c); err != nil {
+		return err
+	}
+	if err = addUserAgentRetryMode(stack, options); err != nil {
 		return err
 	}
 	if err = addOpDecreaseStreamRetentionPeriodValidationMiddleware(stack); err != nil {

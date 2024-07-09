@@ -11,7 +11,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.24
 	github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue v1.14.1
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.32.8
-	github.com/aws/aws-sdk-go-v2/service/kinesis v1.27.8
+	github.com/aws/aws-sdk-go-v2/service/kinesis v1.29.1
 	github.com/awslabs/kinesis-aggregation/go/v2 v2.0.0-20230808105340-e631fe742486
 	github.com/go-sql-driver/mysql v1.8.1
 	github.com/lib/pq v1.10.9
@@ -23,7 +23,7 @@ require (
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/alicebob/gopher-json v0.0.0-20200520072559-a9ecdc9d1d3a // indirect
-	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.6.2 // indirect
+	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.6.3 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.16.9 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.3.13 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.6.13 // indirect
