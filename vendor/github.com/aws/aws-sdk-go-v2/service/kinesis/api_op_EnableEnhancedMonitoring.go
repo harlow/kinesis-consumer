@@ -73,6 +73,7 @@ type EnableEnhancedMonitoringInput struct {
 }
 
 func (in *EnableEnhancedMonitoringInput) bindEndpointParams(p *EndpointParameters) {
+
 	p.StreamARN = in.StreamARN
 	p.OperationType = ptr.String("control")
 }
@@ -153,6 +154,12 @@ func (c *Client) addOperationEnableEnhancedMonitoringMiddlewares(stack *middlewa
 		return err
 	}
 	if err = addSetLegacyContextSigningOptionsMiddleware(stack); err != nil {
+		return err
+	}
+	if err = addTimeOffsetBuild(stack, c); err != nil {
+		return err
+	}
+	if err = addUserAgentRetryMode(stack, options); err != nil {
 		return err
 	}
 	if err = addOpEnableEnhancedMonitoringValidationMiddleware(stack); err != nil {

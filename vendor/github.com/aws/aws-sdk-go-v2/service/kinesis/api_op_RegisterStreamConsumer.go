@@ -63,6 +63,7 @@ type RegisterStreamConsumerInput struct {
 }
 
 func (in *RegisterStreamConsumerInput) bindEndpointParams(p *EndpointParameters) {
+
 	p.StreamARN = in.StreamARN
 	p.OperationType = ptr.String("control")
 }
@@ -134,6 +135,12 @@ func (c *Client) addOperationRegisterStreamConsumerMiddlewares(stack *middleware
 		return err
 	}
 	if err = addSetLegacyContextSigningOptionsMiddleware(stack); err != nil {
+		return err
+	}
+	if err = addTimeOffsetBuild(stack, c); err != nil {
+		return err
+	}
+	if err = addUserAgentRetryMode(stack, options); err != nil {
 		return err
 	}
 	if err = addOpRegisterStreamConsumerValidationMiddleware(stack); err != nil {

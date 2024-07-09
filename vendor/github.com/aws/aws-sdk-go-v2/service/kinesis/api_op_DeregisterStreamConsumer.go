@@ -57,6 +57,7 @@ type DeregisterStreamConsumerInput struct {
 }
 
 func (in *DeregisterStreamConsumerInput) bindEndpointParams(p *EndpointParameters) {
+
 	p.StreamARN = in.StreamARN
 	p.ConsumerARN = in.ConsumerARN
 	p.OperationType = ptr.String("control")
@@ -122,6 +123,12 @@ func (c *Client) addOperationDeregisterStreamConsumerMiddlewares(stack *middlewa
 		return err
 	}
 	if err = addSetLegacyContextSigningOptionsMiddleware(stack); err != nil {
+		return err
+	}
+	if err = addTimeOffsetBuild(stack, c); err != nil {
+		return err
+	}
+	if err = addUserAgentRetryMode(stack, options); err != nil {
 		return err
 	}
 	if err = stack.Initialize.Add(newServiceMetadataMiddleware_opDeregisterStreamConsumer(options.Region), middleware.Before); err != nil {
