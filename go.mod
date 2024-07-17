@@ -11,7 +11,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.26
 	github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue v1.14.9
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.34.3
-	github.com/aws/aws-sdk-go-v2/service/kinesis v1.29.1
+	github.com/aws/aws-sdk-go-v2/service/kinesis v1.29.3
 	github.com/awslabs/kinesis-aggregation/go/v2 v2.0.0-20230808105340-e631fe742486
 	github.com/go-sql-driver/mysql v1.8.1
 	github.com/lib/pq v1.10.9
