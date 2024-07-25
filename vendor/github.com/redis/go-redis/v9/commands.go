@@ -220,7 +220,6 @@ type Cmdable interface {
 	ProbabilisticCmdable
 	PubSubCmdable
 	ScriptingFunctionsCmdable
-	SearchCmdable
 	SetCmdable
 	SortedSetCmdable
 	StringCmdable
