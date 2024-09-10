@@ -184,7 +184,7 @@ github.com/prometheus/client_golang/prometheus/internal
 # github.com/prometheus/client_model v0.6.1
 ## explicit; go 1.19
 github.com/prometheus/client_model/go
-# github.com/prometheus/common v0.55.0
+# github.com/prometheus/common v0.59.1
 ## explicit; go 1.20
 github.com/prometheus/common/expfmt
 github.com/prometheus/common/model
@@ -209,7 +209,7 @@ github.com/yuin/gopher-lua
 github.com/yuin/gopher-lua/ast
 github.com/yuin/gopher-lua/parse
 github.com/yuin/gopher-lua/pm
-# golang.org/x/sys v0.24.0
+# golang.org/x/sys v0.25.0
 ## explicit; go 1.18
 golang.org/x/sys/unix
 golang.org/x/sys/windows
