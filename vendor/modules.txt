@@ -48,11 +48,11 @@ github.com/aws/aws-sdk-go-v2/internal/timeconv
 ## explicit; go 1.21
 github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream
 github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream/eventstreamapi
-# github.com/aws/aws-sdk-go-v2/config v1.27.26
-## explicit; go 1.20
+# github.com/aws/aws-sdk-go-v2/config v1.27.33
+## explicit; go 1.21
 github.com/aws/aws-sdk-go-v2/config
-# github.com/aws/aws-sdk-go-v2/credentials v1.17.26
-## explicit; go 1.20
+# github.com/aws/aws-sdk-go-v2/credentials v1.17.32
+## explicit; go 1.21
 github.com/aws/aws-sdk-go-v2/credentials
 github.com/aws/aws-sdk-go-v2/credentials/ec2rolecreds
 github.com/aws/aws-sdk-go-v2/credentials/endpointcreds
@@ -63,8 +63,8 @@ github.com/aws/aws-sdk-go-v2/credentials/stscreds
 # github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue v1.15.3
 ## explicit; go 1.21
 github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue
-# github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.16.11
-## explicit; go 1.20
+# github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.16.13
+## explicit; go 1.21
 github.com/aws/aws-sdk-go-v2/feature/ec2/imds
 github.com/aws/aws-sdk-go-v2/feature/ec2/imds/internal/config
 # github.com/aws/aws-sdk-go-v2/internal/configsources v1.3.17
@@ -73,8 +73,8 @@ github.com/aws/aws-sdk-go-v2/internal/configsources
 # github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.6.17
 ## explicit; go 1.21
 github.com/aws/aws-sdk-go-v2/internal/endpoints/v2
-# github.com/aws/aws-sdk-go-v2/internal/ini v1.8.0
-## explicit; go 1.20
+# github.com/aws/aws-sdk-go-v2/internal/ini v1.8.1
+## explicit; go 1.21
 github.com/aws/aws-sdk-go-v2/internal/ini
 # github.com/aws/aws-sdk-go-v2/service/dynamodb v1.34.9
 ## explicit; go 1.21
@@ -91,8 +91,8 @@ github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding
 # github.com/aws/aws-sdk-go-v2/service/internal/endpoint-discovery v1.9.18
 ## explicit; go 1.21
 github.com/aws/aws-sdk-go-v2/service/internal/endpoint-discovery
-# github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.11.17
-## explicit; go 1.20
+# github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.11.19
+## explicit; go 1.21
 github.com/aws/aws-sdk-go-v2/service/internal/presigned-url
 # github.com/aws/aws-sdk-go-v2/service/kinesis v1.29.7
 ## explicit; go 1.21
@@ -105,13 +105,13 @@ github.com/aws/aws-sdk-go-v2/service/kinesis/types
 github.com/aws/aws-sdk-go-v2/service/sso
 github.com/aws/aws-sdk-go-v2/service/sso/internal/endpoints
 github.com/aws/aws-sdk-go-v2/service/sso/types
-# github.com/aws/aws-sdk-go-v2/service/ssooidc v1.26.4
-## explicit; go 1.20
+# github.com/aws/aws-sdk-go-v2/service/ssooidc v1.26.7
+## explicit; go 1.21
 github.com/aws/aws-sdk-go-v2/service/ssooidc
 github.com/aws/aws-sdk-go-v2/service/ssooidc/internal/endpoints
 github.com/aws/aws-sdk-go-v2/service/ssooidc/types
-# github.com/aws/aws-sdk-go-v2/service/sts v1.30.3
-## explicit; go 1.20
+# github.com/aws/aws-sdk-go-v2/service/sts v1.30.7
+## explicit; go 1.21
 github.com/aws/aws-sdk-go-v2/service/sts
 github.com/aws/aws-sdk-go-v2/service/sts/internal/endpoints
 github.com/aws/aws-sdk-go-v2/service/sts/types
