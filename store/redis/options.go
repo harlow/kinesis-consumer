@@ -6,7 +6,7 @@ import "github.com/redis/go-redis/v9"
 type Option func(*Checkpoint)
 
 // WithClient overrides the default client
-func WithClient(client *redis.Client) Option {
+func WithClient(client redis.UniversalClient) Option {
 	return func(c *Checkpoint) {
 		c.client = client
 	}

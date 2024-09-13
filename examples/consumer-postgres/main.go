@@ -4,7 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 
@@ -16,45 +16,50 @@ import (
 	store "github.com/alexgridx/kinesis-consumer/store/postgres"
 )
 
+var (
+	applicationName    = flag.String("application.name", "", "Consumer app name")
+	kinesisAWSRegion   = flag.String("kinesis.region", "us-west-2", "AWS Region")
+	kinesisEndpoint    = flag.String("kinesis.endpoint", "http://localhost:4567", "Kinesis endpoint")
+	kinesisStream      = flag.String("kinesis.stream", "", "Stream name")
+	postgresConnection = flag.String("postgres.connection", "", "Connection Str")
+	postgresTable      = flag.String("postgres.table", "", "Table name")
+)
+
 func main() {
-	var (
-		app             = flag.String("app", "", "Consumer app name")
-		stream          = flag.String("stream", "", "Stream name")
-		table           = flag.String("table", "", "Table name")
-		connStr         = flag.String("connection", "", "Connection Str")
-		kinesisEndpoint = flag.String("endpoint", "http://localhost:4567", "Kinesis endpoint")
-		awsRegion       = flag.String("region", "us-west-2", "AWS Region")
-	)
 	flag.Parse()
 
 	// postgres checkpoint
-	checkpointStore, err := store.New(*app, *table, *connStr)
+	checkpointStore, err := store.New(*applicationName, *postgresTable, *postgresConnection)
 	if err != nil {
-		log.Fatalf("checkpoint error: %v", err)
+		slog.Error("checkpoint error", slog.String("error", err.Error()))
+		os.Exit(1)
 	}
 
 	registry, ok := prometheus.DefaultRegisterer.(*prometheus.Registry)
 	if !ok {
-		log.Fatalf("could not get default prometheus registry")
+		slog.Error("prometheus error")
+		os.Exit(1)
 	}
 
 	// client
 	var client = kinesis.New(
 		kinesis.Options{
 			BaseEndpoint: kinesisEndpoint,
-			Region:       *awsRegion,
+			Region:       *kinesisAWSRegion,
 			Credentials:  credentials.NewStaticCredentialsProvider("user", "pass", "token"),
 		})
 
 	// consumer
 	c, err := consumer.New(
-		*stream,
+		*kinesisStream,
 		consumer.WithClient(client),
 		consumer.WithStore(checkpointStore),
 		consumer.WithMetricRegistry(registry),
+		consumer.WithLogger(slog.Default()),
 	)
 	if err != nil {
-		log.Fatalf("consumer error: %v", err)
+		slog.Error("consumer error", slog.String("error", err.Error()))
+		os.Exit(1)
 	}
 
 	// use cancel func to signal shutdown
@@ -76,10 +81,12 @@ func main() {
 	})
 
 	if err != nil {
-		log.Fatalf("scan error: %v", err)
+		slog.Error("scan error", slog.String("error", err.Error()))
+		os.Exit(1)
 	}
 
 	if err := checkpointStore.Shutdown(); err != nil {
-		log.Fatalf("store shutdown error: %v", err)
+		slog.Error("store shutdown error", slog.String("error", err.Error()))
+		os.Exit(1)
 	}
 }
