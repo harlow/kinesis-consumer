@@ -45,10 +45,10 @@ func New(appName string, opts ...Option) (*Checkpoint, error) {
 	return c, nil
 }
 
-// Checkpoint stores and retreives the last evaluated key from a DDB scan
+// Checkpoint stores and retrieves the last evaluated key from a DDB scan
 type Checkpoint struct {
 	appName string
-	client  *redis.Client
+	client  redis.UniversalClient
 }
 
 // GetCheckpoint fetches the checkpoint for a particular Shard.
@@ -59,7 +59,7 @@ func (c *Checkpoint) GetCheckpoint(streamName, shardID string) (string, error) {
 }
 
 // SetCheckpoint stores a checkpoint for a shard (e.g. sequence number of last record processed by application).
-// Upon failover, record processing is resumed from this point.
+// Upon fail over, record processing is resumed from this point.
 func (c *Checkpoint) SetCheckpoint(streamName, shardID, sequenceNumber string) error {
 	if sequenceNumber == "" {
 		return fmt.Errorf("sequence number should not be empty")

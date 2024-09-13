@@ -4,7 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 
@@ -15,53 +15,41 @@ import (
 	store "github.com/alexgridx/kinesis-consumer/store/redis"
 )
 
-// A myLogger provides a minimalistic logger satisfying the Logger interface.
-type myLogger struct {
-	logger *log.Logger
-}
-
-// Log logs the parameters to the stdlib logger. See log.Println.
-func (l *myLogger) Log(args ...interface{}) {
-	l.logger.Println(args...)
-}
+var (
+	applicationName  = flag.String("application.name", "", "Consumer app name")
+	kinesisAWSRegion = flag.String("kinesis.region", "us-west-2", "AWS Region")
+	kinesisEndpoint  = flag.String("kinesis.endpoint", "http://localhost:4567", "Kinesis endpoint")
+	kinesisStream    = flag.String("kinesis.stream", "", "Stream name")
+)
 
 func main() {
-	var (
-		app             = flag.String("app", "", "Consumer app name")
-		stream          = flag.String("stream", "", "Stream name")
-		kinesisEndpoint = flag.String("endpoint", "http://localhost:4567", "Kinesis endpoint")
-		awsRegion       = flag.String("region", "us-west-2", "AWS Region")
-	)
 	flag.Parse()
 
 	// redis checkpoint checkpointStore
-	checkpointStore, err := store.New(*app)
+	checkpointStore, err := store.New(*applicationName)
 	if err != nil {
-		log.Fatalf("checkpointStore error: %v", err)
-	}
-
-	// logger
-	logger := &myLogger{
-		logger: log.New(os.Stdout, "consumer-example: ", log.LstdFlags),
+		slog.Error("checkpoint store error", slog.String("error", err.Error()))
+		os.Exit(1)
 	}
 
 	// client
 	var client = kinesis.New(
 		kinesis.Options{
 			BaseEndpoint: kinesisEndpoint,
-			Region:       *awsRegion,
+			Region:       *kinesisAWSRegion,
 			Credentials:  credentials.NewStaticCredentialsProvider("user", "pass", "token"),
 		})
 
 	// consumer
 	c, err := consumer.New(
-		*stream,
+		*kinesisStream,
 		consumer.WithClient(client),
 		consumer.WithStore(checkpointStore),
-		consumer.WithLogger(logger),
+		consumer.WithLogger(slog.Default()),
 	)
 	if err != nil {
-		log.Fatalf("consumer error: %v", err)
+		slog.Error("consumer error", slog.String("error", err.Error()))
+		os.Exit(1)
 	}
 
 	// use cancel func to signal shutdown
@@ -83,6 +71,7 @@ func main() {
 		return nil // continue scanning
 	})
 	if err != nil {
-		log.Fatalf("scan error: %v", err)
+		slog.Error("scan error", slog.String("error", err.Error()))
+		os.Exit(1)
 	}
 }
