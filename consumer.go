@@ -90,7 +90,7 @@ type Consumer struct {
 type ScanFunc func(*Record) error
 
 // ErrSkipCheckpoint is used as a return value from ScanFunc to indicate that
-// the current checkpoint should be skipped skipped. It is not returned
+// the current checkpoint should be skipped. It is not returned
 // as an error by any function.
 var ErrSkipCheckpoint = errors.New("skip checkpoint")
 
@@ -146,10 +146,6 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 	}()
 
 	return <-errc
-}
-
-func (c *Consumer) scanSingleShard(ctx context.Context, shardID string, fn ScanFunc) error {
-	return nil
 }
 
 // ScanShard loops over records on a specific shard, calls the callback func
@@ -213,14 +209,12 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 					return nil
 				default:
 					err := fn(&Record{r, shardID, resp.MillisBehindLatest})
-					if err != nil && err != ErrSkipCheckpoint {
+					if err != nil && !errors.Is(err, ErrSkipCheckpoint) {
 						return err
 					}
 
-					if err != ErrSkipCheckpoint {
-						if err := c.group.SetCheckpoint(c.streamName, shardID, *r.SequenceNumber); err != nil {
-							return err
-						}
+					if err := c.group.SetCheckpoint(c.streamName, shardID, *r.SequenceNumber); err != nil {
+						return err
 					}
 
 					c.counter.Add("records", 1)
@@ -284,7 +278,7 @@ func (c *Consumer) getShardIterator(ctx context.Context, streamName, shardID, se
 		params.ShardIteratorType = types.ShardIteratorTypeAtTimestamp
 		params.Timestamp = c.initialTimestamp
 	} else {
-		params.ShardIteratorType = types.ShardIteratorType(c.initialShardIteratorType)
+		params.ShardIteratorType = c.initialShardIteratorType
 	}
 
 	res, err := c.client.GetShardIterator(ctx, params)
@@ -295,10 +289,10 @@ func (c *Consumer) getShardIterator(ctx context.Context, streamName, shardID, se
 }
 
 func isRetriableError(err error) bool {
-	switch err.(type) {
-	case *types.ExpiredIteratorException:
+	if oe := (*types.ExpiredIteratorException)(nil); errors.As(err, &oe) {
 		return true
-	case *types.ProvisionedThroughputExceededException:
+	}
+	if oe := (*types.ProvisionedThroughputExceededException)(nil); errors.As(err, &oe) {
 		return true
 	}
 	return false
