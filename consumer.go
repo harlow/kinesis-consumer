@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"sync"
 	"time"
@@ -38,7 +38,7 @@ func New(streamName string, opts ...Option) (*Consumer, error) {
 		store:                    &noopStore{},
 		counter:                  &noopCounter{},
 		logger: &noopLogger{
-			logger: log.New(ioutil.Discard, "", log.LstdFlags),
+			logger: log.New(io.Discard, "", log.LstdFlags),
 		},
 		scanInterval: 250 * time.Millisecond,
 		maxRecords:   10000,
@@ -90,7 +90,7 @@ type Consumer struct {
 type ScanFunc func(*Record) error
 
 // ErrSkipCheckpoint is used as a return value from ScanFunc to indicate that
-// the current checkpoint should be skipped skipped. It is not returned
+// the current checkpoint should be skipped. It is not returned
 // as an error by any function.
 var ErrSkipCheckpoint = errors.New("skip checkpoint")
 
@@ -102,25 +102,35 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 	defer cancel()
 
 	var (
-		errc   = make(chan error, 1)
-		shardc = make(chan types.Shard, 1)
+		errC   = make(chan error, 1)
+		shardC = make(chan types.Shard, 1)
 	)
 
 	go func() {
-		err := c.group.Start(ctx, shardc)
+		err := c.group.Start(ctx, shardC)
 		if err != nil {
-			errc <- fmt.Errorf("error starting scan: %w", err)
+			errC <- fmt.Errorf("error starting scan: %w", err)
 			cancel()
 		}
 		<-ctx.Done()
-		close(shardc)
+		close(shardC)
 	}()
 
 	wg := new(sync.WaitGroup)
 	// process each of the shards
-	for shard := range shardc {
+	shardsInProcess := make(map[string]struct{})
+	for shard := range shardC {
+		shardId := aws.ToString(shard.ShardId)
+		if _, ok := shardsInProcess[shardId]; ok {
+			// safetynet: if shard already in process by another goroutine, just skipping the request
+			continue
+		}
 		wg.Add(1)
 		go func(shardID string) {
+			shardsInProcess[shardID] = struct{}{}
+			defer func() {
+				delete(shardsInProcess, shardID)
+			}()
 			defer wg.Done()
 			var err error
 			if err = c.ScanShard(ctx, shardID, fn); err != nil {
@@ -132,24 +142,20 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 			}
 			if err != nil {
 				select {
-				case errc <- fmt.Errorf("shard %s error: %w", shardID, err):
+				case errC <- fmt.Errorf("shard %s error: %w", shardID, err):
 					cancel()
 				default:
 				}
 			}
-		}(aws.ToString(shard.ShardId))
+		}(shardId)
 	}
 
 	go func() {
 		wg.Wait()
-		close(errc)
+		close(errC)
 	}()
 
-	return <-errc
-}
-
-func (c *Consumer) scanSingleShard(ctx context.Context, shardID string, fn ScanFunc) error {
-	return nil
+	return <-errC
 }
 
 // ScanShard loops over records on a specific shard, calls the callback func
@@ -213,14 +219,12 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 					return nil
 				default:
 					err := fn(&Record{r, shardID, resp.MillisBehindLatest})
-					if err != nil && err != ErrSkipCheckpoint {
+					if err != nil && !errors.Is(err, ErrSkipCheckpoint) {
 						return err
 					}
 
-					if err != ErrSkipCheckpoint {
-						if err := c.group.SetCheckpoint(c.streamName, shardID, *r.SequenceNumber); err != nil {
-							return err
-						}
+					if err := c.group.SetCheckpoint(c.streamName, shardID, *r.SequenceNumber); err != nil {
+						return err
 					}
 
 					c.counter.Add("records", 1)
@@ -284,7 +288,7 @@ func (c *Consumer) getShardIterator(ctx context.Context, streamName, shardID, se
 		params.ShardIteratorType = types.ShardIteratorTypeAtTimestamp
 		params.Timestamp = c.initialTimestamp
 	} else {
-		params.ShardIteratorType = types.ShardIteratorType(c.initialShardIteratorType)
+		params.ShardIteratorType = c.initialShardIteratorType
 	}
 
 	res, err := c.client.GetShardIterator(ctx, params)
