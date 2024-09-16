@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"sync"
 	"time"
@@ -38,7 +38,7 @@ func New(streamName string, opts ...Option) (*Consumer, error) {
 		store:                    &noopStore{},
 		counter:                  &noopCounter{},
 		logger: &noopLogger{
-			logger: log.New(ioutil.Discard, "", log.LstdFlags),
+			logger: log.New(io.Discard, "", log.LstdFlags),
 		},
 		scanInterval: 250 * time.Millisecond,
 		maxRecords:   10000,
@@ -102,25 +102,35 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 	defer cancel()
 
 	var (
-		errc   = make(chan error, 1)
-		shardc = make(chan types.Shard, 1)
+		errC   = make(chan error, 1)
+		shardC = make(chan types.Shard, 1)
 	)
 
 	go func() {
-		err := c.group.Start(ctx, shardc)
+		err := c.group.Start(ctx, shardC)
 		if err != nil {
-			errc <- fmt.Errorf("error starting scan: %w", err)
+			errC <- fmt.Errorf("error starting scan: %w", err)
 			cancel()
 		}
 		<-ctx.Done()
-		close(shardc)
+		close(shardC)
 	}()
 
 	wg := new(sync.WaitGroup)
 	// process each of the shards
-	for shard := range shardc {
+	shardsInProcess := make(map[string]struct{})
+	for shard := range shardC {
+		shardId := aws.ToString(shard.ShardId)
+		if _, ok := shardsInProcess[shardId]; ok {
+			// safetynet: if shard already in process by another goroutine, just skipping the request
+			continue
+		}
 		wg.Add(1)
 		go func(shardID string) {
+			shardsInProcess[shardID] = struct{}{}
+			defer func() {
+				delete(shardsInProcess, shardID)
+			}()
 			defer wg.Done()
 			var err error
 			if err = c.ScanShard(ctx, shardID, fn); err != nil {
@@ -132,20 +142,20 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 			}
 			if err != nil {
 				select {
-				case errc <- fmt.Errorf("shard %s error: %w", shardID, err):
+				case errC <- fmt.Errorf("shard %s error: %w", shardID, err):
 					cancel()
 				default:
 				}
 			}
-		}(aws.ToString(shard.ShardId))
+		}(shardId)
 	}
 
 	go func() {
 		wg.Wait()
-		close(errc)
+		close(errC)
 	}()
 
-	return <-errc
+	return <-errC
 }
 
 // ScanShard loops over records on a specific shard, calls the callback func

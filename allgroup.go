@@ -38,7 +38,7 @@ type AllGroup struct {
 
 // Start is a blocking operation which will loop and attempt to find new
 // shards on a regular cadence.
-func (g *AllGroup) Start(ctx context.Context, shardc chan types.Shard) error {
+func (g *AllGroup) Start(ctx context.Context, shardC chan types.Shard) error {
 	// Note: while ticker is a rather naive approach to this problem,
 	// it actually simplifies a few things. I.e. If we miss a new shard
 	// while AWS is resharding, we'll pick it up max 30 seconds later.
@@ -51,7 +51,7 @@ func (g *AllGroup) Start(ctx context.Context, shardc chan types.Shard) error {
 	var ticker = time.NewTicker(30 * time.Second)
 
 	for {
-		if err := g.findNewShards(ctx, shardc); err != nil {
+		if err := g.findNewShards(ctx, shardC); err != nil {
 			ticker.Stop()
 			return err
 		}
@@ -94,7 +94,7 @@ func waitForCloseChannel(ctx context.Context, c <-chan struct{}) bool {
 // findNewShards pulls the list of shards from the Kinesis API
 // and uses a local cache to determine if we are already processing
 // a particular shard.
-func (g *AllGroup) findNewShards(ctx context.Context, shardc chan types.Shard) error {
+func (g *AllGroup) findNewShards(ctx context.Context, shardC chan types.Shard) error {
 	g.shardMu.Lock()
 	defer g.shardMu.Unlock()
 
@@ -110,14 +110,17 @@ func (g *AllGroup) findNewShards(ctx context.Context, shardc chan types.Shard) e
 	// channels before we start using any of them.  It's highly probable
 	// that Kinesis provides us the shards in dependency order (parents
 	// before children), but it doesn't appear to be a guarantee.
+	newShards := make(map[string]types.Shard)
 	for _, shard := range shards {
 		if _, ok := g.shards[*shard.ShardId]; ok {
 			continue
 		}
 		g.shards[*shard.ShardId] = shard
 		g.shardsClosed[*shard.ShardId] = make(chan struct{})
+		newShards[*shard.ShardId] = shard
 	}
-	for _, shard := range shards {
+	// only new shards need to be checked for parent dependencies
+	for _, shard := range newShards {
 		shard := shard // Shadow shard, since we use it in goroutine
 		var parent1, parent2 <-chan struct{}
 		if shard.ParentShardId != nil {
@@ -133,7 +136,7 @@ func (g *AllGroup) findNewShards(ctx context.Context, shardc chan types.Shard) e
 			// but when splits or joins happen, we need to process all parents prior
 			// to processing children or that ordering guarantee is not maintained.
 			if waitForCloseChannel(ctx, parent1) && waitForCloseChannel(ctx, parent2) {
-				shardc <- shard
+				shardC <- shard
 			}
 		}()
 	}
