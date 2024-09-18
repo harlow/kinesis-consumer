@@ -3,6 +3,7 @@
 package redis
 
 import (
+	"context"
 	"testing"
 
 	"github.com/alicebob/miniredis"
@@ -34,10 +35,10 @@ func Test_CheckpointLifecycle(t *testing.T) {
 	}
 
 	// set
-	_ = c.SetCheckpoint("streamName", "shardID", "testSeqNum")
+	_ = c.SetCheckpoint(context.Background(), "streamName", "shardID", "testSeqNum")
 
 	// get
-	val, err := c.GetCheckpoint("streamName", "shardID")
+	val, err := c.GetCheckpoint(context.Background(), "streamName", "shardID")
 	if err != nil {
 		t.Fatalf("get checkpoint error: %v", err)
 	}
@@ -52,7 +53,7 @@ func Test_SetEmptySeqNum(t *testing.T) {
 		t.Fatalf("new checkpoint error: %v", err)
 	}
 
-	err = c.SetCheckpoint("streamName", "shardID", "")
+	err = c.SetCheckpoint(context.Background(), "streamName", "shardID", "")
 	if err == nil {
 		t.Fatalf("should not allow empty sequence number")
 	}

@@ -85,7 +85,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := checkpointStore.Shutdown(); err != nil {
+	if err := checkpointStore.Shutdown(context.Background()); err != nil {
 		slog.Error("store shutdown error", slog.String("error", err.Error()))
 		os.Exit(1)
 	}

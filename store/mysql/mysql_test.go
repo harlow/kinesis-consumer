@@ -1,6 +1,7 @@
 package mysql
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"testing"
@@ -73,6 +74,7 @@ func TestNew_WithMaxIntervalOption(t *testing.T) {
 }
 
 func TestCheckpoint_GetCheckpoint(t *testing.T) {
+	ctx := context.Background()
 	appName := "streamConsumer"
 	tableName := "checkpoint"
 	connString := "user:password@/dbname"
@@ -98,7 +100,7 @@ func TestCheckpoint_GetCheckpoint(t *testing.T) {
 		tableName)
 	mock.ExpectQuery(expectedSQLRegexString).WithArgs(namespace, shardID).WillReturnRows(expectedRows)
 
-	gotSequenceNumber, err := ck.GetCheckpoint(streamName, shardID)
+	gotSequenceNumber, err := ck.GetCheckpoint(ctx, streamName, shardID)
 
 	if gotSequenceNumber != expectedSequenceNumber {
 		t.Errorf("expected sequence number equals %v, but got %v", expectedSequenceNumber, gotSequenceNumber)
@@ -113,6 +115,7 @@ func TestCheckpoint_GetCheckpoint(t *testing.T) {
 }
 
 func TestCheckpoint_Get_NoRows(t *testing.T) {
+	ctx := context.Background()
 	appName := "streamConsumer"
 	tableName := "checkpoint"
 	connString := "user:password@/dbname"
@@ -134,7 +137,7 @@ func TestCheckpoint_Get_NoRows(t *testing.T) {
 		tableName)
 	mock.ExpectQuery(expectedSQLRegexString).WithArgs(namespace, shardID).WillReturnError(sql.ErrNoRows)
 
-	gotSequenceNumber, err := ck.GetCheckpoint(streamName, shardID)
+	gotSequenceNumber, err := ck.GetCheckpoint(ctx, streamName, shardID)
 
 	if gotSequenceNumber != "" {
 		t.Errorf("expected sequence number equals empty, but got %v", gotSequenceNumber)
@@ -149,6 +152,7 @@ func TestCheckpoint_Get_NoRows(t *testing.T) {
 }
 
 func TestCheckpoint_Get_QueryError(t *testing.T) {
+	ctx := context.Background()
 	appName := "streamConsumer"
 	tableName := "checkpoint"
 	connString := "user:password@/dbname"
@@ -170,7 +174,7 @@ func TestCheckpoint_Get_QueryError(t *testing.T) {
 		tableName)
 	mock.ExpectQuery(expectedSQLRegexString).WithArgs(namespace, shardID).WillReturnError(errors.New("an error"))
 
-	gotSequenceNumber, err := ck.GetCheckpoint(streamName, shardID)
+	gotSequenceNumber, err := ck.GetCheckpoint(ctx, streamName, shardID)
 
 	if gotSequenceNumber != "" {
 		t.Errorf("expected sequence number equals empty, but got %v", gotSequenceNumber)
@@ -185,6 +189,7 @@ func TestCheckpoint_Get_QueryError(t *testing.T) {
 }
 
 func TestCheckpoint_SetCheckpoint(t *testing.T) {
+	ctx := context.Background()
 	appName := "streamConsumer"
 	tableName := "checkpoint"
 	connString := "user:password@/dbname"
@@ -197,7 +202,7 @@ func TestCheckpoint_SetCheckpoint(t *testing.T) {
 		t.Fatalf("error occurred during the checkpoint creation. cause: %v", err)
 	}
 
-	err = ck.SetCheckpoint(streamName, shardID, expectedSequenceNumber)
+	err = ck.SetCheckpoint(ctx, streamName, shardID, expectedSequenceNumber)
 
 	if err != nil {
 		t.Errorf("expected error equals nil, but got %v", err)
@@ -206,6 +211,7 @@ func TestCheckpoint_SetCheckpoint(t *testing.T) {
 }
 
 func TestCheckpoint_Set_SequenceNumberEmpty(t *testing.T) {
+	ctx := context.Background()
 	appName := "streamConsumer"
 	tableName := "checkpoint"
 	connString := "user:password@/dbname"
@@ -218,7 +224,7 @@ func TestCheckpoint_Set_SequenceNumberEmpty(t *testing.T) {
 		t.Fatalf("error occurred during the checkpoint creation. cause: %v", err)
 	}
 
-	err = ck.SetCheckpoint(streamName, shardID, expectedSequenceNumber)
+	err = ck.SetCheckpoint(ctx, streamName, shardID, expectedSequenceNumber)
 
 	if err == nil {
 		t.Errorf("expected error equals not nil, but got %v", err)
@@ -227,6 +233,7 @@ func TestCheckpoint_Set_SequenceNumberEmpty(t *testing.T) {
 }
 
 func TestCheckpoint_Shutdown(t *testing.T) {
+	ctx := context.Background()
 	appName := "streamConsumer"
 	tableName := "checkpoint"
 	connString := "user:password@/dbname"
@@ -249,7 +256,7 @@ func TestCheckpoint_Shutdown(t *testing.T) {
 	result := sqlmock.NewResult(0, 1)
 	mock.ExpectExec(expectedSQLRegexString).WithArgs(namespace, shardID, expectedSequenceNumber).WillReturnResult(result)
 
-	err = ck.SetCheckpoint(streamName, shardID, expectedSequenceNumber)
+	err = ck.SetCheckpoint(ctx, streamName, shardID, expectedSequenceNumber)
 
 	if err != nil {
 		t.Fatalf("unable to set checkpoint for data initialization. cause: %v", err)
@@ -266,6 +273,7 @@ func TestCheckpoint_Shutdown(t *testing.T) {
 }
 
 func TestCheckpoint_Shutdown_SaveError(t *testing.T) {
+	ctx := context.Background()
 	appName := "streamConsumer"
 	tableName := "checkpoint"
 	connString := "user:password@/dbname"
@@ -287,7 +295,7 @@ func TestCheckpoint_Shutdown_SaveError(t *testing.T) {
 	expectedSQLRegexString := fmt.Sprintf(`REPLACE INTO %s \(namespace, shard_id, sequence_number\) VALUES \(\?, \?, \?\)`, tableName)
 	mock.ExpectExec(expectedSQLRegexString).WithArgs(namespace, shardID, expectedSequenceNumber).WillReturnError(errors.New("an error"))
 
-	err = ck.SetCheckpoint(streamName, shardID, expectedSequenceNumber)
+	err = ck.SetCheckpoint(ctx, streamName, shardID, expectedSequenceNumber)
 
 	if err != nil {
 		t.Fatalf("unable to set checkpoint for data initialization. cause: %v", err)
