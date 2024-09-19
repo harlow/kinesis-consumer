@@ -46,6 +46,7 @@ func main() {
 		consumer.WithClient(client),
 		consumer.WithStore(checkpointStore),
 		consumer.WithLogger(slog.Default()),
+		consumer.WithParallelProcessing(2),
 	)
 	if err != nil {
 		slog.Error("consumer error", slog.String("error", err.Error()))

@@ -43,6 +43,7 @@ func New(streamName string, opts ...Option) (*Consumer, error) {
 		scanInterval:             250 * time.Millisecond,
 		maxRecords:               10000,
 		metricRegistry:           nil,
+		numWorkers:               1,
 	}
 
 	// override defaults
@@ -93,6 +94,8 @@ type Consumer struct {
 	maxRecords         int64
 	isAggregated       bool
 	shardClosedHandler ShardClosedHandler
+	numWorkers         int
+	workerPool         WorkerPool
 }
 
 // ScanFunc is the type of the function called for each message read
@@ -115,25 +118,25 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 	defer cancel()
 
 	var (
-		errc   = make(chan error, 1)
-		shardc = make(chan types.Shard, 1)
+		errC   = make(chan error, 1)
+		shardC = make(chan types.Shard, 1)
 	)
 
 	go func() {
-		c.group.Start(ctx, shardc)
+		c.group.Start(ctx, shardC)
 		<-ctx.Done()
-		close(shardc)
+		close(shardC)
 	}()
 
 	wg := new(sync.WaitGroup)
 	// process each of the shards
-	for shard := range shardc {
+	for shard := range shardC {
 		wg.Add(1)
 		go func(shardID string) {
 			defer wg.Done()
 			if err := c.ScanShard(ctx, shardID, fn); err != nil {
 				select {
-				case errc <- fmt.Errorf("shard %s error: %w", shardID, err):
+				case errC <- fmt.Errorf("shard %s error: %w", shardID, err):
 					// first error to occur
 					cancel()
 				default:
@@ -145,15 +148,19 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 
 	go func() {
 		wg.Wait()
-		close(errc)
+		close(errC)
 	}()
 
-	return <-errc
+	return <-errC
 }
 
 // ScanShard loops over records on a specific shard, calls the callback func
 // for each record and checkpoints the progress of scan.
 func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) error {
+	wp := NewWorkerPool(c.streamName, c.numWorkers, fn)
+	wp.Start(ctx)
+	defer wp.Stop()
+
 	// get last seq number from checkpoint
 	lastSeqNum, err := c.group.GetCheckpoint(ctx, c.streamName, shardID)
 	if err != nil {
@@ -211,7 +218,14 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 				case <-ctx.Done():
 					return nil
 				default:
-					err := fn(&Record{r, shardID, resp.MillisBehindLatest})
+					record := Record{r, shardID, resp.MillisBehindLatest}
+					wp.Submit(record)
+
+					res := wp.Result()
+					var err error
+					if res != nil && res.Err != nil {
+						err = res.Err
+					}
 
 					secondsBehindLatest := float64(time.Duration(*resp.MillisBehindLatest)*time.Millisecond) / float64(time.Second)
 					collectorMillisBehindLatest.

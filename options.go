@@ -91,6 +91,13 @@ func WithAggregation(a bool) Option {
 	}
 }
 
+// WithParallelProcessing sets the size of the Worker Pool that processes incoming requests. Defaults to 1
+func WithParallelProcessing(numWorkers int) Option {
+	return func(c *Consumer) {
+		c.numWorkers = numWorkers
+	}
+}
+
 // WithShardClosedHandler defines a custom handler for closed shards.
 func WithShardClosedHandler(h ShardClosedHandler) Option {
 	return func(c *Consumer) {
