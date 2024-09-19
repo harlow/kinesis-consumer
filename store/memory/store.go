@@ -6,6 +6,7 @@
 package store
 
 import (
+	"context"
 	"fmt"
 	"sync"
 )
@@ -21,7 +22,7 @@ type Store struct {
 }
 
 // SetCheckpoint stores a checkpoint for a shard (e.g. sequence number of last record processed by application).
-func (c *Store) SetCheckpoint(streamName, shardID, sequenceNumber string) error {
+func (c *Store) SetCheckpoint(_ context.Context, streamName, shardID, sequenceNumber string) error {
 	if sequenceNumber == "" {
 		return fmt.Errorf("sequence number should not be empty")
 	}
@@ -32,7 +33,7 @@ func (c *Store) SetCheckpoint(streamName, shardID, sequenceNumber string) error 
 // GetCheckpoint determines if a checkpoint for a particular Shard exists.
 // Typically, this is used to determine whether processing should start with TRIM_HORIZON or AFTER_SEQUENCE_NUMBER
 // (if checkpoint exists).
-func (c *Store) GetCheckpoint(streamName, shardID string) (string, error) {
+func (c *Store) GetCheckpoint(_ context.Context, streamName, shardID string) (string, error) {
 	val, ok := c.Load(streamName + ":" + shardID)
 	if !ok {
 		return "", nil

@@ -1,6 +1,7 @@
 package mysql
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -81,12 +82,12 @@ func (c *Checkpoint) GetMaxInterval() time.Duration {
 // GetCheckpoint determines if a checkpoint for a particular Shard exists.
 // Typically used to determine whether we should start processing the shard with
 // TRIM_HORIZON or AFTER_SEQUENCE_NUMBER (if checkpoint exists).
-func (c *Checkpoint) GetCheckpoint(streamName, shardID string) (string, error) {
+func (c *Checkpoint) GetCheckpoint(ctx context.Context, streamName, shardID string) (string, error) {
 	namespace := fmt.Sprintf("%s-%s", c.appName, streamName)
 
 	var sequenceNumber string
 	getCheckpointQuery := fmt.Sprintf(`SELECT sequence_number FROM %s WHERE namespace=? AND shard_id=?;`, c.tableName) // nolint: gas, it replaces only the table name
-	err := c.conn.QueryRow(getCheckpointQuery, namespace, shardID).Scan(&sequenceNumber)
+	err := c.conn.QueryRowContext(ctx, getCheckpointQuery, namespace, shardID).Scan(&sequenceNumber)
 
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -100,7 +101,7 @@ func (c *Checkpoint) GetCheckpoint(streamName, shardID string) (string, error) {
 
 // SetCheckpoint stores a checkpoint for a shard (e.g. sequence number of last record processed by application).
 // Upon fail over, record processing is resumed from this point.
-func (c *Checkpoint) SetCheckpoint(streamName, shardID, sequenceNumber string) error {
+func (c *Checkpoint) SetCheckpoint(_ context.Context, streamName, shardID, sequenceNumber string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 

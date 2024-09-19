@@ -52,19 +52,17 @@ type Checkpoint struct {
 }
 
 // GetCheckpoint fetches the checkpoint for a particular Shard.
-func (c *Checkpoint) GetCheckpoint(streamName, shardID string) (string, error) {
-	ctx := context.Background()
+func (c *Checkpoint) GetCheckpoint(ctx context.Context, streamName, shardID string) (string, error) {
 	val, _ := c.client.Get(ctx, c.key(streamName, shardID)).Result()
 	return val, nil
 }
 
 // SetCheckpoint stores a checkpoint for a shard (e.g. sequence number of last record processed by application).
 // Upon fail over, record processing is resumed from this point.
-func (c *Checkpoint) SetCheckpoint(streamName, shardID, sequenceNumber string) error {
+func (c *Checkpoint) SetCheckpoint(ctx context.Context, streamName, shardID, sequenceNumber string) error {
 	if sequenceNumber == "" {
 		return fmt.Errorf("sequence number should not be empty")
 	}
-	ctx := context.Background()
 	err := c.client.Set(ctx, c.key(streamName, shardID), sequenceNumber, 0).Err()
 	if err != nil {
 		return err

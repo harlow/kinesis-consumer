@@ -7,14 +7,13 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"time"
 
-	alog "github.com/apex/log"
-	"github.com/apex/log/handlers/text"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
@@ -38,25 +37,7 @@ func init() {
 	}()
 }
 
-// A myLogger provides a minimalistic logger satisfying the Logger interface.
-type myLogger struct {
-	logger alog.Logger
-}
-
-// Log logs the parameters to the stdlib logger. See log.Println.
-func (l *myLogger) Log(args ...interface{}) {
-	l.logger.Infof("producer: %v", args...)
-}
-
 func main() {
-	// Wrap myLogger around  apex logger
-	myLog := &myLogger{
-		logger: alog.Logger{
-			Handler: text.New(os.Stdout),
-			Level:   alog.DebugLevel,
-		},
-	}
-
 	var (
 		app             = flag.String("app", "", "Consumer app name")
 		stream          = flag.String("stream", "", "Stream name")
@@ -100,7 +81,7 @@ func main() {
 	c, err := consumer.New(
 		*stream,
 		consumer.WithStore(ddb),
-		consumer.WithLogger(myLog),
+		consumer.WithLogger(slog.Default()),
 		consumer.WithCounter(counter),
 		consumer.WithClient(client),
 	)
@@ -129,7 +110,7 @@ func main() {
 		log.Fatalf("scan error: %v", err)
 	}
 
-	if err := ddb.Shutdown(); err != nil {
+	if err := ddb.Shutdown(ctx); err != nil {
 		log.Fatalf("storage shutdown error: %v", err)
 	}
 }

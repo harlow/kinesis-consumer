@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -88,12 +89,12 @@ func (c *Checkpoint) GetMaxInterval() time.Duration {
 // GetCheckpoint determines if a checkpoint for a particular Shard exists.
 // Typically used to determine whether we should start processing the shard with
 // TRIM_HORIZON or AFTER_SEQUENCE_NUMBER (if checkpoint exists).
-func (c *Checkpoint) GetCheckpoint(streamName, shardID string) (string, error) {
+func (c *Checkpoint) GetCheckpoint(ctx context.Context, streamName, shardID string) (string, error) {
 	namespace := fmt.Sprintf("%s-%s", c.appName, streamName)
 
 	var sequenceNumber string
 	getCheckpointQuery := fmt.Sprintf(`SELECT sequence_number FROM %s WHERE namespace=$1 AND shard_id=$2;`, c.tableName) // nolint: gas, it replaces only the table name
-	err := c.conn.QueryRow(getCheckpointQuery, namespace, shardID).Scan(&sequenceNumber)
+	err := c.conn.QueryRowContext(ctx, getCheckpointQuery, namespace, shardID).Scan(&sequenceNumber)
 
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -107,7 +108,7 @@ func (c *Checkpoint) GetCheckpoint(streamName, shardID string) (string, error) {
 
 // SetCheckpoint stores a checkpoint for a shard (e.g. sequence number of last record processed by application).
 // Upon fail over, record processing is resumed from this point.
-func (c *Checkpoint) SetCheckpoint(streamName, shardID, sequenceNumber string) error {
+func (c *Checkpoint) SetCheckpoint(_ context.Context, streamName, shardID, sequenceNumber string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -126,15 +127,16 @@ func (c *Checkpoint) SetCheckpoint(streamName, shardID, sequenceNumber string) e
 }
 
 // Shutdown the checkpoint. Save any in-flight data.
-func (c *Checkpoint) Shutdown() error {
+func (c *Checkpoint) Shutdown(ctx context.Context) error {
 	defer c.conn.Close()
 
 	c.done <- struct{}{}
 
-	return c.save()
+	return c.save(ctx)
 }
 
 func (c *Checkpoint) loop() {
+	ctx := context.Background()
 	tick := time.NewTicker(c.maxInterval)
 	defer tick.Stop()
 	defer close(c.done)
@@ -142,14 +144,14 @@ func (c *Checkpoint) loop() {
 	for {
 		select {
 		case <-tick.C:
-			_ = c.save()
+			_ = c.save(ctx)
 		case <-c.done:
 			return
 		}
 	}
 }
 
-func (c *Checkpoint) save() error {
+func (c *Checkpoint) save(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -159,10 +161,10 @@ func (c *Checkpoint) save() error {
 						ON CONFLICT (namespace, shard_id)
 						DO
 						UPDATE
-						SET sequence_number= $3;`, c.tableName)
+						SET sequence_number=$3;`, c.tableName)
 
 	for key, sequenceNumber := range c.checkpoints {
-		if _, err := c.conn.Exec(upsertCheckpoint, fmt.Sprintf("%s-%s", c.appName, key.streamName), key.shardID, sequenceNumber); err != nil {
+		if _, err := c.conn.ExecContext(ctx, upsertCheckpoint, fmt.Sprintf("%s-%s", c.appName, key.streamName), key.shardID, sequenceNumber); err != nil {
 			return err
 		}
 	}
