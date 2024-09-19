@@ -66,12 +66,12 @@ func New(streamName string, opts ...Option) (*Consumer, error) {
 	}
 
 	if c.metricRegistry != nil {
-		var err error
-		errors.Join(err, c.metricRegistry.Register(collectorMillisBehindLatest))
-		errors.Join(err, c.metricRegistry.Register(counterEventsConsumed))
-		errors.Join(err, c.metricRegistry.Register(counterCheckpointsWritten))
-		if err != nil {
-			return nil, err
+		var errs error
+		errs = errors.Join(errs, c.metricRegistry.Register(collectorMillisBehindLatest))
+		errs = errors.Join(errs, c.metricRegistry.Register(counterEventsConsumed))
+		errs = errors.Join(errs, c.metricRegistry.Register(counterCheckpointsWritten))
+		if errs != nil {
+			return nil, errs
 		}
 	}
 
