@@ -39,4 +39,37 @@ var (
 		labelStreamName,
 		labelShardID,
 	})
+
+	gaugeBatchSize = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace:   "net",
+		Subsystem:   "kinesis",
+		Name:        "get_records_result_size",
+		Help:        "number of records received from a call to get results",
+		ConstLabels: nil,
+	}, []string{
+		labelStreamName,
+		labelShardID,
+	})
+
+	histogramBatchDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: "net",
+		Subsystem: "kinesis",
+		Name:      "records_processing_duration",
+		Help:      "time in seconds it takes to process all of the records that were returned from a get records call",
+		Buckets:   []float64{0.1, 0.5, 1, 3, 5, 10, 30, 60},
+	}, []string{
+		labelStreamName,
+		labelShardID,
+	})
+
+	histogramAverageRecordDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: "net",
+		Subsystem: "kinesis",
+		Name:      "average_record_processing_duration",
+		Help:      "average time in seconds it takes to process a single record in a batch",
+		Buckets:   []float64{0.003, 0.005, 0.01, 0.025, 0.05, 0.1, 1, 3},
+	}, []string{
+		labelStreamName,
+		labelShardID,
+	})
 )
