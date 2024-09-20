@@ -55,12 +55,12 @@ func (wp *WorkerPool) Submit(r Record) {
 }
 
 // Result returns the Result of the Submit-ed Record after it has been processed.
-func (wp *WorkerPool) Result() (Result, error) {
+func (wp *WorkerPool) Result() (*Result, error) {
 	select {
 	case r := <-wp.resultC:
-		return r, r.err
+		return &r, r.err
 	default:
-		return Result{}, nil
+		return nil, nil
 	}
 }
 
