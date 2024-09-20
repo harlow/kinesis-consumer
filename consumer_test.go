@@ -39,8 +39,9 @@ func TestScan(t *testing.T) {
 		},
 		getRecordsMock: func(_ context.Context, _ *kinesis.GetRecordsInput, _ ...func(*kinesis.Options)) (*kinesis.GetRecordsOutput, error) {
 			return &kinesis.GetRecordsOutput{
-				NextShardIterator: nil,
-				Records:           records,
+				NextShardIterator:  nil,
+				Records:            records,
+				MillisBehindLatest: aws.Int64(int64(1000)),
 			}, nil
 		},
 		listShardsMock: func(_ context.Context, _ *kinesis.ListShardsInput, _ ...func(*kinesis.Options)) (*kinesis.ListShardsOutput, error) {
@@ -92,7 +93,7 @@ func TestScan(t *testing.T) {
 		t.Errorf("counter error expected %d, got %d", 2, val)
 	}
 
-	val, err := cp.GetCheckpoint("myStreamName", "myShard")
+	val, err := cp.GetCheckpoint(ctx, "myStreamName", "myShard")
 	if err != nil && val != "lastSeqNum" {
 		t.Errorf("checkout error expected %s, got %s", "lastSeqNum", val)
 	}
@@ -158,7 +159,7 @@ func TestScanShard(t *testing.T) {
 	}
 
 	// sets checkpoint
-	val, err := cp.GetCheckpoint("myStreamName", "myShard")
+	val, err := cp.GetCheckpoint(ctx, "myStreamName", "myShard")
 	if err != nil && val != "lastSeqNum" {
 		t.Fatalf("checkout error expected %s, got %s", "lastSeqNum", val)
 	}
@@ -242,7 +243,7 @@ func TestScanShard_SkipCheckpoint(t *testing.T) {
 		t.Fatalf("scan shard error: %v", err)
 	}
 
-	val, err := cp.GetCheckpoint("myStreamName", "myShard")
+	val, err := cp.GetCheckpoint(ctx, "myStreamName", "myShard")
 	if err != nil && val != "firstSeqNum" {
 		t.Fatalf("checkout error expected %s, got %s", "firstSeqNum", val)
 	}

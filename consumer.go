@@ -70,6 +70,9 @@ func New(streamName string, opts ...Option) (*Consumer, error) {
 		errs = errors.Join(errs, c.metricRegistry.Register(collectorMillisBehindLatest))
 		errs = errors.Join(errs, c.metricRegistry.Register(counterEventsConsumed))
 		errs = errors.Join(errs, c.metricRegistry.Register(counterCheckpointsWritten))
+		errs = errors.Join(errs, c.metricRegistry.Register(gaugeBatchSize))
+		errs = errors.Join(errs, c.metricRegistry.Register(histogramBatchDuration))
+		errs = errors.Join(errs, c.metricRegistry.Register(histogramAverageRecordDuration))
 		if errs != nil {
 			return nil, errs
 		}
@@ -95,7 +98,7 @@ type Consumer struct {
 	isAggregated       bool
 	shardClosedHandler ShardClosedHandler
 	numWorkers         int
-	workerPool         WorkerPool
+	workerPool         *WorkerPool
 }
 
 // ScanFunc is the type of the function called for each message read
@@ -157,9 +160,9 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 // ScanShard loops over records on a specific shard, calls the callback func
 // for each record and checkpoints the progress of scan.
 func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) error {
-	wp := NewWorkerPool(c.streamName, c.numWorkers, fn)
-	wp.Start(ctx)
-	defer wp.Stop()
+	c.workerPool = NewWorkerPool(c.streamName, c.numWorkers, fn)
+	c.workerPool.Start(ctx)
+	defer c.workerPool.Stop()
 
 	// get last seq number from checkpoint
 	lastSeqNum, err := c.group.GetCheckpoint(ctx, c.streamName, shardID)
@@ -200,54 +203,9 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 				return fmt.Errorf("get shard iterator error: %w", err)
 			}
 		} else {
-			// loop over records, call callback func
-			var records []types.Record
-
-			// desegregate records
-			if c.isAggregated {
-				records, err = disaggregateRecords(resp.Records)
-				if err != nil {
-					return err
-				}
-			} else {
-				records = resp.Records
-			}
-
-			for _, r := range records {
-				select {
-				case <-ctx.Done():
-					return nil
-				default:
-					record := Record{r, shardID, resp.MillisBehindLatest}
-					wp.Submit(record)
-
-					res := wp.Result()
-					var err error
-					if res != nil && res.Err != nil {
-						err = res.Err
-					}
-
-					secondsBehindLatest := float64(time.Duration(*resp.MillisBehindLatest)*time.Millisecond) / float64(time.Second)
-					collectorMillisBehindLatest.
-						With(prometheus.Labels{labelStreamName: c.streamName, labelShardID: shardID}).
-						Observe(secondsBehindLatest)
-
-					if err != nil && !errors.Is(err, ErrSkipCheckpoint) {
-						return err
-					}
-
-					if !errors.Is(err, ErrSkipCheckpoint) {
-						if err := c.group.SetCheckpoint(ctx, c.streamName, shardID, *r.SequenceNumber); err != nil {
-							return err
-						}
-						c.counter.Add("checkpoint", 1)
-						counterCheckpointsWritten.With(prometheus.Labels{labelStreamName: c.streamName, labelShardID: shardID}).Inc()
-					}
-
-					counterEventsConsumed.With(prometheus.Labels{labelStreamName: c.streamName, labelShardID: shardID}).Inc()
-					c.counter.Add("records", 1)
-					lastSeqNum = *r.SequenceNumber
-				}
+			lastSeqNum, err = c.processRecords(ctx, shardID, resp)
+			if err != nil {
+				return err
 			}
 
 			if isShardClosed(resp.NextShardIterator, shardIterator) {
@@ -274,6 +232,104 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 			continue
 		}
 	}
+}
+
+func (c *Consumer) processRecords(ctx context.Context, shardID string, resp *kinesis.GetRecordsOutput) (string, error) {
+	if len(resp.Records) == 0 {
+		return "", nil
+	}
+
+	startedAt := time.Now()
+	batchSize := float64(len(resp.Records))
+	gaugeBatchSize.
+		With(prometheus.Labels{labelStreamName: c.streamName, labelShardID: shardID}).
+		Set(batchSize)
+
+	secondsBehindLatest := float64(time.Duration(*resp.MillisBehindLatest)*time.Millisecond) / float64(time.Second)
+	collectorMillisBehindLatest.
+		With(prometheus.Labels{labelStreamName: c.streamName, labelShardID: shardID}).
+		Observe(secondsBehindLatest)
+
+	// loop over records, call callback func
+	var records []types.Record
+
+	// disaggregate records
+	var err error
+	if c.isAggregated {
+		records, err = disaggregateRecords(resp.Records)
+		if err != nil {
+			return "", err
+		}
+	} else {
+		records = resp.Records
+	}
+
+	if len(records) == 0 {
+		// nothing to do here
+		return "", nil
+	}
+
+	// submit in goroutine
+	go func() {
+		for _, r := range records {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				record := Record{r, shardID, resp.MillisBehindLatest}
+				// blocks until someone is ready to pick it up
+				c.workerPool.Submit(record)
+			}
+		}
+	}()
+
+	// wait for all tasks to be processed
+	numberOfProcessedTasks := 0
+	timeout := 5 * time.Second
+	countDownTimer := time.NewTimer(timeout)
+	for {
+		if numberOfProcessedTasks == len(records) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return "", nil
+		case <-countDownTimer.C:
+			return "", fmt.Errorf("timeline exceeded while awaiting result from workers")
+		default:
+			res, err := c.workerPool.Result()
+			if err != nil && !errors.Is(err, ErrSkipCheckpoint) {
+				return "", err // TODO make it more clever once :)
+			}
+			if errors.Is(err, ErrSkipCheckpoint) || res != nil {
+				numberOfProcessedTasks++
+				countDownTimer.Reset(timeout)
+
+				counterEventsConsumed.With(prometheus.Labels{labelStreamName: c.streamName, labelShardID: shardID}).Inc()
+				c.counter.Add("records", 1)
+			}
+		}
+	}
+
+	// we MUST only reach this point if everything is processed
+	lastSeqNum := *records[len(records)-1].SequenceNumber
+
+	if err := c.group.SetCheckpoint(ctx, c.streamName, shardID, lastSeqNum); err != nil {
+		return "", fmt.Errorf("set checkpoint error: %w", err)
+	}
+	c.counter.Add("checkpoint", int64(numberOfProcessedTasks))
+	counterCheckpointsWritten.
+		With(prometheus.Labels{labelStreamName: c.streamName, labelShardID: shardID}).
+		Add(float64(numberOfProcessedTasks))
+
+	duration := time.Since(startedAt).Seconds()
+	histogramBatchDuration.
+		With(prometheus.Labels{labelStreamName: c.streamName, labelShardID: shardID}).
+		Observe(duration)
+	histogramAverageRecordDuration.
+		With(prometheus.Labels{labelStreamName: c.streamName, labelShardID: shardID}).
+		Observe(duration / batchSize)
+	return lastSeqNum, nil
 }
 
 // temporary conversion func of []types.Record -> DesegregateRecords([]*types.Record) -> []types.Record

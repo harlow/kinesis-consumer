@@ -10,7 +10,7 @@ import (
 type Result struct {
 	Record
 	WorkerName string
-	Err        error
+	err        error
 }
 
 // WorkerPool allows to parallel process records
@@ -55,12 +55,12 @@ func (wp *WorkerPool) Submit(r Record) {
 }
 
 // Result returns the Result of the Submit-ed Record after it has been processed.
-func (wp *WorkerPool) Result() *Result {
+func (wp *WorkerPool) Result() (Result, error) {
 	select {
 	case r := <-wp.resultC:
-		return &r
+		return r, r.err
 	default:
-		return nil
+		return Result{}, nil
 	}
 }
 
@@ -91,7 +91,7 @@ func (w *worker) start(ctx context.Context) {
 				res := Result{
 					Record:     r,
 					WorkerName: w.name,
-					Err:        err,
+					err:        err,
 				}
 
 				w.resultC <- res
