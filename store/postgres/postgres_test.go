@@ -152,7 +152,7 @@ func TestCheckpoint_Get_NoRows(t *testing.T) {
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("there were unfulfilled expectations: %s", err)
 	}
-	_ = ck.Shutdown()
+	_ = ck.Shutdown(ctx)
 }
 
 func TestCheckpoint_Get_QueryError(t *testing.T) {
