@@ -15,7 +15,8 @@ linters:
 
 linters-settings:
   errcheck:
-    ignore: Close
+    exclude-functions:
+    - Close
 
 issues:
   exclude-use-default: false
