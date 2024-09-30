@@ -12,7 +12,7 @@ github.com/alicebob/gopher-json
 ## explicit
 github.com/alicebob/miniredis
 github.com/alicebob/miniredis/server
-# github.com/aws/aws-sdk-go-v2 v1.30.5
+# github.com/aws/aws-sdk-go-v2 v1.31.0
 ## explicit; go 1.21
 github.com/aws/aws-sdk-go-v2/aws
 github.com/aws/aws-sdk-go-v2/aws/defaults
@@ -44,10 +44,10 @@ github.com/aws/aws-sdk-go-v2/internal/timeconv
 ## explicit; go 1.21
 github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream
 github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream/eventstreamapi
-# github.com/aws/aws-sdk-go-v2/config v1.27.35
+# github.com/aws/aws-sdk-go-v2/config v1.27.39
 ## explicit; go 1.21
 github.com/aws/aws-sdk-go-v2/config
-# github.com/aws/aws-sdk-go-v2/credentials v1.17.33
+# github.com/aws/aws-sdk-go-v2/credentials v1.17.37
 ## explicit; go 1.21
 github.com/aws/aws-sdk-go-v2/credentials
 github.com/aws/aws-sdk-go-v2/credentials/ec2rolecreds
@@ -59,14 +59,14 @@ github.com/aws/aws-sdk-go-v2/credentials/stscreds
 # github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue v1.15.4
 ## explicit; go 1.21
 github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue
-# github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.16.13
+# github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.16.14
 ## explicit; go 1.21
 github.com/aws/aws-sdk-go-v2/feature/ec2/imds
 github.com/aws/aws-sdk-go-v2/feature/ec2/imds/internal/config
-# github.com/aws/aws-sdk-go-v2/internal/configsources v1.3.17
+# github.com/aws/aws-sdk-go-v2/internal/configsources v1.3.18
 ## explicit; go 1.21
 github.com/aws/aws-sdk-go-v2/internal/configsources
-# github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.6.17
+# github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.6.18
 ## explicit; go 1.21
 github.com/aws/aws-sdk-go-v2/internal/endpoints/v2
 # github.com/aws/aws-sdk-go-v2/internal/ini v1.8.1
@@ -81,13 +81,13 @@ github.com/aws/aws-sdk-go-v2/service/dynamodb/types
 # github.com/aws/aws-sdk-go-v2/service/dynamodbstreams v1.22.8
 ## explicit; go 1.21
 github.com/aws/aws-sdk-go-v2/service/dynamodbstreams/types
-# github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.11.4
+# github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.11.5
 ## explicit; go 1.21
 github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding
 # github.com/aws/aws-sdk-go-v2/service/internal/endpoint-discovery v1.9.18
 ## explicit; go 1.21
 github.com/aws/aws-sdk-go-v2/service/internal/endpoint-discovery
-# github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.11.19
+# github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.11.20
 ## explicit; go 1.21
 github.com/aws/aws-sdk-go-v2/service/internal/presigned-url
 # github.com/aws/aws-sdk-go-v2/service/kinesis v1.29.8
@@ -96,22 +96,22 @@ github.com/aws/aws-sdk-go-v2/service/kinesis
 github.com/aws/aws-sdk-go-v2/service/kinesis/internal/customizations
 github.com/aws/aws-sdk-go-v2/service/kinesis/internal/endpoints
 github.com/aws/aws-sdk-go-v2/service/kinesis/types
-# github.com/aws/aws-sdk-go-v2/service/sso v1.22.8
+# github.com/aws/aws-sdk-go-v2/service/sso v1.23.3
 ## explicit; go 1.21
 github.com/aws/aws-sdk-go-v2/service/sso
 github.com/aws/aws-sdk-go-v2/service/sso/internal/endpoints
 github.com/aws/aws-sdk-go-v2/service/sso/types
-# github.com/aws/aws-sdk-go-v2/service/ssooidc v1.26.8
+# github.com/aws/aws-sdk-go-v2/service/ssooidc v1.27.3
 ## explicit; go 1.21
 github.com/aws/aws-sdk-go-v2/service/ssooidc
 github.com/aws/aws-sdk-go-v2/service/ssooidc/internal/endpoints
 github.com/aws/aws-sdk-go-v2/service/ssooidc/types
-# github.com/aws/aws-sdk-go-v2/service/sts v1.30.8
+# github.com/aws/aws-sdk-go-v2/service/sts v1.31.3
 ## explicit; go 1.21
 github.com/aws/aws-sdk-go-v2/service/sts
 github.com/aws/aws-sdk-go-v2/service/sts/internal/endpoints
 github.com/aws/aws-sdk-go-v2/service/sts/types
-# github.com/aws/smithy-go v1.20.4
+# github.com/aws/smithy-go v1.21.0
 ## explicit; go 1.21
 github.com/aws/smithy-go
 github.com/aws/smithy-go/auth
@@ -127,12 +127,14 @@ github.com/aws/smithy-go/endpoints/private/rulesfn
 github.com/aws/smithy-go/internal/sync/singleflight
 github.com/aws/smithy-go/io
 github.com/aws/smithy-go/logging
+github.com/aws/smithy-go/metrics
 github.com/aws/smithy-go/middleware
 github.com/aws/smithy-go/private/requestcompression
 github.com/aws/smithy-go/ptr
 github.com/aws/smithy-go/rand
 github.com/aws/smithy-go/sync
 github.com/aws/smithy-go/time
+github.com/aws/smithy-go/tracing
 github.com/aws/smithy-go/transport/http
 github.com/aws/smithy-go/transport/http/internal/io
 github.com/aws/smithy-go/waiter
