@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/kinesis"
@@ -203,7 +205,7 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 				return fmt.Errorf("get shard iterator error: %w", err)
 			}
 		} else {
-			lastSeqNum, err = c.processRecords(ctx, shardID, resp)
+			lastSeqNum, err = c.processRecords(ctx, shardID, resp, fn)
 			if err != nil {
 				return err
 			}
@@ -234,7 +236,7 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 	}
 }
 
-func (c *Consumer) processRecords(ctx context.Context, shardID string, resp *kinesis.GetRecordsOutput) (string, error) {
+func (c *Consumer) processRecords(ctx context.Context, shardID string, resp *kinesis.GetRecordsOutput, fn ScanFunc) (string, error) {
 	if len(resp.Records) == 0 {
 		return "", nil
 	}
@@ -269,46 +271,9 @@ func (c *Consumer) processRecords(ctx context.Context, shardID string, resp *kin
 		return "", nil
 	}
 
-	// submit in goroutine
-	go func() {
-		for _, r := range records {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-				record := Record{r, shardID, resp.MillisBehindLatest}
-				// blocks until someone is ready to pick it up
-				c.workerPool.Submit(record)
-			}
-		}
-	}()
-
-	// wait for all tasks to be processed
-	numberOfProcessedTasks := 0
-	timeout := 5 * time.Second
-	countDownTimer := time.NewTimer(timeout)
-	for {
-		if numberOfProcessedTasks == len(records) {
-			break
-		}
-		select {
-		case <-ctx.Done():
-			return "", nil
-		case <-countDownTimer.C:
-			return "", fmt.Errorf("timeline exceeded while awaiting result from workers")
-		default:
-			res, err := c.workerPool.Result()
-			if err != nil && !errors.Is(err, ErrSkipCheckpoint) {
-				return "", err // TODO make it more clever once :)
-			}
-			if errors.Is(err, ErrSkipCheckpoint) || res != nil {
-				numberOfProcessedTasks++
-				countDownTimer.Reset(timeout)
-
-				counterEventsConsumed.With(prometheus.Labels{labelStreamName: c.streamName, labelShardID: shardID}).Inc()
-				c.counter.Add("records", 1)
-			}
-		}
+	err = c.runWorkers(ctx, shardID, resp, fn, records)
+	if err != nil {
+		return "", err
 	}
 
 	// we MUST only reach this point if everything is processed
@@ -317,6 +282,9 @@ func (c *Consumer) processRecords(ctx context.Context, shardID string, resp *kin
 	if err := c.group.SetCheckpoint(ctx, c.streamName, shardID, lastSeqNum); err != nil {
 		return "", fmt.Errorf("set checkpoint error: %w", err)
 	}
+
+	numberOfProcessedTasks := len(records)
+
 	c.counter.Add("checkpoint", int64(numberOfProcessedTasks))
 	counterCheckpointsWritten.
 		With(prometheus.Labels{labelStreamName: c.streamName, labelShardID: shardID}).
@@ -330,6 +298,23 @@ func (c *Consumer) processRecords(ctx context.Context, shardID string, resp *kin
 		With(prometheus.Labels{labelStreamName: c.streamName, labelShardID: shardID}).
 		Observe(duration / batchSize)
 	return lastSeqNum, nil
+}
+
+// runWorkers launches a worker pool to process the records
+func (c *Consumer) runWorkers(ctx context.Context, shardID string, resp *kinesis.GetRecordsOutput, fn ScanFunc, records []types.Record) error {
+	errGroup, ctx := errgroup.WithContext(ctx)
+	errGroup.SetLimit(c.numWorkers)
+	for _, r := range records {
+		errGroup.Go(func() error {
+			err := fn(&Record{Record: r, ShardID: shardID, MillisBehindLatest: resp.MillisBehindLatest})
+			if !errors.Is(err, ErrSkipCheckpoint) {
+				return err
+			}
+			return nil
+		})
+	}
+
+	return errGroup.Wait()
 }
 
 // temporary conversion func of []types.Record -> DesegregateRecords([]*types.Record) -> []types.Record
