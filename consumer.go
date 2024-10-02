@@ -169,7 +169,6 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 			if err != nil {
 				select {
 				case errC <- fmt.Errorf("shard %s error: %w", shardID, err):
-					// first error to occur
 					cancel()
 				default:
 					// error has already occurred
