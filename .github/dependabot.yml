@@ -8,3 +8,8 @@ updates:
     interval: daily
   rebase-strategy: auto
   open-pull-requests-limit: 10
+  groups:
+    aws-sdk-go-v2:
+      applies-to: version-updates
+      patterns:
+        - "github.com/aws/aws-sdk-go-v2/*"
