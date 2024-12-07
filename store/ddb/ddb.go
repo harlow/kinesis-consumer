@@ -116,9 +116,6 @@ func (c *Checkpoint) GetCheckpoint(streamName, shardID string) (string, error) {
 
 	var i item
 	attributevalue.UnmarshalMap(resp.Item, &i)
-	if i.SequenceNumber == "" {
-		i.SequenceNumber = "0"
-	}
 	return i.SequenceNumber, nil
 }
 
