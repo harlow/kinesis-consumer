@@ -12,7 +12,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.39.4
 	github.com/aws/aws-sdk-go-v2/service/kinesis v1.32.12
 	github.com/awslabs/kinesis-aggregation/go/v2 v2.0.0-20230808105340-e631fe742486
-	github.com/go-sql-driver/mysql v1.8.1
+	github.com/go-sql-driver/mysql v1.9.0
 	github.com/lib/pq v1.10.9
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.20.5
