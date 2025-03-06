@@ -1,6 +1,7 @@
 module github.com/alexgridx/kinesis-consumer
 
 go 1.22
+toolchain go1.23.7
 
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
@@ -47,6 +48,6 @@ require (
 	github.com/prometheus/common v0.62.0 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/yuin/gopher-lua v1.1.1 // indirect
-	golang.org/x/sys v0.29.0 // indirect
+	golang.org/x/sys v0.31.0 // indirect
 	google.golang.org/protobuf v1.36.5 // indirect
 )
