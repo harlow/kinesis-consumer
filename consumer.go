@@ -37,6 +37,7 @@ func New(streamName string, opts ...Option) (*Consumer, error) {
 		initialShardIteratorType: types.ShardIteratorTypeLatest,
 		store:                    &noopStore{},
 		counter:                  &noopCounter{},
+		getRecordsOpts:           []func(*kinesis.Options){},
 		logger: &noopLogger{
 			logger: log.New(io.Discard, "", log.LstdFlags),
 		},
@@ -80,6 +81,7 @@ type Consumer struct {
 	maxRecords               int64
 	isAggregated             bool
 	shardClosedHandler       ShardClosedHandler
+	getRecordsOpts           []func(*kinesis.Options)
 }
 
 // ScanFunc is the type of the function called for each message read
@@ -185,7 +187,7 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 		resp, err := c.client.GetRecords(ctx, &kinesis.GetRecordsInput{
 			Limit:         aws.Int32(int32(c.maxRecords)),
 			ShardIterator: shardIterator,
-		})
+		}, c.getRecordsOpts...)
 
 		// attempt to recover from GetRecords error
 		if err != nil {
