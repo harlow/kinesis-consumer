@@ -225,8 +225,10 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 						return err
 					}
 
-					if err := c.group.SetCheckpoint(c.streamName, shardID, *r.SequenceNumber); err != nil {
-						return err
+					if !errors.Is(err, ErrSkipCheckpoint) {
+						if err := c.group.SetCheckpoint(c.streamName, shardID, *r.SequenceNumber); err != nil {
+							return err
+						}
 					}
 
 					c.counter.Add("records", 1)
