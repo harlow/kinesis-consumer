@@ -82,6 +82,24 @@ return consumer.SkipCheckpoint
 return errors.New("my error, exit all scans")
 ```
 
+### ScanBatch (experimental)
+
+For interval/size-based batch processing, use `ScanBatch`:
+
+```go
+err := c.ScanBatch(ctx, func(batch []*consumer.Record) error {
+	// process records in this batch
+	return nil
+},
+	consumer.WithBatchMaxSize(500),
+	consumer.WithBatchFlushInterval(2*time.Second),
+)
+```
+
+Checkpoint behavior in batch mode:
+- checkpoint advances only after a batch callback succeeds
+- on callback error, scan stops and that batch is not checkpointed
+
 Use context cancel to signal the scan to exit without error. For example if we wanted to gracefully exit the scan on interrupt.
 
 ```go

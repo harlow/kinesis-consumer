@@ -112,6 +112,174 @@ func TestScan(t *testing.T) {
 	}
 }
 
+func TestScanBatch_FlushByMaxSize(t *testing.T) {
+	client := &kinesisClientMock{
+		getShardIteratorMock: func(ctx context.Context, params *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {
+			return &kinesis.GetShardIteratorOutput{
+				ShardIterator: aws.String("iterator"),
+			}, nil
+		},
+		getRecordsMock: func(ctx context.Context, params *kinesis.GetRecordsInput, optFns ...func(*kinesis.Options)) (*kinesis.GetRecordsOutput, error) {
+			return &kinesis.GetRecordsOutput{
+				NextShardIterator: nil,
+				Records:           records,
+			}, nil
+		},
+		listShardsMock: func(ctx context.Context, params *kinesis.ListShardsInput, optFns ...func(*kinesis.Options)) (*kinesis.ListShardsOutput, error) {
+			return &kinesis.ListShardsOutput{
+				Shards: []types.Shard{{ShardId: aws.String("myShard")}},
+			}, nil
+		},
+	}
+	cp := store.New()
+
+	c, err := New("myStreamName",
+		WithClient(client),
+		WithStore(cp),
+		WithLogger(&testLogger{t}),
+	)
+	if err != nil {
+		t.Fatalf("new consumer error: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var batchSizes []int
+	err = c.ScanBatch(ctx, func(batch []*Record) error {
+		batchSizes = append(batchSizes, len(batch))
+		if len(batchSizes) == 2 {
+			cancel()
+		}
+		return nil
+	}, WithBatchMaxSize(1), WithBatchFlushInterval(time.Hour))
+	if err != nil {
+		t.Fatalf("ScanBatch error: %v", err)
+	}
+
+	if len(batchSizes) != 2 || batchSizes[0] != 1 || batchSizes[1] != 1 {
+		t.Fatalf("unexpected batch sizes: %v", batchSizes)
+	}
+
+	val, err := cp.GetCheckpoint("myStreamName", "myShard")
+	if err != nil {
+		t.Fatalf("checkpoint error: %v", err)
+	}
+	if val != "lastSeqNum" {
+		t.Fatalf("checkpoint = %q, want %q", val, "lastSeqNum")
+	}
+}
+
+func TestScanBatch_FinalFlushWithoutInterval(t *testing.T) {
+	client := &kinesisClientMock{
+		getShardIteratorMock: func(ctx context.Context, params *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {
+			return &kinesis.GetShardIteratorOutput{
+				ShardIterator: aws.String("iterator"),
+			}, nil
+		},
+		getRecordsMock: func(ctx context.Context, params *kinesis.GetRecordsInput, optFns ...func(*kinesis.Options)) (*kinesis.GetRecordsOutput, error) {
+			return &kinesis.GetRecordsOutput{
+				NextShardIterator: nil,
+				Records:           records,
+			}, nil
+		},
+		listShardsMock: func(ctx context.Context, params *kinesis.ListShardsInput, optFns ...func(*kinesis.Options)) (*kinesis.ListShardsOutput, error) {
+			return &kinesis.ListShardsOutput{
+				Shards: []types.Shard{{ShardId: aws.String("myShard")}},
+			}, nil
+		},
+	}
+	cp := store.New()
+
+	c, err := New("myStreamName",
+		WithClient(client),
+		WithStore(cp),
+		WithLogger(&testLogger{t}),
+	)
+	if err != nil {
+		t.Fatalf("new consumer error: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+
+	var gotBatches int
+	var gotCount int
+	err = c.ScanBatch(ctx, func(batch []*Record) error {
+		gotBatches++
+		gotCount += len(batch)
+		return nil
+	}, WithBatchMaxSize(100), WithBatchFlushInterval(0))
+	if err != nil {
+		t.Fatalf("ScanBatch error: %v", err)
+	}
+
+	if gotBatches != 1 || gotCount != 2 {
+		t.Fatalf("unexpected batch stats: batches=%d count=%d", gotBatches, gotCount)
+	}
+
+	val, err := cp.GetCheckpoint("myStreamName", "myShard")
+	if err != nil {
+		t.Fatalf("checkpoint error: %v", err)
+	}
+	if val != "lastSeqNum" {
+		t.Fatalf("checkpoint = %q, want %q", val, "lastSeqNum")
+	}
+}
+
+func TestScanBatch_CallbackErrorStopsAndSkipsCheckpoint(t *testing.T) {
+	client := &kinesisClientMock{
+		getShardIteratorMock: func(ctx context.Context, params *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {
+			return &kinesis.GetShardIteratorOutput{
+				ShardIterator: aws.String("iterator"),
+			}, nil
+		},
+		getRecordsMock: func(ctx context.Context, params *kinesis.GetRecordsInput, optFns ...func(*kinesis.Options)) (*kinesis.GetRecordsOutput, error) {
+			return &kinesis.GetRecordsOutput{
+				NextShardIterator: nil,
+				Records:           records,
+			}, nil
+		},
+		listShardsMock: func(ctx context.Context, params *kinesis.ListShardsInput, optFns ...func(*kinesis.Options)) (*kinesis.ListShardsOutput, error) {
+			return &kinesis.ListShardsOutput{
+				Shards: []types.Shard{{ShardId: aws.String("myShard")}},
+			}, nil
+		},
+	}
+	cp := store.New()
+
+	c, err := New("myStreamName",
+		WithClient(client),
+		WithStore(cp),
+		WithLogger(&testLogger{t}),
+	)
+	if err != nil {
+		t.Fatalf("new consumer error: %v", err)
+	}
+
+	callbackErr := errors.New("batch callback error")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err = c.ScanBatch(ctx, func(batch []*Record) error {
+		return callbackErr
+	}, WithBatchMaxSize(1), WithBatchFlushInterval(time.Hour))
+	if !errors.Is(err, callbackErr) {
+		t.Fatalf("ScanBatch error = %v, want %v", err, callbackErr)
+	}
+
+	val, err := cp.GetCheckpoint("myStreamName", "myShard")
+	if err != nil {
+		t.Fatalf("checkpoint error: %v", err)
+	}
+	if val != "" {
+		t.Fatalf("checkpoint = %q, want empty", val)
+	}
+}
+
 func TestScan_ListShardsError(t *testing.T) {
 	mockError := errors.New("mock list shards error")
 	client := &kinesisClientMock{
@@ -664,9 +832,9 @@ func TestScanShard_GetRecordsError(t *testing.T) {
 		},
 		getRecordsMock: func(ctx context.Context, params *kinesis.GetRecordsInput, optFns ...func(*kinesis.Options)) (*kinesis.GetRecordsOutput, error) {
 			return &kinesis.GetRecordsOutput{
-					NextShardIterator: nil,
-					Records:           nil,
-				}, getRecordsError
+				NextShardIterator: nil,
+				Records:           nil,
+			}, getRecordsError
 		},
 	}
 

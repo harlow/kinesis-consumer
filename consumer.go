@@ -92,6 +92,33 @@ type Consumer struct {
 // function returns the special value ErrSkipCheckpoint.
 type ScanFunc func(*Record) error
 
+// ScanBatchFunc is called with buffered records from a shard.
+// Checkpoint advances only after this callback returns nil.
+type ScanBatchFunc func([]*Record) error
+
+// ScanBatchOption customizes batch behavior for ScanBatch.
+type ScanBatchOption func(*scanBatchConfig)
+
+type scanBatchConfig struct {
+	flushInterval time.Duration
+	maxSize       int
+}
+
+// WithBatchFlushInterval sets how often pending batches are flushed.
+// A non-positive duration disables periodic flushing.
+func WithBatchFlushInterval(d time.Duration) ScanBatchOption {
+	return func(cfg *scanBatchConfig) {
+		cfg.flushInterval = d
+	}
+}
+
+// WithBatchMaxSize sets the per-shard max buffered record count before flush.
+func WithBatchMaxSize(n int) ScanBatchOption {
+	return func(cfg *scanBatchConfig) {
+		cfg.maxSize = n
+	}
+}
+
 // ErrSkipCheckpoint is used as a return value from ScanFunc to indicate that
 // the current checkpoint should be skipped. It is not returned
 // as an error by any function.
@@ -164,6 +191,132 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 	}()
 
 	return <-errC
+}
+
+// ScanBatch scans all shards and delivers buffered records to a batch callback.
+// Existing Scan behavior remains unchanged and this method is opt-in.
+//
+// Checkpoint semantics:
+// - Each shard is checkpointed only after its batch callback succeeds.
+// - On callback error, scanning stops and that batch is not checkpointed.
+func (c *Consumer) ScanBatch(ctx context.Context, fn ScanBatchFunc, opts ...ScanBatchOption) error {
+	if fn == nil {
+		return errors.New("batch callback is required")
+	}
+
+	cfg := scanBatchConfig{
+		flushInterval: time.Second,
+		maxSize:       100,
+	}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	if cfg.maxSize <= 0 {
+		cfg.maxSize = 100
+	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	buffers := newScanBatchBuffers()
+	var flushMu sync.Mutex
+
+	var (
+		asyncErrMu sync.Mutex
+		asyncErr   error
+	)
+	setAsyncErr := func(err error) {
+		if err == nil {
+			return
+		}
+		asyncErrMu.Lock()
+		if asyncErr == nil {
+			asyncErr = err
+		}
+		asyncErrMu.Unlock()
+		cancel()
+	}
+	getAsyncErr := func() error {
+		asyncErrMu.Lock()
+		defer asyncErrMu.Unlock()
+		return asyncErr
+	}
+
+	flush := func(flushCtx context.Context, batches map[string][]*Record) error {
+		if len(batches) == 0 {
+			return nil
+		}
+
+		flushMu.Lock()
+		defer flushMu.Unlock()
+
+		for shardID, batch := range batches {
+			if len(batch) == 0 {
+				continue
+			}
+			if err := fn(batch); err != nil {
+				return err
+			}
+			last := batch[len(batch)-1]
+			if err := c.setCheckpointWithRetry(flushCtx, shardID, aws.ToString(last.SequenceNumber)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	var tickerWG sync.WaitGroup
+	if cfg.flushInterval > 0 {
+		tickerWG.Add(1)
+		go func() {
+			defer tickerWG.Done()
+			ticker := time.NewTicker(cfg.flushInterval)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					batches := buffers.drainAll()
+					if err := flush(ctx, batches); err != nil {
+						setAsyncErr(fmt.Errorf("batch flush error: %w", err))
+						return
+					}
+				}
+			}
+		}()
+	}
+
+	scanErr := c.Scan(ctx, func(r *Record) error {
+		shardID, batch := buffers.addAndMaybeDrain(r, cfg.maxSize)
+		if len(batch) > 0 {
+			if err := flush(ctx, map[string][]*Record{shardID: batch}); err != nil {
+				return err
+			}
+		}
+		return ErrSkipCheckpoint
+	})
+
+	cancel()
+	tickerWG.Wait()
+
+	if err := getAsyncErr(); err != nil {
+		return err
+	}
+	if scanErr != nil && !errors.Is(scanErr, context.Canceled) {
+		return scanErr
+	}
+
+	// Final flush for any residual records that did not hit size/interval thresholds.
+	if err := flush(context.Background(), buffers.drainAll()); err != nil {
+		return err
+	}
+	if err := getAsyncErr(); err != nil {
+		return err
+	}
+
+	return scanErr
 }
 
 // ScanShard loops over records on a specific shard, calls the callback func
@@ -378,6 +531,45 @@ func isShardClosed(nextShardIterator, currentShardIterator *string) bool {
 
 type shards struct {
 	shardsInProcess sync.Map
+}
+
+type scanBatchBuffers struct {
+	mu      sync.Mutex
+	byShard map[string][]*Record
+}
+
+func newScanBatchBuffers() *scanBatchBuffers {
+	return &scanBatchBuffers{byShard: make(map[string][]*Record)}
+}
+
+func (b *scanBatchBuffers) addAndMaybeDrain(r *Record, maxSize int) (string, []*Record) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	b.byShard[r.ShardID] = append(b.byShard[r.ShardID], r)
+	if len(b.byShard[r.ShardID]) < maxSize {
+		return "", nil
+	}
+
+	shardID := r.ShardID
+	batch := b.byShard[shardID]
+	delete(b.byShard, shardID)
+	return shardID, batch
+}
+
+func (b *scanBatchBuffers) drainAll() map[string][]*Record {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	out := make(map[string][]*Record, len(b.byShard))
+	for shardID, batch := range b.byShard {
+		if len(batch) == 0 {
+			continue
+		}
+		out[shardID] = batch
+	}
+	b.byShard = make(map[string][]*Record)
+	return out
 }
 
 func newShardsInProcess() *shards {
