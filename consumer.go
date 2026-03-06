@@ -492,7 +492,7 @@ func (c *Consumer) setCheckpointWithRetry(ctx context.Context, shardID, sequence
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return ctx.Err()
+			return nil
 		case <-timer.C:
 		}
 	}

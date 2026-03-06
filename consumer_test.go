@@ -659,6 +659,69 @@ func TestScanShard_CheckpointSetRetriesThenFails(t *testing.T) {
 	}
 }
 
+func TestScanShard_CheckpointSetRetryContextCancelReturnsNil(t *testing.T) {
+	var (
+		mu       sync.Mutex
+		attempts int
+	)
+	firstAttemptCh := make(chan struct{}, 1)
+
+	client := &kinesisClientMock{
+		getShardIteratorMock: func(ctx context.Context, params *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {
+			return &kinesis.GetShardIteratorOutput{ShardIterator: aws.String("iter-1")}, nil
+		},
+		getRecordsMock: func(ctx context.Context, params *kinesis.GetRecordsInput, optFns ...func(*kinesis.Options)) (*kinesis.GetRecordsOutput, error) {
+			return &kinesis.GetRecordsOutput{
+				NextShardIterator: nil,
+				Records: []types.Record{
+					{
+						Data:           []byte("record"),
+						SequenceNumber: aws.String("seq-1"),
+					},
+				},
+			}, nil
+		},
+	}
+
+	group := &groupMock{
+		getCheckpointMock: func(streamName, shardID string) (string, error) {
+			return "", nil
+		},
+		setCheckpointMock: func(streamName, shardID, sequenceNumber string) error {
+			mu.Lock()
+			attempts++
+			if attempts == 1 {
+				firstAttemptCh <- struct{}{}
+			}
+			mu.Unlock()
+			return errors.New("transient checkpoint write failure")
+		},
+	}
+
+	c, err := New("myStreamName", WithClient(client), WithGroup(group))
+	if err != nil {
+		t.Fatalf("new consumer error: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		<-firstAttemptCh
+		cancel()
+	}()
+
+	if err := c.ScanShard(ctx, "myShard", func(r *Record) error { return nil }); err != nil {
+		t.Fatalf("expected nil on context cancellation, got %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if attempts != 1 {
+		t.Fatalf("expected 1 checkpoint attempt before cancellation, got %d", attempts)
+	}
+}
+
 func TestScanShard_ShardIsClosed(t *testing.T) {
 	var client = &kinesisClientMock{
 		getShardIteratorMock: func(ctx context.Context, params *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {
