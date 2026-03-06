@@ -341,6 +341,74 @@ func main() {
 	}
 ```
 
+### Consumer Groups (DynamoDB Leases, Opt-In)
+
+By default, `consumer.New(...).Scan(...)` consumes all shards in a single process.
+For multi-process shard coordination, use the opt-in consumer-group package.
+
+> Note: Consumer-group support is currently experimental and may evolve.
+
+```go
+import (
+	consumer "github.com/harlow/kinesis-consumer"
+	groupddb "github.com/harlow/kinesis-consumer/group/consumergroup/ddb"
+	checkpointddb "github.com/harlow/kinesis-consumer/store/ddb"
+)
+
+// checkpoint store (existing API)
+ck, err := checkpointddb.New(appName, checkpointTable)
+if err != nil {
+	log.Fatalf("checkpoint store error: %v", err)
+}
+
+// group (new opt-in API)
+group, err := groupddb.NewGroup(groupddb.GroupConfig{
+	GroupName:     groupName, // preferred
+	AppName:       appName,   // deprecated alias
+	StreamName:    streamName,
+	WorkerID:      workerID, // optional; auto-generated if empty
+	KinesisClient: kinesisClient,
+	Repository: groupddb.Config{
+		Client:    dynamoClient,
+		TableName: leaseTable,
+	},
+	CheckpointStore: ck,
+	EnableStealing:  true,
+	MaxLeasesToSteal: 1,
+})
+if err != nil {
+	log.Fatalf("group error: %v", err)
+}
+
+c, err := consumer.New(
+	streamName,
+	consumer.WithGroup(group),
+	consumer.WithStore(ck), // keep checkpoints consistent with group
+)
+if err != nil {
+	log.Fatalf("consumer error: %v", err)
+}
+```
+
+If `WorkerID` is omitted, the library generates a unique worker ID per process.
+If both `GroupName` and `AppName` are set, `GroupName` is used.
+
+The lease table schema is:
+
+```
+Partition key: namespace
+Sort key: shard_id
+```
+
+For worker row cleanup, enable DynamoDB TTL on attribute `ttl`.
+Worker heartbeat rows write this field automatically.
+
+Integration tests for this path are available and opt-in:
+
+```bash
+RUN_DDB_INTEGRATION=1 DDB_ENDPOINT=http://localhost:8000 go test ./group/consumergroup/... -run DynamoDB -v
+```
+
 # Examples
 
 There are examples of producer and comsumer in the `/examples` directory. These should help give end-to-end examples of setting up consumers with different checkpoint strategies.
