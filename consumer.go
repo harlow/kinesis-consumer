@@ -229,10 +229,10 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 						if err := c.group.SetCheckpoint(c.streamName, shardID, *r.SequenceNumber); err != nil {
 							return err
 						}
+						lastSeqNum = *r.SequenceNumber
 					}
 
 					c.counter.Add("records", 1)
-					lastSeqNum = *r.SequenceNumber
 				}
 			}
 

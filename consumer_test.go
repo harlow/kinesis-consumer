@@ -327,6 +327,69 @@ func TestScanShard_SkipCheckpoint(t *testing.T) {
 	}
 }
 
+func TestScanShard_SkipCheckpointRecoveryUsesLastPersistedCheckpoint(t *testing.T) {
+	var (
+		mu                    sync.Mutex
+		getShardIteratorCalls int
+		secondCallStartSeq    *string
+	)
+
+	var client = &kinesisClientMock{
+		getShardIteratorMock: func(ctx context.Context, params *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			getShardIteratorCalls++
+			if getShardIteratorCalls == 2 {
+				secondCallStartSeq = params.StartingSequenceNumber
+			}
+			return &kinesis.GetShardIteratorOutput{
+				ShardIterator: aws.String(fmt.Sprintf("iter-%d", getShardIteratorCalls)),
+			}, nil
+		},
+		getRecordsMock: func(ctx context.Context, params *kinesis.GetRecordsInput, optFns ...func(*kinesis.Options)) (*kinesis.GetRecordsOutput, error) {
+			switch aws.ToString(params.ShardIterator) {
+			case "iter-1":
+				return &kinesis.GetRecordsOutput{
+					NextShardIterator: aws.String("iter-active"),
+					Records:           records,
+				}, nil
+			case "iter-active":
+				return nil, &types.ExpiredIteratorException{Message: aws.String("expired iterator")}
+			case "iter-2":
+				return &kinesis.GetRecordsOutput{
+					NextShardIterator: nil,
+					Records:           nil,
+				}, nil
+			default:
+				t.Fatalf("unexpected shard iterator: %s", aws.ToString(params.ShardIterator))
+				return nil, nil
+			}
+		},
+	}
+
+	var cp = store.New()
+
+	c, err := New("myStreamName", WithClient(client), WithStore(cp))
+	if err != nil {
+		t.Fatalf("new consumer error: %v", err)
+	}
+
+	var fn = func(r *Record) error {
+		if aws.ToString(r.SequenceNumber) == "lastSeqNum" {
+			return ErrSkipCheckpoint
+		}
+		return nil
+	}
+
+	if err := c.ScanShard(context.Background(), "myShard", fn); err != nil {
+		t.Fatalf("scan shard error: %v", err)
+	}
+
+	if secondCallStartSeq == nil || aws.ToString(secondCallStartSeq) != "firstSeqNum" {
+		t.Fatalf("expected shard iterator refresh from %q, got %q", "firstSeqNum", aws.ToString(secondCallStartSeq))
+	}
+}
+
 func TestScanShard_ShardIsClosed(t *testing.T) {
 	var client = &kinesisClientMock{
 		getShardIteratorMock: func(ctx context.Context, params *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {
