@@ -322,8 +322,8 @@ func TestScanShard_SkipCheckpoint(t *testing.T) {
 	}
 
 	val, err := cp.GetCheckpoint("myStreamName", "myShard")
-	if err != nil && val != "firstSeqNum" {
-		t.Fatalf("checkout error expected %s, got %s", "firstSeqNum", val)
+	if err != nil || val != "firstSeqNum" {
+		t.Fatalf("checkpoint error expected %s, got %s", "firstSeqNum", val)
 	}
 }
 
