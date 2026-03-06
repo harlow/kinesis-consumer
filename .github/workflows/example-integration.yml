@@ -1,0 +1,23 @@
+name: Example Integration
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+
+jobs:
+  example-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run example integration suite
+        run: make integration
