@@ -49,16 +49,15 @@ func (g *AllGroup) Start(ctx context.Context, shardC chan types.Shard) error {
 	// thundering heard of notifications from the consumer.
 
 	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
 
 	for {
 		if err := g.findNewShards(ctx, shardC); err != nil {
-			ticker.Stop()
 			return err
 		}
 
 		select {
 		case <-ctx.Done():
-			ticker.Stop()
 			return nil
 		case <-ticker.C:
 		}
@@ -166,7 +165,10 @@ func (g *AllGroup) findNewShards(ctx context.Context, shardC chan types.Shard) e
 			// but when splits or joins happen, we need to process all parents prior
 			// to processing children or that ordering guarantee is not maintained.
 			if waitForCloseChannel(ctx, sp.parent) && waitForCloseChannel(ctx, sp.adjacentParent) {
-				shardC <- sp.shard
+				select {
+				case <-ctx.Done():
+				case shardC <- sp.shard:
+				}
 			}
 		}()
 	}
