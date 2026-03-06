@@ -104,6 +104,14 @@ type scanBatchConfig struct {
 	maxSize       int
 }
 
+type shardContextProvider interface {
+	ShardContext(parent context.Context, shardID string) (context.Context, func())
+}
+
+type shardStopHandler interface {
+	ShardStopped(ctx context.Context, shardID string) error
+}
+
 // WithBatchFlushInterval sets how often pending batches are flushed.
 // A non-positive duration disables periodic flushing.
 func WithBatchFlushInterval(d time.Duration) ScanBatchOption {
@@ -166,12 +174,26 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 				s.deleteShard(shardID)
 			}()
 			defer wg.Done()
+
+			shardCtx := ctx
+			shardCleanup := func() {}
+			if provider, ok := c.group.(shardContextProvider); ok {
+				shardCtx, shardCleanup = provider.ShardContext(ctx, shardID)
+			}
+			defer shardCleanup()
+
 			var err error
-			if err = c.ScanShard(ctx, shardID, fn); err != nil {
+			if err = c.ScanShard(shardCtx, shardID, fn); err != nil {
 				err = fmt.Errorf("shard %s error: %w", shardID, err)
+			} else if shardCtx.Err() != nil && ctx.Err() == nil {
+				if stoppable, ok := c.group.(shardStopHandler); ok {
+					if err = stoppable.ShardStopped(context.Background(), shardID); err != nil {
+						err = fmt.Errorf("shard stopped error: %w", err)
+					}
+				}
 			} else if closeable, ok := c.group.(CloseableGroup); !ok {
 				// group doesn't allow closure, skip calling CloseShard
-			} else if err = closeable.CloseShard(ctx, shardID); err != nil {
+			} else if err = closeable.CloseShard(context.Background(), shardID); err != nil {
 				err = fmt.Errorf("shard closed CloseableGroup error: %w", err)
 			}
 			if err != nil {

@@ -48,11 +48,10 @@ func (f *fakeKinesisClient) ListShards(ctx context.Context, params *kinesis.List
 }
 
 type fakeLeaseRepo struct {
-	mu            sync.Mutex
-	leases        map[string]Lease
-	workerExpiry  map[string]time.Time
-	shardOrder    []string
-	stealRequests []stealRequest
+	mu           sync.Mutex
+	leases       map[string]Lease
+	workerExpiry map[string]time.Time
+	shardOrder   []string
 }
 
 type fakeCheckpointStore struct {
@@ -166,20 +165,7 @@ func (r *fakeLeaseRepo) ClaimLease(ctx context.Context, namespace, shardID, work
 }
 
 func (r *fakeLeaseRepo) StealLease(ctx context.Context, namespace, shardID, fromWorker, toWorker string, now, expiresAt time.Time) (bool, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	lease, ok := r.leases[shardID]
-	if !ok {
-		return false, nil
-	}
-	if lease.Owner != fromWorker {
-		return false, nil
-	}
-	lease.Owner = toWorker
-	lease.ExpiresAt = expiresAt
-	r.leases[shardID] = lease
-	r.stealRequests = append(r.stealRequests, stealRequest{ShardID: shardID, FromWorker: fromWorker})
-	return true, nil
+	return false, nil
 }
 
 func (r *fakeLeaseRepo) ReleaseLease(ctx context.Context, namespace, shardID, workerID string) error {
@@ -229,17 +215,18 @@ func TestGroupRunOnce_ClaimsAndEmitsShards(t *testing.T) {
 	}
 }
 
-func TestGroupRunOnce_StealsWhenUnderTarget(t *testing.T) {
+func TestGroupRunOnce_ReleasesExcessLeasesWhenOverTarget(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
 	repo := newFakeLeaseRepo([]Lease{
-		{ShardID: "s0", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
-		{ShardID: "s1", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
-		{ShardID: "s2", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
-		{ShardID: "s3", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
+		{ShardID: "s0", Owner: "worker-b", ExpiresAt: now.Add(time.Minute)},
+		{ShardID: "s1", Owner: "worker-b", ExpiresAt: now.Add(time.Minute)},
+		{ShardID: "s2", Owner: "worker-b", ExpiresAt: now.Add(time.Minute)},
+		{ShardID: "s3", Owner: "worker-b", ExpiresAt: now.Add(time.Minute)},
 		{ShardID: "s4", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
-		{ShardID: "s5", Owner: "worker-b", ExpiresAt: now.Add(time.Minute)},
+		{ShardID: "s5", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
 	})
 	repo.workerExpiry["worker-a"] = now.Add(time.Minute)
+	repo.workerExpiry["worker-b"] = now.Add(time.Minute)
 
 	client := &fakeKinesisClient{
 		shards: []types.Shard{
@@ -253,14 +240,12 @@ func TestGroupRunOnce_StealsWhenUnderTarget(t *testing.T) {
 	}
 
 	group, err := New(Config{
-		AppName:          "my-app",
-		StreamName:       "my-stream",
-		WorkerID:         "worker-b",
-		KinesisClient:    client,
-		Repository:       repo,
-		Clock:            fakeClock{now: now},
-		EnableStealing:   true,
-		MaxLeasesToSteal: 2,
+		AppName:       "my-app",
+		StreamName:    "my-stream",
+		WorkerID:      "worker-b",
+		KinesisClient: client,
+		Repository:    repo,
+		Clock:         fakeClock{now: now},
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -271,12 +256,74 @@ func TestGroupRunOnce_StealsWhenUnderTarget(t *testing.T) {
 		t.Fatalf("runOnce() error = %v", err)
 	}
 
-	if len(repo.stealRequests) != 2 {
-		t.Fatalf("len(stealRequests) = %d, want 2", len(repo.stealRequests))
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	if got := repo.leases["s3"].Owner; got != "" {
+		t.Fatalf("released lease owner = %q, want empty", got)
+	}
+	if len(shardC) != 0 {
+		t.Fatalf("len(shardC) = %d, want 0", len(shardC))
+	}
+}
+
+func TestGroupRunOnce_CancelsActiveShardBeforeRelease(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+	repo := newFakeLeaseRepo([]Lease{
+		{ShardID: "s0", Owner: "worker-b", ExpiresAt: now.Add(time.Minute)},
+		{ShardID: "s1", Owner: "worker-b", ExpiresAt: now.Add(time.Minute)},
+		{ShardID: "s2", Owner: "worker-b", ExpiresAt: now.Add(time.Minute)},
+		{ShardID: "s3", Owner: "worker-b", ExpiresAt: now.Add(time.Minute)},
+		{ShardID: "s4", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
+		{ShardID: "s5", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
+	})
+	repo.workerExpiry["worker-a"] = now.Add(time.Minute)
+	repo.workerExpiry["worker-b"] = now.Add(time.Minute)
+
+	client := &fakeKinesisClient{
+		shards: []types.Shard{
+			{ShardId: aws.String("s0")},
+			{ShardId: aws.String("s1")},
+			{ShardId: aws.String("s2")},
+			{ShardId: aws.String("s3")},
+			{ShardId: aws.String("s4")},
+			{ShardId: aws.String("s5")},
+		},
 	}
 
-	if len(shardC) != 2 {
-		t.Fatalf("len(shardC) = %d, want 2", len(shardC))
+	group, err := New(Config{
+		AppName:       "my-app",
+		StreamName:    "my-stream",
+		WorkerID:      "worker-b",
+		KinesisClient: client,
+		Repository:    repo,
+		Clock:         fakeClock{now: now},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	ctx, cleanup := group.ShardContext(context.Background(), "s3")
+	defer cleanup()
+	group.mu.Lock()
+	group.active["s3"] = true
+	group.mu.Unlock()
+
+	shardC := make(chan types.Shard, 8)
+	if err := group.runOnce(context.Background(), shardC); err != nil {
+		t.Fatalf("runOnce() error = %v", err)
+	}
+	if ctx.Err() == nil {
+		t.Fatal("expected active shard context to be canceled for release")
+	}
+
+	if err := group.ShardStopped(context.Background(), "s3"); err != nil {
+		t.Fatalf("ShardStopped() error = %v", err)
+	}
+
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	if got := repo.leases["s3"].Owner; got != "" {
+		t.Fatalf("released lease owner = %q, want empty", got)
 	}
 }
 
@@ -442,26 +489,23 @@ func TestGroupJoinRebalance_ConvergesNearEvenSplit(t *testing.T) {
 	clockB := newMutableClock(now)
 
 	groupA, err := New(Config{
-		AppName:        "my-app",
-		StreamName:     "my-stream",
-		WorkerID:       "worker-a",
-		KinesisClient:  client,
-		Repository:     repo,
-		Clock:          clockA,
-		EnableStealing: false,
+		AppName:       "my-app",
+		StreamName:    "my-stream",
+		WorkerID:      "worker-a",
+		KinesisClient: client,
+		Repository:    repo,
+		Clock:         clockA,
 	})
 	if err != nil {
 		t.Fatalf("New(worker-a) error = %v", err)
 	}
 	groupB, err := New(Config{
-		AppName:          "my-app",
-		StreamName:       "my-stream",
-		WorkerID:         "worker-b",
-		KinesisClient:    client,
-		Repository:       repo,
-		Clock:            clockB,
-		EnableStealing:   true,
-		MaxLeasesToSteal: 2,
+		AppName:       "my-app",
+		StreamName:    "my-stream",
+		WorkerID:      "worker-b",
+		KinesisClient: client,
+		Repository:    repo,
+		Clock:         clockB,
 	})
 	if err != nil {
 		t.Fatalf("New(worker-b) error = %v", err)

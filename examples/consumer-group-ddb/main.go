@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"expvar"
 	"flag"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	ddbtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/aws/aws-sdk-go-v2/service/kinesis"
+	kinesistypes "github.com/aws/aws-sdk-go-v2/service/kinesis/types"
 	consumer "github.com/harlow/kinesis-consumer"
 	groupddb "github.com/harlow/kinesis-consumer/group/consumergroup/ddb"
 	checkpointddb "github.com/harlow/kinesis-consumer/store/ddb"
@@ -118,11 +120,13 @@ func main() {
 			Client:    dynamoClient,
 			TableName: *leaseTable,
 		},
-		CheckpointStore:  ck,
-		LeaseDuration:    20 * time.Second,
-		RenewInterval:    5 * time.Second,
-		AssignInterval:   5 * time.Second,
-		EnableStealing:   true,
+		CheckpointStore: ck,
+		LeaseDuration:   20 * time.Second,
+		RenewInterval:   5 * time.Second,
+		AssignInterval:  5 * time.Second,
+		// Lease stealing is disabled in the example because the current
+		// consumer API does not provide shard revocation for in-flight scans.
+		EnableStealing:   false,
 		MaxLeasesToSteal: 1,
 	})
 	if err != nil {
@@ -151,6 +155,9 @@ func main() {
 	}()
 
 	log.Printf("worker %q scanning stream %q", *workerID, *stream)
+	if err := waitForStream(kinesisClient, *stream); err != nil {
+		log.Fatalf("wait for stream error: %v", err)
+	}
 	err = c.Scan(ctx, func(r *consumer.Record) error {
 		log.Printf("worker=%s shard=%s seq=%s data=%s", *workerID, r.ShardID, aws.ToString(r.SequenceNumber), string(r.Data))
 		return nil
@@ -187,7 +194,10 @@ func createTable(client *dynamodb.Client, tableName string) error {
 		},
 	)
 	if err != nil {
-		return err
+		var alreadyExists *ddbtypes.ResourceInUseException
+		if !errors.As(err, &alreadyExists) {
+			return err
+		}
 	}
 
 	waiter := dynamodb.NewTableExistsWaiter(client)
@@ -209,6 +219,27 @@ func enableTTL(client *dynamodb.Client, tableName string) error {
 		},
 	})
 	return err
+}
+
+func waitForStream(client *kinesis.Client, streamName string) error {
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		_, err := client.DescribeStream(context.Background(), &kinesis.DescribeStreamInput{
+			StreamName: aws.String(streamName),
+		})
+		if err == nil {
+			return nil
+		}
+
+		var notFound *kinesistypes.ResourceNotFoundException
+		if !errors.As(err, &notFound) {
+			return err
+		}
+		if time.Now().After(deadline) {
+			return err
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 }
 
 func newConfig(url, region string) (aws.Config, error) {

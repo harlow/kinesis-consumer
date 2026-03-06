@@ -531,6 +531,100 @@ func TestScan_CloseableGroupClosesProcessedShard(t *testing.T) {
 	}
 }
 
+func TestScan_CloseableGroupUsesNonCanceledContextOnShutdown(t *testing.T) {
+	client := &kinesisClientMock{
+		getShardIteratorMock: func(ctx context.Context, params *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {
+			return &kinesis.GetShardIteratorOutput{
+				ShardIterator: aws.String("iterator"),
+			}, nil
+		},
+		getRecordsMock: func(ctx context.Context, params *kinesis.GetRecordsInput, optFns ...func(*kinesis.Options)) (*kinesis.GetRecordsOutput, error) {
+			return &kinesis.GetRecordsOutput{
+				NextShardIterator: nil,
+				Records: []types.Record{
+					{
+						Data:           []byte("record"),
+						SequenceNumber: aws.String("seq-1"),
+					},
+				},
+			}, nil
+		},
+	}
+
+	group := &closeableGroupMock{
+		closeShardMock: func(ctx context.Context, shardID string) error {
+			if err := ctx.Err(); err != nil {
+				t.Fatalf("CloseShard received canceled context: %v", err)
+			}
+			return nil
+		},
+	}
+
+	c, err := New("myStreamName",
+		WithClient(client),
+		WithGroup(group),
+	)
+	if err != nil {
+		t.Fatalf("new consumer error: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := c.Scan(ctx, func(r *Record) error {
+		cancel()
+		return nil
+	}); err != nil {
+		t.Fatalf("scan returned unexpected error %v", err)
+	}
+}
+
+func TestScan_RevokedShardCallsShardStoppedInsteadOfCloseShard(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	client := &kinesisClientMock{
+		getShardIteratorMock: func(ctx context.Context, params *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {
+			return &kinesis.GetShardIteratorOutput{
+				ShardIterator: aws.String("iterator"),
+			}, nil
+		},
+		getRecordsMock: func(ctx context.Context, params *kinesis.GetRecordsInput, optFns ...func(*kinesis.Options)) (*kinesis.GetRecordsOutput, error) {
+			<-ctx.Done()
+			return &kinesis.GetRecordsOutput{
+				NextShardIterator: aws.String("iterator-2"),
+			}, nil
+		},
+	}
+
+	group := &rebalanceAwareGroupMock{
+		shardStoppedMock: func(ctx context.Context, shardID string) error {
+			cancel()
+			return nil
+		},
+	}
+
+	c, err := New("myStreamName",
+		WithClient(client),
+		WithGroup(group),
+		WithScanInterval(time.Millisecond),
+	)
+	if err != nil {
+		t.Fatalf("new consumer error: %v", err)
+	}
+
+	if err := c.Scan(ctx, func(r *Record) error { return nil }); err != nil {
+		t.Fatalf("scan returned unexpected error %v", err)
+	}
+
+	if group.shardStoppedCalls != 1 {
+		t.Fatalf("expected ShardStopped to be called once, got %d", group.shardStoppedCalls)
+	}
+	if group.closeShardCalls != 0 {
+		t.Fatalf("expected CloseShard to be skipped for revoked shard, got %d calls", group.closeShardCalls)
+	}
+}
+
 func TestScan_DuplicateShardIsProcessedOnce(t *testing.T) {
 	var (
 		mu                    sync.Mutex
@@ -1273,6 +1367,44 @@ func (g *closeableGroupMock) SetCheckpoint(streamName, shardID, sequenceNumber s
 func (g *closeableGroupMock) CloseShard(ctx context.Context, shardID string) error {
 	if g.closeShardMock != nil {
 		return g.closeShardMock(ctx, shardID)
+	}
+	return nil
+}
+
+type rebalanceAwareGroupMock struct {
+	shardStoppedMock  func(ctx context.Context, shardID string) error
+	shardStoppedCalls int
+	closeShardCalls   int
+}
+
+func (g *rebalanceAwareGroupMock) Start(ctx context.Context, shardC chan types.Shard) error {
+	shardC <- types.Shard{ShardId: aws.String("myShard")}
+	return nil
+}
+
+func (g *rebalanceAwareGroupMock) GetCheckpoint(streamName, shardID string) (string, error) {
+	return "", nil
+}
+
+func (g *rebalanceAwareGroupMock) SetCheckpoint(streamName, shardID, sequenceNumber string) error {
+	return nil
+}
+
+func (g *rebalanceAwareGroupMock) CloseShard(ctx context.Context, shardID string) error {
+	g.closeShardCalls++
+	return nil
+}
+
+func (g *rebalanceAwareGroupMock) ShardContext(parent context.Context, shardID string) (context.Context, func()) {
+	ctx, cancel := context.WithCancel(parent)
+	cancel()
+	return ctx, func() {}
+}
+
+func (g *rebalanceAwareGroupMock) ShardStopped(ctx context.Context, shardID string) error {
+	g.shardStoppedCalls++
+	if g.shardStoppedMock != nil {
+		return g.shardStoppedMock(ctx, shardID)
 	}
 	return nil
 }
