@@ -391,6 +391,106 @@ func TestScanShard_SkipCheckpointRecoveryUsesLastPersistedCheckpoint(t *testing.
 	}
 }
 
+func TestScanShard_CheckpointSetRetriesTransientFailure(t *testing.T) {
+	var (
+		mu       sync.Mutex
+		attempts int
+	)
+
+	client := &kinesisClientMock{
+		getShardIteratorMock: func(ctx context.Context, params *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {
+			return &kinesis.GetShardIteratorOutput{ShardIterator: aws.String("iter-1")}, nil
+		},
+		getRecordsMock: func(ctx context.Context, params *kinesis.GetRecordsInput, optFns ...func(*kinesis.Options)) (*kinesis.GetRecordsOutput, error) {
+			return &kinesis.GetRecordsOutput{
+				NextShardIterator: nil,
+				Records: []types.Record{
+					{
+						Data:           []byte("record"),
+						SequenceNumber: aws.String("seq-1"),
+					},
+				},
+			}, nil
+		},
+	}
+
+	group := &groupMock{
+		getCheckpointMock: func(streamName, shardID string) (string, error) {
+			return "", nil
+		},
+		setCheckpointMock: func(streamName, shardID, sequenceNumber string) error {
+			mu.Lock()
+			defer mu.Unlock()
+			attempts++
+			if attempts < 3 {
+				return errors.New("transient checkpoint write failure")
+			}
+			return nil
+		},
+	}
+
+	c, err := New("myStreamName", WithClient(client), WithGroup(group))
+	if err != nil {
+		t.Fatalf("new consumer error: %v", err)
+	}
+
+	if err := c.ScanShard(context.Background(), "myShard", func(r *Record) error { return nil }); err != nil {
+		t.Fatalf("scan shard error: %v", err)
+	}
+
+	if attempts != 3 {
+		t.Fatalf("expected 3 checkpoint attempts, got %d", attempts)
+	}
+}
+
+func TestScanShard_CheckpointSetRetriesThenFails(t *testing.T) {
+	var attempts int
+
+	client := &kinesisClientMock{
+		getShardIteratorMock: func(ctx context.Context, params *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {
+			return &kinesis.GetShardIteratorOutput{ShardIterator: aws.String("iter-1")}, nil
+		},
+		getRecordsMock: func(ctx context.Context, params *kinesis.GetRecordsInput, optFns ...func(*kinesis.Options)) (*kinesis.GetRecordsOutput, error) {
+			return &kinesis.GetRecordsOutput{
+				NextShardIterator: nil,
+				Records: []types.Record{
+					{
+						Data:           []byte("record"),
+						SequenceNumber: aws.String("seq-1"),
+					},
+				},
+			}, nil
+		},
+	}
+
+	rootErr := errors.New("persistent checkpoint write failure")
+	group := &groupMock{
+		getCheckpointMock: func(streamName, shardID string) (string, error) {
+			return "", nil
+		},
+		setCheckpointMock: func(streamName, shardID, sequenceNumber string) error {
+			attempts++
+			return rootErr
+		},
+	}
+
+	c, err := New("myStreamName", WithClient(client), WithGroup(group))
+	if err != nil {
+		t.Fatalf("new consumer error: %v", err)
+	}
+
+	err = c.ScanShard(context.Background(), "myShard", func(r *Record) error { return nil })
+	if err == nil {
+		t.Fatal("expected scan shard error")
+	}
+	if !errors.Is(err, rootErr) {
+		t.Fatalf("expected wrapped root error, got %v", err)
+	}
+	if attempts != 3 {
+		t.Fatalf("expected 3 checkpoint attempts, got %d", attempts)
+	}
+}
+
 func TestScanShard_ShardIsClosed(t *testing.T) {
 	var client = &kinesisClientMock{
 		getShardIteratorMock: func(ctx context.Context, params *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {
@@ -606,6 +706,23 @@ func (c *kinesisClientMock) GetRecords(ctx context.Context, params *kinesis.GetR
 
 func (c *kinesisClientMock) GetShardIterator(ctx context.Context, params *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {
 	return c.getShardIteratorMock(ctx, params)
+}
+
+type groupMock struct {
+	getCheckpointMock func(streamName, shardID string) (string, error)
+	setCheckpointMock func(streamName, shardID, sequenceNumber string) error
+}
+
+func (g *groupMock) Start(ctx context.Context, shardC chan types.Shard) error {
+	return nil
+}
+
+func (g *groupMock) GetCheckpoint(streamName, shardID string) (string, error) {
+	return g.getCheckpointMock(streamName, shardID)
+}
+
+func (g *groupMock) SetCheckpoint(streamName, shardID, sequenceNumber string) error {
+	return g.setCheckpointMock(streamName, shardID, sequenceNumber)
 }
 
 // implementation of counter
