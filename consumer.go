@@ -13,7 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/kinesis"
 	"github.com/aws/aws-sdk-go-v2/service/kinesis/types"
-	"github.com/harlow/kinesis-consumer/internal/deaggregator"
+	"github.com/awslabs/kinesis-aggregation/go/v2/deaggregator"
 )
 
 // Record wraps the record returned from the Kinesis library and
@@ -260,23 +260,8 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 	}
 }
 
-// temporary conversion func of []types.Record -> DeaggregateRecords([]*types.Record) -> []types.Record
 func deaggregateRecords(in []types.Record) ([]types.Record, error) {
-	var recs []*types.Record
-	for _, rec := range in {
-		recs = append(recs, &rec)
-	}
-
-	deagg, err := deaggregator.DeaggregateRecords(recs)
-	if err != nil {
-		return nil, err
-	}
-
-	var out []types.Record
-	for _, rec := range deagg {
-		out = append(out, *rec)
-	}
-	return out, nil
+	return deaggregator.DeaggregateRecords(in)
 }
 
 func (c *Consumer) getShardIterator(ctx context.Context, streamName, shardID, seqNum string) (*string, error) {
