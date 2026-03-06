@@ -119,7 +119,7 @@ The uniq identifier for a consumer is `[appName, streamName, shardID]`
 
 Note: The default storage is in-memory (no-op). Which means the scan will not persist any state and the consumer will start from the beginning of the stream each time it is re-started.
 
-The consumer accpets a `WithStore` option to set the storage layer:
+The consumer accepts a `WithStore` option to set the storage layer:
 
 ```go
 c, err := consumer.New(*stream, consumer.WithStore(db))
@@ -132,7 +132,7 @@ To persist scan progress choose one of the following storage layers:
 
 #### Redis
 
-The Redis checkpoint requries App Name, and Stream Name:
+The Redis checkpoint requires App Name, and Stream Name:
 
 ```go
 import store "github.com/harlow/kinesis-consumer/store/redis"
@@ -292,7 +292,7 @@ c, err := consumer.New(
 
 ### Logging
 
-Logging supports the basic built-in logging library or use thrid party external one, so long as
+Logging supports the basic built-in logging library or use third party external one, so long as
 it implements the Logger interface.
 
 For example, to use the builtin logging package, we wrap it with myLogger structure.
