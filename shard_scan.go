@@ -91,6 +91,10 @@ func (r *scanShardRunner) getRecords(ctx context.Context, shardIterator *string)
 func (r *scanShardRunner) refreshIterator(ctx context.Context, lastSeqNum string, getRecordsErr error) (*string, string, error) {
 	r.consumer.logger.Log("[CONSUMER] get records error:", getRecordsErr.Error())
 
+	if ctx.Err() != nil {
+		return nil, lastSeqNum, nil
+	}
+
 	if !isRetriableError(getRecordsErr) {
 		return nil, lastSeqNum, fmt.Errorf("get records error: %w", getRecordsErr)
 	}

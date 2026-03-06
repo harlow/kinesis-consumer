@@ -1,6 +1,9 @@
 package consumergroup
 
-import "time"
+import (
+	"sort"
+	"time"
+)
 
 type leaseState struct {
 	ShardID   string
@@ -8,15 +11,10 @@ type leaseState struct {
 	ExpiresAt time.Time
 }
 
-type stealRequest struct {
-	ShardID    string
-	FromWorker string
-}
-
 type assignmentPlan struct {
-	ClaimShardIDs []string
-	Steals        []stealRequest
-	RenewShardIDs []string
+	ClaimShardIDs   []string
+	ReleaseShardIDs []string
+	RenewShardIDs   []string
 }
 
 type assignmentPlanner struct {
@@ -32,20 +30,23 @@ func (p assignmentPlanner) Plan(leases []leaseState, activeWorkers []string) ass
 	target := targetLeaseCount(len(leases), len(workers), p.MaxLeasesForWorker)
 
 	var plan assignmentPlan
-	var owned int
-	ownerCounts := map[string]int{}
+	var ownedLeases []string
 
 	for _, lease := range leases {
-		if lease.Owner != "" && !isExpired(lease, p.Now) {
-			ownerCounts[lease.Owner]++
-		}
 		if lease.Owner == p.WorkerID && !isExpired(lease, p.Now) {
-			owned++
-			plan.RenewShardIDs = append(plan.RenewShardIDs, lease.ShardID)
+			ownedLeases = append(ownedLeases, lease.ShardID)
 		}
 	}
 
-	need := target - owned
+	sort.Strings(ownedLeases)
+	if len(ownedLeases) > target {
+		plan.RenewShardIDs = append(plan.RenewShardIDs, ownedLeases[:target]...)
+		plan.ReleaseShardIDs = append(plan.ReleaseShardIDs, ownedLeases[target:]...)
+		return plan
+	}
+	plan.RenewShardIDs = append(plan.RenewShardIDs, ownedLeases...)
+
+	need := target - len(ownedLeases)
 	if need <= 0 {
 		return plan
 	}
@@ -74,30 +75,6 @@ func (p assignmentPlanner) Plan(leases []leaseState, activeWorkers []string) ass
 			continue
 		}
 		plan.ClaimShardIDs = append(plan.ClaimShardIDs, lease.ShardID)
-		need--
-	}
-
-	if need <= 0 || !p.EnableStealing || p.MaxLeasesToSteal <= 0 {
-		return plan
-	}
-
-	stealsLeft := p.MaxLeasesToSteal
-	for _, lease := range leases {
-		if need <= 0 || stealsLeft <= 0 {
-			break
-		}
-		if lease.Owner == "" || lease.Owner == p.WorkerID || isExpired(lease, p.Now) {
-			continue
-		}
-		if ownerCounts[lease.Owner] <= target {
-			continue
-		}
-		plan.Steals = append(plan.Steals, stealRequest{
-			ShardID:    lease.ShardID,
-			FromWorker: lease.Owner,
-		})
-		ownerCounts[lease.Owner]--
-		stealsLeft--
 		need--
 	}
 

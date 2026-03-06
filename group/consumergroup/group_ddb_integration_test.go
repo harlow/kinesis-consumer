@@ -74,22 +74,19 @@ func TestGroupStart_DynamoDBRebalanceAndFailover(t *testing.T) {
 		LeaseDuration:  cfgBase.LeaseDuration,
 		RenewInterval:  cfgBase.RenewInterval,
 		AssignInterval: cfgBase.AssignInterval,
-		EnableStealing: false,
 	})
 	if err != nil {
 		t.Fatalf("New(worker-a) error = %v", err)
 	}
 	groupB, err := consumergroup.New(consumergroup.Config{
-		AppName:          cfgBase.AppName,
-		StreamName:       cfgBase.StreamName,
-		WorkerID:         "worker-b",
-		KinesisClient:    cfgBase.KinesisClient,
-		Repository:       cfgBase.Repository,
-		LeaseDuration:    cfgBase.LeaseDuration,
-		RenewInterval:    cfgBase.RenewInterval,
-		AssignInterval:   cfgBase.AssignInterval,
-		EnableStealing:   true,
-		MaxLeasesToSteal: 2,
+		AppName:        cfgBase.AppName,
+		StreamName:     cfgBase.StreamName,
+		WorkerID:       "worker-b",
+		KinesisClient:  cfgBase.KinesisClient,
+		Repository:     cfgBase.Repository,
+		LeaseDuration:  cfgBase.LeaseDuration,
+		RenewInterval:  cfgBase.RenewInterval,
+		AssignInterval: cfgBase.AssignInterval,
 	})
 	if err != nil {
 		t.Fatalf("New(worker-b) error = %v", err)

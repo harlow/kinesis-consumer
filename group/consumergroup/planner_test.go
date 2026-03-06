@@ -55,7 +55,7 @@ func TestTargetLeaseCount(t *testing.T) {
 	}
 }
 
-func TestAssignmentPlanner_UnownedThenExpiredThenSteal(t *testing.T) {
+func TestAssignmentPlanner_UnownedThenExpired(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
 
 	leases := []leaseState{
@@ -71,8 +71,6 @@ func TestAssignmentPlanner_UnownedThenExpiredThenSteal(t *testing.T) {
 		WorkerID:           "worker-b",
 		Now:                now,
 		MaxLeasesForWorker: 0,
-		MaxLeasesToSteal:   1,
-		EnableStealing:     true,
 	}
 
 	plan := p.Plan(leases, []string{"worker-a", "worker-b"})
@@ -81,63 +79,38 @@ func TestAssignmentPlanner_UnownedThenExpiredThenSteal(t *testing.T) {
 	if !reflect.DeepEqual(plan.ClaimShardIDs, wantClaims) {
 		t.Fatalf("ClaimShardIDs = %v, want %v", plan.ClaimShardIDs, wantClaims)
 	}
-
-	if len(plan.Steals) != 1 {
-		t.Fatalf("len(Steals) = %d, want %d", len(plan.Steals), 1)
-	}
-	if plan.Steals[0].ShardID != "s2" {
-		t.Fatalf("steal shard = %q, want %q", plan.Steals[0].ShardID, "s2")
-	}
-	if plan.Steals[0].FromWorker != "worker-a" {
-		t.Fatalf("steal from = %q, want %q", plan.Steals[0].FromWorker, "worker-a")
-	}
 }
 
-func TestAssignmentPlanner_DisabledStealing(t *testing.T) {
+func TestAssignmentPlanner_ReleasesExcessOwnedLeases(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
 
 	leases := []leaseState{
-		{ShardID: "s0", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
-		{ShardID: "s1", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
-		{ShardID: "s2", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
+		{ShardID: "s0", Owner: "worker-b", ExpiresAt: now.Add(time.Minute)},
+		{ShardID: "s1", Owner: "worker-b", ExpiresAt: now.Add(time.Minute)},
+		{ShardID: "s2", Owner: "worker-b", ExpiresAt: now.Add(time.Minute)},
 		{ShardID: "s3", Owner: "worker-b", ExpiresAt: now.Add(time.Minute)},
+		{ShardID: "s4", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
+		{ShardID: "s5", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
 	}
 
 	p := assignmentPlanner{
 		WorkerID:           "worker-b",
 		Now:                now,
 		MaxLeasesForWorker: 0,
-		MaxLeasesToSteal:   2,
-		EnableStealing:     false,
 	}
 
 	plan := p.Plan(leases, []string{"worker-a", "worker-b"})
-	if len(plan.Steals) != 0 {
-		t.Fatalf("len(Steals) = %d, want 0", len(plan.Steals))
-	}
-}
 
-func TestAssignmentPlanner_RespectsMaxSteals(t *testing.T) {
-	now := time.Unix(1700000000, 0).UTC()
-
-	leases := []leaseState{
-		{ShardID: "s0", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
-		{ShardID: "s1", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
-		{ShardID: "s2", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
-		{ShardID: "s3", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
-		{ShardID: "s4", Owner: "worker-b", ExpiresAt: now.Add(time.Minute)},
+	wantRenew := []string{"s0", "s1", "s2"}
+	if !reflect.DeepEqual(plan.RenewShardIDs, wantRenew) {
+		t.Fatalf("RenewShardIDs = %v, want %v", plan.RenewShardIDs, wantRenew)
 	}
 
-	p := assignmentPlanner{
-		WorkerID:           "worker-b",
-		Now:                now,
-		MaxLeasesForWorker: 0,
-		MaxLeasesToSteal:   1,
-		EnableStealing:     true,
+	wantRelease := []string{"s3"}
+	if !reflect.DeepEqual(plan.ReleaseShardIDs, wantRelease) {
+		t.Fatalf("ReleaseShardIDs = %v, want %v", plan.ReleaseShardIDs, wantRelease)
 	}
-
-	plan := p.Plan(leases, []string{"worker-a", "worker-b"})
-	if len(plan.Steals) != 1 {
-		t.Fatalf("len(Steals) = %d, want 1", len(plan.Steals))
+	if len(plan.ClaimShardIDs) != 0 {
+		t.Fatalf("ClaimShardIDs = %v, want none", plan.ClaimShardIDs)
 	}
 }

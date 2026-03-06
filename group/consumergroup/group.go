@@ -86,6 +86,8 @@ type Group struct {
 	mu         sync.Mutex
 	active     map[string]bool
 	completed  map[string]bool
+	releasing  map[string]bool
+	shardStop  map[string]context.CancelFunc
 	shardCache map[string]types.Shard
 }
 
@@ -154,6 +156,8 @@ func New(cfg Config) (*Group, error) {
 		enableStealing:     cfg.EnableStealing,
 		active:             map[string]bool{},
 		completed:          map[string]bool{},
+		releasing:          map[string]bool{},
+		shardStop:          map[string]context.CancelFunc{},
 		shardCache:         map[string]types.Shard{},
 	}, nil
 }
@@ -197,6 +201,37 @@ func (g *Group) CloseShard(ctx context.Context, shardID string) error {
 	g.mu.Lock()
 	g.completed[shardID] = true
 	delete(g.active, shardID)
+	delete(g.releasing, shardID)
+	delete(g.shardStop, shardID)
+	g.mu.Unlock()
+
+	return g.repo.ReleaseLease(ctx, g.namespace(), shardID, g.workerID)
+}
+
+func (g *Group) ShardContext(parent context.Context, shardID string) (context.Context, func()) {
+	ctx, cancel := context.WithCancel(parent)
+
+	g.mu.Lock()
+	g.shardStop[shardID] = cancel
+	shouldStop := g.releasing[shardID]
+	g.mu.Unlock()
+
+	if shouldStop {
+		cancel()
+	}
+
+	return ctx, func() {
+		g.mu.Lock()
+		delete(g.shardStop, shardID)
+		g.mu.Unlock()
+	}
+}
+
+func (g *Group) ShardStopped(ctx context.Context, shardID string) error {
+	g.mu.Lock()
+	delete(g.active, shardID)
+	delete(g.releasing, shardID)
+	delete(g.shardStop, shardID)
 	g.mu.Unlock()
 
 	return g.repo.ReleaseLease(ctx, g.namespace(), shardID, g.workerID)
@@ -255,6 +290,11 @@ func (g *Group) runOnce(ctx context.Context, shardC chan types.Shard) error {
 			return err
 		}
 	}
+	for _, shardID := range plan.ReleaseShardIDs {
+		if err := g.releaseShard(ctx, shardID); err != nil {
+			return err
+		}
+	}
 
 	for _, shardID := range plan.ClaimShardIDs {
 		ok, err := g.repo.ClaimLease(ctx, g.namespace(), shardID, g.workerID, now, now.Add(g.leaseDuration))
@@ -263,15 +303,6 @@ func (g *Group) runOnce(ctx context.Context, shardC chan types.Shard) error {
 		}
 		if ok {
 			g.emitShardIfNeeded(shardC, shardID)
-		}
-	}
-	for _, steal := range plan.Steals {
-		ok, err := g.repo.StealLease(ctx, g.namespace(), steal.ShardID, steal.FromWorker, g.workerID, now, now.Add(g.leaseDuration))
-		if err != nil {
-			return err
-		}
-		if ok {
-			g.emitShardIfNeeded(shardC, steal.ShardID)
 		}
 	}
 
@@ -286,11 +317,13 @@ func (g *Group) renewOwned(ctx context.Context) error {
 	}
 
 	var shardIDs []string
+	g.mu.Lock()
 	for _, lease := range leases {
-		if lease.Owner == g.workerID {
+		if lease.Owner == g.workerID && !g.releasing[lease.ShardID] {
 			shardIDs = append(shardIDs, lease.ShardID)
 		}
 	}
+	g.mu.Unlock()
 	if len(shardIDs) == 0 {
 		return nil
 	}
@@ -300,7 +333,7 @@ func (g *Group) renewOwned(ctx context.Context) error {
 func (g *Group) emitShardIfNeeded(shardC chan types.Shard, shardID string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if g.completed[shardID] || g.active[shardID] {
+	if g.completed[shardID] || g.active[shardID] || g.releasing[shardID] {
 		return
 	}
 	shard, ok := g.shardCache[shardID]
@@ -309,6 +342,30 @@ func (g *Group) emitShardIfNeeded(shardC chan types.Shard, shardID string) {
 	}
 	g.active[shardID] = true
 	shardC <- shard
+}
+
+func (g *Group) releaseShard(ctx context.Context, shardID string) error {
+	g.mu.Lock()
+	if g.completed[shardID] {
+		g.mu.Unlock()
+		return nil
+	}
+
+	cancel := g.shardStop[shardID]
+	active := g.active[shardID]
+	if active && cancel != nil {
+		g.releasing[shardID] = true
+		g.mu.Unlock()
+		cancel()
+		return nil
+	}
+
+	delete(g.active, shardID)
+	delete(g.releasing, shardID)
+	delete(g.shardStop, shardID)
+	g.mu.Unlock()
+
+	return g.repo.ReleaseLease(ctx, g.namespace(), shardID, g.workerID)
 }
 
 func (g *Group) namespace() string {
