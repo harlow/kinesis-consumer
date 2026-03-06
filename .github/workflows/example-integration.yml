@@ -1,4 +1,4 @@
-name: Example Integration
+name: CI
 
 on:
   pull_request:
@@ -7,8 +7,24 @@ on:
       - master
 
 jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run Go test suite
+        run: go test ./...
+
   example-integration:
     runs-on: ubuntu-latest
+    needs: unit
     steps:
       - name: Checkout
         uses: actions/checkout@v4
