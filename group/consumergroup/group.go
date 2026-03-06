@@ -2,8 +2,11 @@ package consumergroup
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -47,7 +50,8 @@ type realClock struct{}
 func (realClock) Now() time.Time { return time.Now().UTC() }
 
 type Config struct {
-	AppName            string
+	GroupName          string // preferred
+	AppName            string // deprecated alias for GroupName
 	StreamName         string
 	WorkerID           string
 	KinesisClient      KinesisClient
@@ -96,14 +100,18 @@ func (noopCheckpointStore) SetCheckpoint(streamName, shardID, sequenceNumber str
 }
 
 func New(cfg Config) (*Group, error) {
-	if cfg.AppName == "" {
-		return nil, errors.New("app name is required")
+	groupName := cfg.GroupName
+	if groupName == "" {
+		groupName = cfg.AppName
+	}
+	if groupName == "" {
+		return nil, errors.New("group name is required")
 	}
 	if cfg.StreamName == "" {
 		return nil, errors.New("stream name is required")
 	}
 	if cfg.WorkerID == "" {
-		return nil, errors.New("worker id is required")
+		cfg.WorkerID = newWorkerID()
 	}
 	if cfg.KinesisClient == nil {
 		return nil, errors.New("kinesis client is required")
@@ -131,7 +139,7 @@ func New(cfg Config) (*Group, error) {
 	}
 
 	return &Group{
-		appName:            cfg.AppName,
+		appName:            groupName,
 		streamName:         cfg.StreamName,
 		workerID:           cfg.WorkerID,
 		client:             cfg.KinesisClient,
@@ -322,4 +330,19 @@ func (g *Group) listShards(ctx context.Context, streamName string) ([]types.Shar
 		}
 		input = &kinesis.ListShardsInput{NextToken: resp.NextToken}
 	}
+}
+
+func newWorkerID() string {
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		host = "worker"
+	}
+
+	buf := make([]byte, 4)
+	if _, err := rand.Read(buf); err != nil {
+		// Fallback keeps IDs unique enough for local/dev runs if crypto RNG fails.
+		return fmt.Sprintf("%s-%d", host, time.Now().UnixNano())
+	}
+
+	return fmt.Sprintf("%s-%d-%s", host, os.Getpid(), hex.EncodeToString(buf))
 }

@@ -361,6 +361,65 @@ func TestGroupCheckpointPassthrough(t *testing.T) {
 	}
 }
 
+func TestNewGroup_AutoWorkerIDWhenUnset(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+	repo := newFakeLeaseRepo(nil)
+	client := &fakeKinesisClient{shards: []types.Shard{{ShardId: aws.String("s0")}}}
+
+	g1, err := New(Config{
+		AppName:       "my-app",
+		StreamName:    "my-stream",
+		KinesisClient: client,
+		Repository:    repo,
+		Clock:         fakeClock{now: now},
+	})
+	if err != nil {
+		t.Fatalf("New(g1) error = %v", err)
+	}
+	if g1.workerID == "" {
+		t.Fatalf("expected auto-generated workerID, got empty")
+	}
+
+	g2, err := New(Config{
+		AppName:       "my-app",
+		StreamName:    "my-stream",
+		KinesisClient: client,
+		Repository:    repo,
+		Clock:         fakeClock{now: now},
+	})
+	if err != nil {
+		t.Fatalf("New(g2) error = %v", err)
+	}
+	if g2.workerID == "" {
+		t.Fatalf("expected auto-generated workerID, got empty")
+	}
+	if g1.workerID == g2.workerID {
+		t.Fatalf("expected distinct workerIDs, got same value %q", g1.workerID)
+	}
+}
+
+func TestNewGroup_PrefersGroupNameOverAppName(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+	repo := newFakeLeaseRepo(nil)
+	client := &fakeKinesisClient{shards: []types.Shard{{ShardId: aws.String("s0")}}}
+
+	g, err := New(Config{
+		GroupName:     "preferred-group",
+		AppName:       "legacy-app",
+		StreamName:    "my-stream",
+		KinesisClient: client,
+		Repository:    repo,
+		Clock:         fakeClock{now: now},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	if g.namespace() != "preferred-group#my-stream" {
+		t.Fatalf("namespace = %q, want %q", g.namespace(), "preferred-group#my-stream")
+	}
+}
+
 func TestGroupJoinRebalance_ConvergesNearEvenSplit(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
 	repo := newFakeLeaseRepo(nil)

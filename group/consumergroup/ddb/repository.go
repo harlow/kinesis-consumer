@@ -42,6 +42,7 @@ type workerItem struct {
 	ShardID         string `dynamodbav:"shard_id"`
 	WorkerID        string `dynamodbav:"worker_id"`
 	WorkerExpiresAt int64  `dynamodbav:"worker_expires_at"`
+	TTL             int64  `dynamodbav:"ttl"` // epoch seconds for DynamoDB TTL cleanup
 }
 
 func New(cfg Config) (*Repository, error) {
@@ -92,6 +93,7 @@ func (r *Repository) HeartbeatWorker(ctx context.Context, namespace, workerID st
 		ShardID:         workerSortKey(workerID),
 		WorkerID:        workerID,
 		WorkerExpiresAt: expiresAt.UnixNano() / int64(time.Millisecond),
+		TTL:             expiresAt.Unix(),
 	})
 	if err != nil {
 		return err

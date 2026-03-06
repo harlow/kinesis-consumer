@@ -9,7 +9,8 @@ import (
 
 // GroupConfig configures an opt-in DynamoDB-backed consumer group.
 type GroupConfig struct {
-	AppName         string
+	GroupName       string // preferred
+	AppName         string // deprecated alias for GroupName
 	StreamName      string
 	WorkerID        string
 	KinesisClient   consumergroup.KinesisClient
@@ -37,6 +38,7 @@ func NewGroup(cfg GroupConfig) (*consumergroup.Group, error) {
 	}
 
 	return consumergroup.New(consumergroup.Config{
+		GroupName:          cfg.GroupName,
 		AppName:            cfg.AppName,
 		StreamName:         cfg.StreamName,
 		WorkerID:           cfg.WorkerID,

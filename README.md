@@ -346,6 +346,8 @@ func main() {
 By default, `consumer.New(...).Scan(...)` consumes all shards in a single process.
 For multi-process shard coordination, use the opt-in consumer-group package.
 
+> Note: Consumer-group support is currently experimental and may evolve.
+
 ```go
 import (
 	consumer "github.com/harlow/kinesis-consumer"
@@ -361,9 +363,10 @@ if err != nil {
 
 // group (new opt-in API)
 group, err := groupddb.NewGroup(groupddb.GroupConfig{
-	AppName:       appName,
+	GroupName:     groupName, // preferred
+	AppName:       appName,   // deprecated alias
 	StreamName:    streamName,
-	WorkerID:      workerID, // unique per process
+	WorkerID:      workerID, // optional; auto-generated if empty
 	KinesisClient: kinesisClient,
 	Repository: groupddb.Config{
 		Client:    dynamoClient,
@@ -387,12 +390,18 @@ if err != nil {
 }
 ```
 
+If `WorkerID` is omitted, the library generates a unique worker ID per process.
+If both `GroupName` and `AppName` are set, `GroupName` is used.
+
 The lease table schema is:
 
 ```
 Partition key: namespace
 Sort key: shard_id
 ```
+
+For worker row cleanup, enable DynamoDB TTL on attribute `ttl`.
+Worker heartbeat rows write this field automatically.
 
 Integration tests for this path are available and opt-in:
 

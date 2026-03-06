@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"testing"
 	"time"
 
@@ -62,27 +63,51 @@ func TestRepositoryLifecycle_DynamoDBLocal(t *testing.T) {
 		t.Fatalf("active workers = %v, want [worker-a worker-b]", activeWorkers)
 	}
 
-	ok, err := repo.ClaimLease(context.Background(), namespace, "s0", "worker-a", now, now.Add(time.Minute))
+	workerA, err := client.GetItem(context.Background(), &dynamodb.GetItemInput{
+		TableName: aws.String(tableName),
+		Key: map[string]ddbt.AttributeValue{
+			"namespace": &ddbt.AttributeValueMemberS{Value: namespace},
+			"shard_id":  &ddbt.AttributeValueMemberS{Value: workerSortKey("worker-a")},
+		},
+		ConsistentRead: aws.Bool(true),
+	})
+	if err != nil {
+		t.Fatalf("GetItem(worker-a) error = %v", err)
+	}
+	rawTTL, ok := workerA.Item["ttl"].(*ddbt.AttributeValueMemberN)
+	if !ok {
+		t.Fatalf("worker ttl missing or wrong type: %#v", workerA.Item["ttl"])
+	}
+	ttl, parseErr := strconv.ParseInt(rawTTL.Value, 10, 64)
+	if parseErr != nil {
+		t.Fatalf("ttl parse error: %v", parseErr)
+	}
+	wantTTL := now.Add(time.Minute).Unix()
+	if ttl != wantTTL {
+		t.Fatalf("ttl = %d, want %d", ttl, wantTTL)
+	}
+
+	claimed, err := repo.ClaimLease(context.Background(), namespace, "s0", "worker-a", now, now.Add(time.Minute))
 	if err != nil {
 		t.Fatalf("ClaimLease(worker-a) error = %v", err)
 	}
-	if !ok {
+	if !claimed {
 		t.Fatalf("ClaimLease(worker-a) = false, want true")
 	}
 
-	ok, err = repo.ClaimLease(context.Background(), namespace, "s0", "worker-b", now, now.Add(time.Minute))
+	claimed, err = repo.ClaimLease(context.Background(), namespace, "s0", "worker-b", now, now.Add(time.Minute))
 	if err != nil {
 		t.Fatalf("ClaimLease(worker-b) error = %v", err)
 	}
-	if ok {
+	if claimed {
 		t.Fatalf("ClaimLease(worker-b) = true, want false")
 	}
 
-	ok, err = repo.StealLease(context.Background(), namespace, "s0", "worker-a", "worker-b", now, now.Add(time.Minute))
+	claimed, err = repo.StealLease(context.Background(), namespace, "s0", "worker-a", "worker-b", now, now.Add(time.Minute))
 	if err != nil {
 		t.Fatalf("StealLease() error = %v", err)
 	}
-	if !ok {
+	if !claimed {
 		t.Fatalf("StealLease() = false, want true")
 	}
 
@@ -94,11 +119,11 @@ func TestRepositoryLifecycle_DynamoDBLocal(t *testing.T) {
 		t.Fatalf("ReleaseLease() error = %v", err)
 	}
 
-	ok, err = repo.ClaimLease(context.Background(), namespace, "s0", "worker-a", now, now.Add(time.Minute))
+	claimed, err = repo.ClaimLease(context.Background(), namespace, "s0", "worker-a", now, now.Add(time.Minute))
 	if err != nil {
 		t.Fatalf("ClaimLease(after release) error = %v", err)
 	}
-	if !ok {
+	if !claimed {
 		t.Fatalf("ClaimLease(after release) = false, want true")
 	}
 }
