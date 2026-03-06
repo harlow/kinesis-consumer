@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -170,7 +171,7 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 	}
 
 	// get shard iterator
-	shardIterator, err := c.getShardIterator(ctx, c.streamName, shardID, lastSeqNum)
+	shardIterator, lastSeqNum, err := c.getShardIteratorWithCheckpointFallback(ctx, c.streamName, shardID, lastSeqNum)
 	if err != nil {
 		return fmt.Errorf("get shard iterator error: %w", err)
 	}
@@ -197,7 +198,7 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 				return fmt.Errorf("get records error: %w", err)
 			}
 
-			shardIterator, err = c.getShardIterator(ctx, c.streamName, shardID, lastSeqNum)
+			shardIterator, lastSeqNum, err = c.getShardIteratorWithCheckpointFallback(ctx, c.streamName, shardID, lastSeqNum)
 			if err != nil {
 				return fmt.Errorf("get shard iterator error: %w", err)
 			}
@@ -264,6 +265,24 @@ func deaggregateRecords(in []types.Record) ([]types.Record, error) {
 	return deaggregator.DeaggregateRecords(in)
 }
 
+func (c *Consumer) getShardIteratorWithCheckpointFallback(ctx context.Context, streamName, shardID, seqNum string) (*string, string, error) {
+	shardIterator, err := c.getShardIterator(ctx, streamName, shardID, seqNum)
+	if err == nil {
+		return shardIterator, seqNum, nil
+	}
+
+	if !isExpiredCheckpointSequenceError(err, seqNum) {
+		return nil, seqNum, err
+	}
+
+	c.logger.Log("[CONSUMER] checkpoint sequence is expired, falling back to TRIM_HORIZON:", shardID, seqNum)
+	shardIterator, err = c.getTrimHorizonShardIterator(ctx, streamName, shardID)
+	if err != nil {
+		return nil, seqNum, err
+	}
+	return shardIterator, "", nil
+}
+
 func (c *Consumer) getShardIterator(ctx context.Context, streamName, shardID, seqNum string) (*string, error) {
 	params := &kinesis.GetShardIteratorInput{
 		ShardId:    aws.String(shardID),
@@ -285,6 +304,34 @@ func (c *Consumer) getShardIterator(ctx context.Context, streamName, shardID, se
 		return nil, err
 	}
 	return res.ShardIterator, nil
+}
+
+func (c *Consumer) getTrimHorizonShardIterator(ctx context.Context, streamName, shardID string) (*string, error) {
+	res, err := c.client.GetShardIterator(ctx, &kinesis.GetShardIteratorInput{
+		ShardId:           aws.String(shardID),
+		StreamName:        aws.String(streamName),
+		ShardIteratorType: types.ShardIteratorTypeTrimHorizon,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return res.ShardIterator, nil
+}
+
+func isExpiredCheckpointSequenceError(err error, seqNum string) bool {
+	if seqNum == "" {
+		return false
+	}
+
+	oe := (*types.InvalidArgumentException)(nil)
+	if !errors.As(err, &oe) {
+		return false
+	}
+
+	// Kinesis reports expired checkpoints via InvalidArgumentException where
+	// the message references StartingSequenceNumber.
+	message := strings.ToLower(aws.ToString(oe.Message))
+	return strings.Contains(message, "startingsequencenumber") || strings.Contains(message, "starting sequence number")
 }
 
 func isRetriableError(err error) bool {

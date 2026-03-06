@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -455,6 +456,101 @@ func TestScanShard_ShardIsClosed_WithShardClosedHandler(t *testing.T) {
 	}
 	if err.Error() != "shard closed handler error: closed shard error" {
 		t.Fatalf("unexpected error: %s", err.Error())
+	}
+}
+
+func TestScanShard_ExpiredCheckpointFallsBackToTrimHorizon(t *testing.T) {
+	var (
+		mu                       sync.Mutex
+		startingSeqCalls         int
+		trimHorizonCalls         int
+		startingSequenceObserved *string
+	)
+
+	var client = &kinesisClientMock{
+		getShardIteratorMock: func(ctx context.Context, params *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {
+			mu.Lock()
+			defer mu.Unlock()
+
+			if params.StartingSequenceNumber != nil {
+				startingSeqCalls++
+				startingSequenceObserved = params.StartingSequenceNumber
+				return nil, &types.InvalidArgumentException{Message: aws.String("StartingSequenceNumber is no longer available")}
+			}
+
+			if params.ShardIteratorType == types.ShardIteratorTypeTrimHorizon {
+				trimHorizonCalls++
+				return &kinesis.GetShardIteratorOutput{
+					ShardIterator: aws.String("trim-horizon-iter"),
+				}, nil
+			}
+
+			t.Fatalf("unexpected get shard iterator request: %#v", params)
+			return nil, nil
+		},
+		getRecordsMock: func(ctx context.Context, params *kinesis.GetRecordsInput, optFns ...func(*kinesis.Options)) (*kinesis.GetRecordsOutput, error) {
+			if got := aws.ToString(params.ShardIterator); got != "trim-horizon-iter" {
+				t.Fatalf("expected fallback iterator %q, got %q", "trim-horizon-iter", got)
+			}
+			return &kinesis.GetRecordsOutput{
+				NextShardIterator: nil,
+				Records:           records,
+			}, nil
+		},
+	}
+
+	var cp = store.New()
+	if err := cp.SetCheckpoint("myStreamName", "myShard", "expiredSeqNum"); err != nil {
+		t.Fatalf("seed checkpoint error: %v", err)
+	}
+
+	c, err := New("myStreamName", WithClient(client), WithStore(cp), WithLogger(&testLogger{t}))
+	if err != nil {
+		t.Fatalf("new consumer error: %v", err)
+	}
+
+	if err := c.ScanShard(context.Background(), "myShard", func(r *Record) error { return nil }); err != nil {
+		t.Fatalf("scan shard error: %v", err)
+	}
+
+	if startingSeqCalls != 1 {
+		t.Fatalf("expected 1 starting-seq iterator call, got %d", startingSeqCalls)
+	}
+	if trimHorizonCalls != 1 {
+		t.Fatalf("expected 1 trim-horizon fallback call, got %d", trimHorizonCalls)
+	}
+	if aws.ToString(startingSequenceObserved) != "expiredSeqNum" {
+		t.Fatalf("expected starting sequence %q, got %q", "expiredSeqNum", aws.ToString(startingSequenceObserved))
+	}
+}
+
+func TestScanShard_InvalidArgumentWithoutExpiredSequencePatternDoesNotFallback(t *testing.T) {
+	var client = &kinesisClientMock{
+		getShardIteratorMock: func(ctx context.Context, params *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {
+			return nil, &types.InvalidArgumentException{Message: aws.String("invalid shard id")}
+		},
+		getRecordsMock: func(ctx context.Context, params *kinesis.GetRecordsInput, optFns ...func(*kinesis.Options)) (*kinesis.GetRecordsOutput, error) {
+			t.Fatal("get records should not be called when shard iterator fails")
+			return nil, nil
+		},
+	}
+
+	var cp = store.New()
+	if err := cp.SetCheckpoint("myStreamName", "myShard", "checkpointSeqNum"); err != nil {
+		t.Fatalf("seed checkpoint error: %v", err)
+	}
+
+	c, err := New("myStreamName", WithClient(client), WithStore(cp))
+	if err != nil {
+		t.Fatalf("new consumer error: %v", err)
+	}
+
+	err = c.ScanShard(context.Background(), "myShard", func(r *Record) error { return nil })
+	if err == nil {
+		t.Fatal("expected get shard iterator error")
+	}
+	if !strings.Contains(err.Error(), "get shard iterator error") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
