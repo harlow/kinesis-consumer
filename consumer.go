@@ -97,6 +97,11 @@ type ScanFunc func(*Record) error
 // as an error by any function.
 var ErrSkipCheckpoint = errors.New("skip checkpoint")
 
+const (
+	checkpointSetMaxAttempts = 3
+	checkpointSetRetryDelay  = 100 * time.Millisecond
+)
+
 // Scan launches a goroutine to process each of the shards in the stream. The ScanFunc
 // is passed through to each of the goroutines and called with each message pulled from
 // the stream.
@@ -227,7 +232,7 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 					}
 
 					if !errors.Is(err, ErrSkipCheckpoint) {
-						if err := c.group.SetCheckpoint(c.streamName, shardID, *r.SequenceNumber); err != nil {
+						if err := c.setCheckpointWithRetry(ctx, shardID, *r.SequenceNumber); err != nil {
 							return err
 						}
 						lastSeqNum = *r.SequenceNumber
@@ -316,6 +321,29 @@ func (c *Consumer) getTrimHorizonShardIterator(ctx context.Context, streamName, 
 		return nil, err
 	}
 	return res.ShardIterator, nil
+}
+
+func (c *Consumer) setCheckpointWithRetry(ctx context.Context, shardID, sequenceNumber string) error {
+	var err error
+	for attempt := 1; attempt <= checkpointSetMaxAttempts; attempt++ {
+		err = c.group.SetCheckpoint(c.streamName, shardID, sequenceNumber)
+		if err == nil {
+			return nil
+		}
+		if attempt == checkpointSetMaxAttempts {
+			break
+		}
+
+		c.logger.Log("[CONSUMER] checkpoint set retry:", shardID, attempt, err)
+		timer := time.NewTimer(checkpointSetRetryDelay * time.Duration(attempt))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return fmt.Errorf("checkpoint set error after retries: %w", err)
 }
 
 func isExpiredCheckpointSequenceError(err error, seqNum string) bool {
