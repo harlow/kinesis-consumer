@@ -156,13 +156,12 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 	s := newShardsInProcess()
 	for shard := range shardC {
 		shardId := aws.ToString(shard.ShardId)
-		if s.doesShardExist(shardId) {
+		if !s.tryAddShard(shardId) {
 			// safetynet: if shard already in process by another goroutine, just skipping the request
 			continue
 		}
 		wg.Add(1)
 		go func(shardID string) {
-			s.addShard(shardID)
 			defer func() {
 				s.deleteShard(shardID)
 			}()
@@ -177,7 +176,7 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 			}
 			if err != nil {
 				select {
-				case errC <- fmt.Errorf("shard %s error: %w", shardID, err):
+				case errC <- err:
 					cancel()
 				default:
 				}
@@ -215,212 +214,52 @@ func (c *Consumer) ScanBatch(ctx context.Context, fn ScanBatchFunc, opts ...Scan
 		cfg.maxSize = 100
 	}
 
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	buffers := newScanBatchBuffers()
-	var flushMu sync.Mutex
-
-	var (
-		asyncErrMu sync.Mutex
-		asyncErr   error
-	)
-	setAsyncErr := func(err error) {
-		if err == nil {
-			return
-		}
-		asyncErrMu.Lock()
-		if asyncErr == nil {
-			asyncErr = err
-		}
-		asyncErrMu.Unlock()
-		cancel()
-	}
-	getAsyncErr := func() error {
-		asyncErrMu.Lock()
-		defer asyncErrMu.Unlock()
-		return asyncErr
-	}
-
-	flush := func(flushCtx context.Context, batches map[string][]*Record) error {
-		if len(batches) == 0 {
-			return nil
-		}
-
-		flushMu.Lock()
-		defer flushMu.Unlock()
-
-		for shardID, batch := range batches {
-			if len(batch) == 0 {
-				continue
-			}
-			if err := fn(batch); err != nil {
-				return err
-			}
-			last := batch[len(batch)-1]
-			if err := c.setCheckpointWithRetry(flushCtx, shardID, aws.ToString(last.SequenceNumber)); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-
-	var tickerWG sync.WaitGroup
-	if cfg.flushInterval > 0 {
-		tickerWG.Add(1)
-		go func() {
-			defer tickerWG.Done()
-			ticker := time.NewTicker(cfg.flushInterval)
-			defer ticker.Stop()
-
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-ticker.C:
-					batches := buffers.drainAll()
-					if err := flush(ctx, batches); err != nil {
-						setAsyncErr(fmt.Errorf("batch flush error: %w", err))
-						return
-					}
-				}
-			}
-		}()
-	}
-
-	scanErr := c.Scan(ctx, func(r *Record) error {
-		shardID, batch := buffers.addAndMaybeDrain(r, cfg.maxSize)
-		if len(batch) > 0 {
-			if err := flush(ctx, map[string][]*Record{shardID: batch}); err != nil {
-				return err
-			}
-		}
-		return ErrSkipCheckpoint
-	})
-
-	cancel()
-	tickerWG.Wait()
-
-	if err := getAsyncErr(); err != nil {
-		return err
-	}
-	if scanErr != nil && !errors.Is(scanErr, context.Canceled) {
-		return scanErr
-	}
-
-	// Final flush for any residual records that did not hit size/interval thresholds.
-	if err := flush(context.Background(), buffers.drainAll()); err != nil {
-		return err
-	}
-	if err := getAsyncErr(); err != nil {
-		return err
-	}
-
-	return scanErr
+	runner := newScanBatchRunner(c, fn, cfg)
+	return runner.run(ctx)
 }
 
 // ScanShard loops over records on a specific shard, calls the callback func
 // for each record and checkpoints the progress of scan.
 func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) error {
-	// get last seq number from checkpoint
-	lastSeqNum, err := c.group.GetCheckpoint(c.streamName, shardID)
-	if err != nil {
-		return fmt.Errorf("get checkpoint error: %w", err)
-	}
-
-	// get shard iterator
-	shardIterator, lastSeqNum, err := c.getShardIteratorWithCheckpointFallback(ctx, c.streamName, shardID, lastSeqNum)
-	if err != nil {
-		return fmt.Errorf("get shard iterator error: %w", err)
-	}
-
-	c.logger.Log("[CONSUMER] start scan:", shardID, lastSeqNum)
-	defer func() {
-		c.logger.Log("[CONSUMER] stop scan:", shardID)
-	}()
-
-	scanTicker := time.NewTicker(c.scanInterval)
-	defer scanTicker.Stop()
-
-	for {
-		resp, err := c.client.GetRecords(ctx, &kinesis.GetRecordsInput{
-			Limit:         aws.Int32(int32(c.maxRecords)),
-			ShardIterator: shardIterator,
-		}, c.getRecordsOpts...)
-
-		// attempt to recover from GetRecords error
-		if err != nil {
-			c.logger.Log("[CONSUMER] get records error:", err.Error())
-
-			if !isRetriableError(err) {
-				return fmt.Errorf("get records error: %w", err)
-			}
-
-			shardIterator, lastSeqNum, err = c.getShardIteratorWithCheckpointFallback(ctx, c.streamName, shardID, lastSeqNum)
-			if err != nil {
-				return fmt.Errorf("get shard iterator error: %w", err)
-			}
-		} else {
-			// loop over records, call callback func
-			var records []types.Record
-
-			// deaggregate records
-			if c.isAggregated {
-				records, err = deaggregateRecords(resp.Records)
-				if err != nil {
-					return err
-				}
-			} else {
-				records = resp.Records
-			}
-
-			for _, r := range records {
-				select {
-				case <-ctx.Done():
-					return nil
-				default:
-					err := fn(&Record{r, shardID, resp.MillisBehindLatest})
-					if err != nil && !errors.Is(err, ErrSkipCheckpoint) {
-						return err
-					}
-
-					if !errors.Is(err, ErrSkipCheckpoint) {
-						if err := c.setCheckpointWithRetry(ctx, shardID, *r.SequenceNumber); err != nil {
-							return err
-						}
-						lastSeqNum = *r.SequenceNumber
-					}
-
-					c.counter.Add("records", 1)
-				}
-			}
-
-			if isShardClosed(resp.NextShardIterator, shardIterator) {
-				c.logger.Log("[CONSUMER] shard closed:", shardID)
-
-				if c.shardClosedHandler != nil {
-					if err := c.shardClosedHandler(c.streamName, shardID); err != nil {
-						return fmt.Errorf("shard closed handler error: %w", err)
-					}
-				}
-				return nil
-			}
-
-			shardIterator = resp.NextShardIterator
-		}
-
-		// Wait for next scan
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-scanTicker.C:
-			continue
-		}
-	}
+	return newScanShardRunner(c, shardID, fn).run(ctx)
 }
 
 func deaggregateRecords(in []types.Record) ([]types.Record, error) {
 	return deaggregator.DeaggregateRecords(in)
+}
+
+func (c *Consumer) normalizeRecords(records []types.Record) ([]types.Record, error) {
+	if !c.isAggregated {
+		return records, nil
+	}
+	return deaggregateRecords(records)
+}
+
+func (c *Consumer) processRecords(ctx context.Context, shardID string, records []types.Record, millisBehindLatest *int64, fn ScanFunc, lastSeqNum string) (string, error) {
+	for _, record := range records {
+		select {
+		case <-ctx.Done():
+			return lastSeqNum, nil
+		default:
+		}
+
+		err := fn(&Record{record, shardID, millisBehindLatest})
+		if err != nil && !errors.Is(err, ErrSkipCheckpoint) {
+			return lastSeqNum, err
+		}
+
+		if errors.Is(err, ErrSkipCheckpoint) {
+			c.counter.Add("records", 1)
+			continue
+		}
+
+		if err := c.setCheckpointWithRetry(ctx, shardID, aws.ToString(record.SequenceNumber)); err != nil {
+			return lastSeqNum, err
+		}
+		lastSeqNum = aws.ToString(record.SequenceNumber)
+		c.counter.Add("records", 1)
+	}
+	return lastSeqNum, nil
 }
 
 func (c *Consumer) getShardIteratorWithCheckpointFallback(ctx context.Context, streamName, shardID, seqNum string) (*string, string, error) {
@@ -533,56 +372,13 @@ type shards struct {
 	shardsInProcess sync.Map
 }
 
-type scanBatchBuffers struct {
-	mu      sync.Mutex
-	byShard map[string][]*Record
-}
-
-func newScanBatchBuffers() *scanBatchBuffers {
-	return &scanBatchBuffers{byShard: make(map[string][]*Record)}
-}
-
-func (b *scanBatchBuffers) addAndMaybeDrain(r *Record, maxSize int) (string, []*Record) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	b.byShard[r.ShardID] = append(b.byShard[r.ShardID], r)
-	if len(b.byShard[r.ShardID]) < maxSize {
-		return "", nil
-	}
-
-	shardID := r.ShardID
-	batch := b.byShard[shardID]
-	delete(b.byShard, shardID)
-	return shardID, batch
-}
-
-func (b *scanBatchBuffers) drainAll() map[string][]*Record {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	out := make(map[string][]*Record, len(b.byShard))
-	for shardID, batch := range b.byShard {
-		if len(batch) == 0 {
-			continue
-		}
-		out[shardID] = batch
-	}
-	b.byShard = make(map[string][]*Record)
-	return out
-}
-
 func newShardsInProcess() *shards {
 	return &shards{}
 }
 
-func (s *shards) addShard(shardId string) {
-	s.shardsInProcess.Store(shardId, struct{}{})
-}
-
-func (s *shards) doesShardExist(shardId string) bool {
-	_, ok := s.shardsInProcess.Load(shardId)
-	return ok
+func (s *shards) tryAddShard(shardId string) bool {
+	_, loaded := s.shardsInProcess.LoadOrStore(shardId, struct{}{})
+	return !loaded
 }
 
 func (s *shards) deleteShard(shardId string) {

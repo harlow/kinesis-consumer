@@ -280,6 +280,142 @@ func TestScanBatch_CallbackErrorStopsAndSkipsCheckpoint(t *testing.T) {
 	}
 }
 
+func TestScanBatch_FinalFlushAfterCancellationBeforeTick(t *testing.T) {
+	var getRecordsCalls int
+
+	client := &kinesisClientMock{
+		getShardIteratorMock: func(ctx context.Context, params *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {
+			return &kinesis.GetShardIteratorOutput{
+				ShardIterator: aws.String("iterator"),
+			}, nil
+		},
+		getRecordsMock: func(ctx context.Context, params *kinesis.GetRecordsInput, optFns ...func(*kinesis.Options)) (*kinesis.GetRecordsOutput, error) {
+			getRecordsCalls++
+			if getRecordsCalls == 1 {
+				return &kinesis.GetRecordsOutput{
+					NextShardIterator: aws.String("iterator-2"),
+					Records:           records,
+				}, nil
+			}
+
+			<-ctx.Done()
+			return &kinesis.GetRecordsOutput{
+				NextShardIterator: aws.String("iterator-3"),
+			}, nil
+		},
+		listShardsMock: func(ctx context.Context, params *kinesis.ListShardsInput, optFns ...func(*kinesis.Options)) (*kinesis.ListShardsOutput, error) {
+			return &kinesis.ListShardsOutput{
+				Shards: []types.Shard{{ShardId: aws.String("myShard")}},
+			}, nil
+		},
+	}
+	cp := store.New()
+
+	c, err := New("myStreamName",
+		WithClient(client),
+		WithStore(cp),
+		WithLogger(&testLogger{t}),
+	)
+	if err != nil {
+		t.Fatalf("new consumer error: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+
+	var gotBatches int
+	var gotCount int
+	err = c.ScanBatch(ctx, func(batch []*Record) error {
+		gotBatches++
+		gotCount += len(batch)
+		return nil
+	}, WithBatchMaxSize(100), WithBatchFlushInterval(time.Hour))
+	if err != nil {
+		t.Fatalf("ScanBatch error: %v", err)
+	}
+
+	if gotBatches != 1 || gotCount != 2 {
+		t.Fatalf("unexpected batch stats after cancellation: batches=%d count=%d", gotBatches, gotCount)
+	}
+
+	val, err := cp.GetCheckpoint("myStreamName", "myShard")
+	if err != nil {
+		t.Fatalf("checkpoint error: %v", err)
+	}
+	if val != "lastSeqNum" {
+		t.Fatalf("checkpoint = %q, want %q", val, "lastSeqNum")
+	}
+}
+
+func TestScanBatch_AsyncFlushErrorStopsScan(t *testing.T) {
+	var getRecordsCalls int
+
+	client := &kinesisClientMock{
+		getShardIteratorMock: func(ctx context.Context, params *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {
+			return &kinesis.GetShardIteratorOutput{
+				ShardIterator: aws.String("iterator"),
+			}, nil
+		},
+		getRecordsMock: func(ctx context.Context, params *kinesis.GetRecordsInput, optFns ...func(*kinesis.Options)) (*kinesis.GetRecordsOutput, error) {
+			getRecordsCalls++
+			if getRecordsCalls == 1 {
+				return &kinesis.GetRecordsOutput{
+					NextShardIterator: aws.String("iterator-2"),
+					Records: []types.Record{
+						{
+							Data:           []byte("record"),
+							SequenceNumber: aws.String("seq-1"),
+						},
+					},
+				}, nil
+			}
+
+			<-ctx.Done()
+			return &kinesis.GetRecordsOutput{
+				NextShardIterator: aws.String("iterator-3"),
+			}, nil
+		},
+		listShardsMock: func(ctx context.Context, params *kinesis.ListShardsInput, optFns ...func(*kinesis.Options)) (*kinesis.ListShardsOutput, error) {
+			return &kinesis.ListShardsOutput{
+				Shards: []types.Shard{{ShardId: aws.String("myShard")}},
+			}, nil
+		},
+	}
+	cp := store.New()
+
+	c, err := New("myStreamName",
+		WithClient(client),
+		WithStore(cp),
+		WithLogger(&testLogger{t}),
+	)
+	if err != nil {
+		t.Fatalf("new consumer error: %v", err)
+	}
+
+	callbackErr := errors.New("async batch callback error")
+	err = c.ScanBatch(context.Background(), func(batch []*Record) error {
+		return callbackErr
+	}, WithBatchMaxSize(100), WithBatchFlushInterval(10*time.Millisecond))
+	if !errors.Is(err, callbackErr) {
+		t.Fatalf("ScanBatch error = %v, want %v", err, callbackErr)
+	}
+	if !strings.Contains(err.Error(), "batch flush error") {
+		t.Fatalf("expected async flush error to be wrapped, got %v", err)
+	}
+
+	val, err := cp.GetCheckpoint("myStreamName", "myShard")
+	if err != nil {
+		t.Fatalf("checkpoint error: %v", err)
+	}
+	if val != "" {
+		t.Fatalf("checkpoint = %q, want empty", val)
+	}
+}
+
 func TestScan_ListShardsError(t *testing.T) {
 	mockError := errors.New("mock list shards error")
 	client := &kinesisClientMock{
@@ -342,6 +478,109 @@ func TestScan_GetShardIteratorError(t *testing.T) {
 	err = c.Scan(ctx, fn)
 	if !errors.Is(err, mockError) {
 		t.Errorf("expected an error from getShardIterator, but instead got %v", err)
+	}
+}
+
+func TestScan_CloseableGroupClosesProcessedShard(t *testing.T) {
+	var closeCalls int
+
+	client := &kinesisClientMock{
+		getShardIteratorMock: func(ctx context.Context, params *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {
+			return &kinesis.GetShardIteratorOutput{
+				ShardIterator: aws.String("iterator"),
+			}, nil
+		},
+		getRecordsMock: func(ctx context.Context, params *kinesis.GetRecordsInput, optFns ...func(*kinesis.Options)) (*kinesis.GetRecordsOutput, error) {
+			return &kinesis.GetRecordsOutput{
+				NextShardIterator: nil,
+				Records: []types.Record{
+					{
+						Data:           []byte("record"),
+						SequenceNumber: aws.String("seq-1"),
+					},
+				},
+			}, nil
+		},
+	}
+
+	c, err := New("myStreamName",
+		WithClient(client),
+		WithGroup(&closeableGroupMock{
+			closeShardMock: func(ctx context.Context, shardID string) error {
+				closeCalls++
+				return nil
+			},
+		}),
+	)
+	if err != nil {
+		t.Fatalf("new consumer error: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := c.Scan(ctx, func(r *Record) error {
+		cancel()
+		return nil
+	}); err != nil {
+		t.Fatalf("scan returned unexpected error %v", err)
+	}
+
+	if closeCalls != 1 {
+		t.Fatalf("expected CloseShard to be called once, got %d", closeCalls)
+	}
+}
+
+func TestScan_DuplicateShardIsProcessedOnce(t *testing.T) {
+	var (
+		mu                    sync.Mutex
+		getShardIteratorCalls int
+	)
+
+	client := &kinesisClientMock{
+		getShardIteratorMock: func(ctx context.Context, params *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {
+			mu.Lock()
+			getShardIteratorCalls++
+			mu.Unlock()
+			return &kinesis.GetShardIteratorOutput{
+				ShardIterator: aws.String("iterator"),
+			}, nil
+		},
+		getRecordsMock: func(ctx context.Context, params *kinesis.GetRecordsInput, optFns ...func(*kinesis.Options)) (*kinesis.GetRecordsOutput, error) {
+			return &kinesis.GetRecordsOutput{
+				NextShardIterator: nil,
+				Records: []types.Record{
+					{
+						Data:           []byte("record"),
+						SequenceNumber: aws.String("seq-1"),
+					},
+				},
+			}, nil
+		},
+	}
+
+	c, err := New("myStreamName",
+		WithClient(client),
+		WithGroup(&duplicateShardGroup{}),
+	)
+	if err != nil {
+		t.Fatalf("new consumer error: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := c.Scan(ctx, func(r *Record) error {
+		cancel()
+		return nil
+	}); err != nil {
+		t.Fatalf("scan returned unexpected error %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if getShardIteratorCalls != 1 {
+		t.Fatalf("expected duplicate shard to be processed once, got %d get-shard-iterator calls", getShardIteratorCalls)
 	}
 }
 
@@ -556,6 +795,51 @@ func TestScanShard_SkipCheckpointRecoveryUsesLastPersistedCheckpoint(t *testing.
 
 	if secondCallStartSeq == nil || aws.ToString(secondCallStartSeq) != "firstSeqNum" {
 		t.Fatalf("expected shard iterator refresh from %q, got %q", "firstSeqNum", aws.ToString(secondCallStartSeq))
+	}
+}
+
+func TestScanShard_ProvisionedThroughputExceededRetries(t *testing.T) {
+	var getShardIteratorCalls int
+
+	client := &kinesisClientMock{
+		getShardIteratorMock: func(ctx context.Context, params *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {
+			getShardIteratorCalls++
+			return &kinesis.GetShardIteratorOutput{
+				ShardIterator: aws.String(fmt.Sprintf("iter-%d", getShardIteratorCalls)),
+			}, nil
+		},
+		getRecordsMock: func(ctx context.Context, params *kinesis.GetRecordsInput, optFns ...func(*kinesis.Options)) (*kinesis.GetRecordsOutput, error) {
+			switch aws.ToString(params.ShardIterator) {
+			case "iter-1":
+				return nil, &types.ProvisionedThroughputExceededException{Message: aws.String("throttled")}
+			case "iter-2":
+				return &kinesis.GetRecordsOutput{
+					NextShardIterator: nil,
+					Records: []types.Record{
+						{
+							Data:           []byte("record"),
+							SequenceNumber: aws.String("seq-1"),
+						},
+					},
+				}, nil
+			default:
+				t.Fatalf("unexpected shard iterator: %s", aws.ToString(params.ShardIterator))
+				return nil, nil
+			}
+		},
+	}
+
+	c, err := New("myStreamName", WithClient(client))
+	if err != nil {
+		t.Fatalf("new consumer error: %v", err)
+	}
+
+	if err := c.ScanShard(context.Background(), "myShard", func(r *Record) error { return nil }); err != nil {
+		t.Fatalf("scan shard error: %v", err)
+	}
+
+	if getShardIteratorCalls != 2 {
+		t.Fatalf("expected iterator refresh after throughput error, got %d get-shard-iterator calls", getShardIteratorCalls)
 	}
 }
 
@@ -942,6 +1226,55 @@ func (c *kinesisClientMock) GetShardIterator(ctx context.Context, params *kinesi
 type groupMock struct {
 	getCheckpointMock func(streamName, shardID string) (string, error)
 	setCheckpointMock func(streamName, shardID, sequenceNumber string) error
+}
+
+type duplicateShardGroup struct{}
+
+func (g *duplicateShardGroup) Start(ctx context.Context, shardC chan types.Shard) error {
+	shard := types.Shard{ShardId: aws.String("myShard")}
+	shardC <- shard
+	shardC <- shard
+	return nil
+}
+
+func (g *duplicateShardGroup) GetCheckpoint(streamName, shardID string) (string, error) {
+	return "", nil
+}
+
+func (g *duplicateShardGroup) SetCheckpoint(streamName, shardID, sequenceNumber string) error {
+	return nil
+}
+
+type closeableGroupMock struct {
+	closeShardMock    func(ctx context.Context, shardID string) error
+	getCheckpointMock func(streamName, shardID string) (string, error)
+	setCheckpointMock func(streamName, shardID, sequenceNumber string) error
+}
+
+func (g *closeableGroupMock) Start(ctx context.Context, shardC chan types.Shard) error {
+	shardC <- types.Shard{ShardId: aws.String("myShard")}
+	return nil
+}
+
+func (g *closeableGroupMock) GetCheckpoint(streamName, shardID string) (string, error) {
+	if g.getCheckpointMock != nil {
+		return g.getCheckpointMock(streamName, shardID)
+	}
+	return "", nil
+}
+
+func (g *closeableGroupMock) SetCheckpoint(streamName, shardID, sequenceNumber string) error {
+	if g.setCheckpointMock != nil {
+		return g.setCheckpointMock(streamName, shardID, sequenceNumber)
+	}
+	return nil
+}
+
+func (g *closeableGroupMock) CloseShard(ctx context.Context, shardID string) error {
+	if g.closeShardMock != nil {
+		return g.closeShardMock(ctx, shardID)
+	}
+	return nil
 }
 
 func (g *groupMock) Start(ctx context.Context, shardC chan types.Shard) error {

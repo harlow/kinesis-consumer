@@ -302,3 +302,78 @@ func TestCheckpoint_Shutdown_SaveError(t *testing.T) {
 		t.Errorf("there were unfulfilled expectations: %s", err)
 	}
 }
+
+func TestCheckpoint_SaveClearsFlushedCheckpoints(t *testing.T) {
+	appName := "streamConsumer"
+	tableName := "checkpoint"
+	connString := "UserID=root;Password=myPassword;Host=localhost;Port=5432;Database=myDataBase;"
+	streamName := "myStreamName"
+	shardID := "shardId-00000000"
+	expectedSequenceNumber := "49578481031144599192696750682534686652010819674221576194"
+	maxInterval := time.Second
+	connMock, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("error occurred during the sqlmock creation. cause: %v", err)
+	}
+	ck, err := New(appName, tableName, connString, WithMaxInterval(maxInterval))
+	if err != nil {
+		t.Fatalf("error occurred during the checkpoint creation. cause: %v", err)
+	}
+	ck.SetConn(connMock)
+
+	namespace := fmt.Sprintf("%s-%s", appName, streamName)
+	expectedSQLRegexString := fmt.Sprintf(`INSERT INTO %s \(namespace, shard_id, sequence_number\) VALUES\(\$1, \$2, \$3\) ON CONFLICT \(namespace, shard_id\) DO UPDATE SET sequence_number= \$3;`, tableName)
+	result := sqlmock.NewResult(0, 1)
+	mock.ExpectExec(expectedSQLRegexString).WithArgs(namespace, shardID, expectedSequenceNumber).WillReturnResult(result)
+
+	if err := ck.SetCheckpoint(streamName, shardID, expectedSequenceNumber); err != nil {
+		t.Fatalf("unable to set checkpoint for data initialization. cause: %v", err)
+	}
+	if err := ck.save(); err != nil {
+		t.Fatalf("first save failed. cause: %v", err)
+	}
+	if err := ck.save(); err != nil {
+		t.Fatalf("second save should be a no-op. cause: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("there were unfulfilled expectations: %s", err)
+	}
+}
+
+func TestCheckpoint_SaveErrorRetainsCheckpointsForRetry(t *testing.T) {
+	appName := "streamConsumer"
+	tableName := "checkpoint"
+	connString := "UserID=root;Password=myPassword;Host=localhost;Port=5432;Database=myDataBase;"
+	streamName := "myStreamName"
+	shardID := "shardId-00000000"
+	expectedSequenceNumber := "49578481031144599192696750682534686652010819674221576194"
+	maxInterval := time.Second
+	connMock, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("error occurred during the sqlmock creation. cause: %v", err)
+	}
+	ck, err := New(appName, tableName, connString, WithMaxInterval(maxInterval))
+	if err != nil {
+		t.Fatalf("error occurred during the checkpoint creation. cause: %v", err)
+	}
+	ck.SetConn(connMock)
+
+	namespace := fmt.Sprintf("%s-%s", appName, streamName)
+	expectedSQLRegexString := fmt.Sprintf(`INSERT INTO %s \(namespace, shard_id, sequence_number\) VALUES\(\$1, \$2, \$3\) ON CONFLICT \(namespace, shard_id\) DO UPDATE SET sequence_number= \$3;`, tableName)
+	result := sqlmock.NewResult(0, 1)
+	mock.ExpectExec(expectedSQLRegexString).WithArgs(namespace, shardID, expectedSequenceNumber).WillReturnError(errors.New("an error"))
+	mock.ExpectExec(expectedSQLRegexString).WithArgs(namespace, shardID, expectedSequenceNumber).WillReturnResult(result)
+
+	if err := ck.SetCheckpoint(streamName, shardID, expectedSequenceNumber); err != nil {
+		t.Fatalf("unable to set checkpoint for data initialization. cause: %v", err)
+	}
+	if err := ck.save(); err == nil {
+		t.Fatal("expected first save to fail")
+	}
+	if err := ck.save(); err != nil {
+		t.Fatalf("expected second save to retry retained checkpoint. cause: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("there were unfulfilled expectations: %s", err)
+	}
+}
