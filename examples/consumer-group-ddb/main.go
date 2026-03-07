@@ -59,6 +59,10 @@ func main() {
 		ddbEndpoint     = flag.String("ddb-endpoint", "http://localhost:8000", "DynamoDB endpoint")
 		kinesisEndpoint = flag.String("ksis-endpoint", "http://localhost:4567", "Kinesis endpoint")
 		awsRegion       = flag.String("region", "us-west-2", "AWS Region")
+		leaseDuration   = flag.Duration("lease-duration", 20*time.Second, "Lease duration for consumer-group coordination")
+		renewInterval   = flag.Duration("renew-interval", 5*time.Second, "Lease renewal interval for consumer-group coordination")
+		assignInterval  = flag.Duration("assign-interval", 5*time.Second, "Lease assignment interval for consumer-group coordination")
+		scanInterval    = flag.Duration("scan-interval", 250*time.Millisecond, "Consumer scan polling interval")
 	)
 	flag.Parse()
 
@@ -121,9 +125,9 @@ func main() {
 			TableName: *leaseTable,
 		},
 		CheckpointStore: ck,
-		LeaseDuration:   20 * time.Second,
-		RenewInterval:   5 * time.Second,
-		AssignInterval:  5 * time.Second,
+		LeaseDuration:   *leaseDuration,
+		RenewInterval:   *renewInterval,
+		AssignInterval:  *assignInterval,
 		// Lease stealing is disabled in the example because the current
 		// consumer API does not provide shard revocation for in-flight scans.
 		EnableStealing:   false,
@@ -141,6 +145,7 @@ func main() {
 		consumer.WithStore(ck),
 		consumer.WithCounter(counter),
 		consumer.WithLogger(logger),
+		consumer.WithScanInterval(*scanInterval),
 	)
 	if err != nil {
 		log.Fatalf("consumer error: %v", err)

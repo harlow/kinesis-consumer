@@ -6,6 +6,13 @@ import (
 	"time"
 )
 
+const (
+	groupTestLeaseDuration  = 6 * time.Second
+	groupTestRenewInterval  = 1 * time.Second
+	groupTestAssignInterval = 1 * time.Second
+	groupTestScanInterval   = 50 * time.Millisecond
+)
+
 func TestGroupExample_StartBeforeStreamExists(t *testing.T) {
 	requireExampleIntegration(t)
 	kinesisClient := mustLocalKinesisClient(t)
@@ -27,13 +34,13 @@ func TestGroupExample_StartBeforeStreamExists(t *testing.T) {
 	}, "workers to stay alive before stream creation")
 
 	createStream(t, kinesisClient, stream, 2)
-	waitFor(t, 20*time.Second, func() bool {
+	waitFor(t, 10*time.Second, func() bool {
 		return strings.Contains(workerA.Logs(), "start scan:") && strings.Contains(workerB.Logs(), "start scan:")
 	}, "both workers to start scanning after stream creation")
 
 	putRecords(t, kinesisClient, stream, "startup", 20)
 
-	deadline := time.Now().Add(30 * time.Second)
+	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		recordsA := parseGroupRecords(workerA.Logs())
 		recordsB := parseGroupRecords(workerB.Logs())
@@ -74,20 +81,20 @@ func TestGroupExample_LateJoinRebalancesWithoutDuplicates(t *testing.T) {
 	createStream(t, kinesisClient, stream, 2)
 
 	workerA := startGroupWorker(t, groupBin, stream, groupName, leaseTable, checkpointTable, "worker-a")
-	waitFor(t, 20*time.Second, func() bool {
+	waitFor(t, 10*time.Second, func() bool {
 		return strings.Contains(workerA.Logs(), "start scan:")
 	}, "worker-a to start scanning")
 
 	putRecords(t, kinesisClient, stream, "before", 20)
-	waitFor(t, 30*time.Second, func() bool {
+	waitFor(t, 15*time.Second, func() bool {
 		return len(parseGroupRecords(workerA.Logs())) > 0
 	}, "worker-a to consume initial batch")
 
 	workerB := startGroupWorker(t, groupBin, stream, groupName, leaseTable, checkpointTable, "worker-b")
-	time.Sleep(15 * time.Second)
+	time.Sleep(4 * time.Second)
 	putRecords(t, kinesisClient, stream, "after", 40)
 
-	waitFor(t, 40*time.Second, func() bool {
+	waitFor(t, 20*time.Second, func() bool {
 		recordsA := parseGroupRecords(workerA.Logs())
 		recordsB := parseGroupRecords(workerB.Logs())
 		return countUniqueSeq(recordsA, recordsB) >= 60
@@ -129,12 +136,12 @@ func TestGroupExample_FailoverAfterLeaseExpiry(t *testing.T) {
 
 	workerA := startGroupWorker(t, groupBin, stream, groupName, leaseTable, checkpointTable, "worker-a")
 	workerB := startGroupWorker(t, groupBin, stream, groupName, leaseTable, checkpointTable, "worker-b")
-	waitFor(t, 20*time.Second, func() bool {
+	waitFor(t, 10*time.Second, func() bool {
 		return strings.Contains(workerA.Logs(), "start scan:") && strings.Contains(workerB.Logs(), "start scan:")
 	}, "workers to start scanning before failover batch")
 
 	putRecords(t, kinesisClient, stream, "before", 20)
-	waitFor(t, 30*time.Second, func() bool {
+	waitFor(t, 15*time.Second, func() bool {
 		recordsA := parseGroupRecords(workerA.Logs())
 		recordsB := parseGroupRecords(workerB.Logs())
 		return countUniqueSeq(recordsA, recordsB) >= 20
@@ -144,11 +151,10 @@ func TestGroupExample_FailoverAfterLeaseExpiry(t *testing.T) {
 		t.Fatalf("workerB.Kill() error = %v", err)
 	}
 
-	// Example config uses LeaseDuration=20s and AssignInterval=5s.
-	time.Sleep(28 * time.Second)
+	time.Sleep(groupTestLeaseDuration + 3*time.Second)
 
 	putRecords(t, kinesisClient, stream, "after", 20)
-	waitFor(t, 40*time.Second, func() bool {
+	waitFor(t, 20*time.Second, func() bool {
 		recordsA := parseGroupRecords(workerA.Logs())
 		return countTag(recordsA, "after") >= 20
 	}, "worker-a to consume post-failover batch")
@@ -180,6 +186,10 @@ func startGroupWorker(t *testing.T, bin, stream, group, leaseTable, checkpointTa
 		"-worker-id", workerID,
 		"-ksis-endpoint", localKinesisEndpoint(),
 		"-ddb-endpoint", localDynamoEndpoint(),
+		"-lease-duration", groupTestLeaseDuration.String(),
+		"-renew-interval", groupTestRenewInterval.String(),
+		"-assign-interval", groupTestAssignInterval.String(),
+		"-scan-interval", groupTestScanInterval.String(),
 	}
 	return startProcess(t, workerID, bin, args, nil)
 }
