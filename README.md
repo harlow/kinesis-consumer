@@ -1,6 +1,6 @@
 # Golang Kinesis Consumer
 
-![technology Go](https://img.shields.io/badge/technology-go-blue.svg) [![Build Status](https://travis-ci.com/harlow/kinesis-consumer.svg?branch=master)](https://travis-ci.com/harlow/kinesis-consumer) [![GoDoc](https://godoc.org/github.com/harlow/kinesis-consumer?status.svg)](https://godoc.org/github.com/harlow/kinesis-consumer) [![GoReportCard](https://goreportcard.com/badge/github.com/harlow/kinesis-consumer)](https://goreportcard.com/report/harlow/kinesis-consumer)
+![technology Go](https://img.shields.io/badge/technology-go-blue.svg) [![GoDoc](https://godoc.org/github.com/harlow/kinesis-consumer?status.svg)](https://godoc.org/github.com/harlow/kinesis-consumer) [![GoReportCard](https://goreportcard.com/badge/github.com/harlow/kinesis-consumer)](https://goreportcard.com/report/harlow/kinesis-consumer)
 
 Kinesis consumer applications written in Go. This library is intended to be a lightweight wrapper around the Kinesis API to read records, save checkpoints (with swappable backends), and gracefully recover from service timeouts/errors.
 
@@ -119,6 +119,72 @@ err := c.Scan(ctx, func(r *consumer.Record) error {
 	fmt.Println(string(r.Data))
 	return nil // continue scanning
 })
+```
+
+### Consumer Groups (DynamoDB Leases, Opt-In)
+
+By default, `consumer.New(...).Scan(...)` consumes all shards in a single process.
+For multi-process shard coordination, use the opt-in consumer-group package.
+
+> Note: Consumer-group support is currently experimental and may evolve.
+
+```go
+import (
+	consumer "github.com/harlow/kinesis-consumer"
+	groupddb "github.com/harlow/kinesis-consumer/group/consumergroup/ddb"
+	checkpointddb "github.com/harlow/kinesis-consumer/store/ddb"
+)
+
+// checkpoint store (existing API)
+ck, err := checkpointddb.New(appName, checkpointTable)
+if err != nil {
+	log.Fatalf("checkpoint store error: %v", err)
+}
+
+// group (new opt-in API)
+group, err := groupddb.NewGroup(groupddb.GroupConfig{
+	GroupName:   groupName, // preferred
+	AppName:     appName,   // deprecated alias
+	StreamName:  streamName,
+	WorkerID:    workerID, // optional; auto-generated if empty
+	KinesisClient: kinesisClient,
+	Repository: groupddb.Config{
+		Client:    dynamoClient,
+		TableName: leaseTable,
+	},
+	CheckpointStore: ck,
+})
+if err != nil {
+	log.Fatalf("group error: %v", err)
+}
+
+c, err := consumer.New(
+	streamName,
+	consumer.WithGroup(group),
+	consumer.WithStore(ck), // keep checkpoints consistent with group
+)
+if err != nil {
+	log.Fatalf("consumer error: %v", err)
+}
+```
+
+If `WorkerID` is omitted, the library generates a unique worker ID per process.
+If both `GroupName` and `AppName` are set, `GroupName` is used.
+
+The lease table schema is:
+
+```
+Partition key: namespace
+Sort key: shard_id
+```
+
+For worker row cleanup, enable DynamoDB TTL on attribute `ttl`.
+Worker heartbeat rows write this field automatically.
+
+Integration tests for this path are available and opt-in:
+
+```bash
+RUN_DDB_INTEGRATION=1 DDB_ENDPOINT=http://localhost:8000 go test ./group/consumergroup/... -run DynamoDB -v
 ```
 
 ## Options
@@ -357,74 +423,6 @@ func main() {
 			Level:   alog.DebugLevel,
 		},
 	}
-```
-
-### Consumer Groups (DynamoDB Leases, Opt-In)
-
-By default, `consumer.New(...).Scan(...)` consumes all shards in a single process.
-For multi-process shard coordination, use the opt-in consumer-group package.
-
-> Note: Consumer-group support is currently experimental and may evolve.
-
-```go
-import (
-	consumer "github.com/harlow/kinesis-consumer"
-	groupddb "github.com/harlow/kinesis-consumer/group/consumergroup/ddb"
-	checkpointddb "github.com/harlow/kinesis-consumer/store/ddb"
-)
-
-// checkpoint store (existing API)
-ck, err := checkpointddb.New(appName, checkpointTable)
-if err != nil {
-	log.Fatalf("checkpoint store error: %v", err)
-}
-
-// group (new opt-in API)
-group, err := groupddb.NewGroup(groupddb.GroupConfig{
-	GroupName:     groupName, // preferred
-	AppName:       appName,   // deprecated alias
-	StreamName:    streamName,
-	WorkerID:      workerID, // optional; auto-generated if empty
-	KinesisClient: kinesisClient,
-	Repository: groupddb.Config{
-		Client:    dynamoClient,
-		TableName: leaseTable,
-	},
-	CheckpointStore: ck,
-	EnableStealing:  true,
-	MaxLeasesToSteal: 1,
-})
-if err != nil {
-	log.Fatalf("group error: %v", err)
-}
-
-c, err := consumer.New(
-	streamName,
-	consumer.WithGroup(group),
-	consumer.WithStore(ck), // keep checkpoints consistent with group
-)
-if err != nil {
-	log.Fatalf("consumer error: %v", err)
-}
-```
-
-If `WorkerID` is omitted, the library generates a unique worker ID per process.
-If both `GroupName` and `AppName` are set, `GroupName` is used.
-
-The lease table schema is:
-
-```
-Partition key: namespace
-Sort key: shard_id
-```
-
-For worker row cleanup, enable DynamoDB TTL on attribute `ttl`.
-Worker heartbeat rows write this field automatically.
-
-Integration tests for this path are available and opt-in:
-
-```bash
-RUN_DDB_INTEGRATION=1 DDB_ENDPOINT=http://localhost:8000 go test ./group/consumergroup/... -run DynamoDB -v
 ```
 
 # Examples
