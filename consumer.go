@@ -183,7 +183,7 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 			defer shardCleanup()
 
 			var err error
-			if err = c.ScanShard(shardCtx, shardID, fn); err != nil {
+			if err = c.scanShard(shardCtx, shardID, fn); err != nil {
 				err = fmt.Errorf("shard %s error: %w", shardID, err)
 			} else if shardCtx.Err() != nil && ctx.Err() == nil {
 				if stoppable, ok := c.group.(shardStopHandler); ok {
@@ -211,7 +211,8 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 		close(errC)
 	}()
 
-	return <-errC
+	err := <-errC
+	return c.finishScan(err)
 }
 
 // ScanBatch scans all shards and delivers buffered records to a batch callback.
@@ -243,6 +244,11 @@ func (c *Consumer) ScanBatch(ctx context.Context, fn ScanBatchFunc, opts ...Scan
 // ScanShard loops over records on a specific shard, calls the callback func
 // for each record and checkpoints the progress of scan.
 func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) error {
+	err := c.scanShard(ctx, shardID, fn)
+	return c.finishScan(err)
+}
+
+func (c *Consumer) scanShard(ctx context.Context, shardID string, fn ScanFunc) error {
 	return newScanShardRunner(c, shardID, fn).run(ctx)
 }
 
@@ -358,6 +364,26 @@ func (c *Consumer) setCheckpointWithRetry(ctx context.Context, shardID, sequence
 		}
 	}
 	return fmt.Errorf("checkpoint set error after retries: %w", err)
+}
+
+func (c *Consumer) finishScan(scanErr error) error {
+	if flushErr := c.flushCheckpoints(); flushErr != nil {
+		if scanErr == nil {
+			return fmt.Errorf("checkpoint flush error: %w", flushErr)
+		}
+		c.logger.Log("[CONSUMER] checkpoint flush error:", flushErr)
+	}
+	return scanErr
+}
+
+func (c *Consumer) flushCheckpoints() error {
+	if flushable, ok := c.group.(FlushableGroup); ok {
+		return flushable.Flush()
+	}
+	if flushable, ok := c.store.(FlushableStore); ok {
+		return flushable.Flush()
+	}
+	return nil
 }
 
 func isExpiredCheckpointSequenceError(err error, seqNum string) bool {

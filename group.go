@@ -13,6 +13,11 @@ type Group interface {
 	SetCheckpoint(streamName, shardID, sequenceNumber string) error
 }
 
+type FlushableGroup interface {
+	Group
+	Flush() error
+}
+
 type CloseableGroup interface {
 	Group
 	// Allows shard processors to tell the group when the shard has been

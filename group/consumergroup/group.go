@@ -197,6 +197,14 @@ func (g *Group) SetCheckpoint(streamName, shardID, sequenceNumber string) error 
 	return g.store.SetCheckpoint(streamName, shardID, sequenceNumber)
 }
 
+func (g *Group) Flush() error {
+	flushable, ok := g.store.(interface{ Flush() error })
+	if !ok {
+		return nil
+	}
+	return flushable.Flush()
+}
+
 func (g *Group) CloseShard(ctx context.Context, shardID string) error {
 	g.mu.Lock()
 	g.completed[shardID] = true

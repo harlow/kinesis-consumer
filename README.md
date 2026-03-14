@@ -16,7 +16,7 @@ Get the package source:
 
     $ go get github.com/harlow/kinesis-consumer
 
-Note: This repo now requires the AWS SDK V2 package. If you are still using
+Note: This repo requires the AWS SDK V2 package. If you are still using
 AWS SDK V1 then use: https://github.com/harlow/kinesis-consumer/releases/tag/v0.3.5
 
 ## Overview
@@ -126,7 +126,7 @@ err := c.Scan(ctx, func(r *consumer.Record) error {
 By default, `consumer.New(...).Scan(...)` consumes all shards in a single process.
 For multi-process shard coordination, use the opt-in consumer-group package.
 
-> Note: Consumer-group support is currently experimental and may evolve.
+> Note: Consumer-group support is experimental and may evolve.
 
 ```go
 import (
@@ -211,6 +211,13 @@ if err != nil {
 	log.Log("consumer error: %v", err)
 }
 ```
+
+Checkpoint durability depends on the store implementation:
+
+- `store/redis` writes checkpoints immediately.
+- `store/ddb`, `store/postgres`, and `store/mysql` buffer checkpoints in memory and flush them periodically.
+- `consumer.Scan(...)`, `consumer.ScanShard(...)`, and `consumer.ScanBatch(...)` flush buffered checkpoints automatically before they return.
+- If you manage a buffered store outside the consumer lifecycle, call `Flush()` to persist pending checkpoints or `Shutdown()` to flush and stop the store.
 
 To persist scan progress choose one of the following storage layers:
 

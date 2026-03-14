@@ -77,6 +77,14 @@ func (g *AllGroup) CloseShard(_ context.Context, shardID string) error {
 	return nil
 }
 
+func (g *AllGroup) Flush() error {
+	flushable, ok := g.Store.(FlushableStore)
+	if !ok {
+		return nil
+	}
+	return flushable.Flush()
+}
+
 func waitForCloseChannel(ctx context.Context, c <-chan struct{}) bool {
 	if c == nil {
 		// no channel means we haven't seen this shard in listShards, so it
