@@ -138,10 +138,15 @@ func (c *Checkpoint) SetCheckpoint(streamName, shardID, sequenceNumber string) e
 	return nil
 }
 
+// Flush saves any buffered checkpoints without closing the store.
+func (c *Checkpoint) Flush() error {
+	return c.save()
+}
+
 // Shutdown the checkpoint. Save any in-flight data.
 func (c *Checkpoint) Shutdown() error {
 	c.done <- struct{}{}
-	return c.save()
+	return c.Flush()
 }
 
 func (c *Checkpoint) loop() {
@@ -160,10 +165,8 @@ func (c *Checkpoint) loop() {
 }
 
 func (c *Checkpoint) save() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	for key, sequenceNumber := range c.checkpoints {
+	pending := c.drainCheckpoints()
+	for key, sequenceNumber := range pending {
 		item, err := attributevalue.MarshalMap(item{
 			Namespace:      fmt.Sprintf("%s-%s", c.appName, key.StreamName),
 			ShardID:        key.ShardID,
@@ -181,12 +184,37 @@ func (c *Checkpoint) save() error {
 				Item:      item,
 			})
 		if err != nil {
-			if !c.retryer.ShouldRetry(err) {
-				return err
+			c.restoreCheckpoints(pending)
+			if c.retryer.ShouldRetry(err) {
+				return c.save()
 			}
-			return c.save()
+			return err
 		}
 	}
 
 	return nil
+}
+
+func (c *Checkpoint) drainCheckpoints() map[key]string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	pending := make(map[key]string, len(c.checkpoints))
+	for checkpointKey, sequenceNumber := range c.checkpoints {
+		pending[checkpointKey] = sequenceNumber
+	}
+	c.checkpoints = map[key]string{}
+	return pending
+}
+
+func (c *Checkpoint) restoreCheckpoints(pending map[key]string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for checkpointKey, sequenceNumber := range pending {
+		if _, exists := c.checkpoints[checkpointKey]; exists {
+			continue
+		}
+		c.checkpoints[checkpointKey] = sequenceNumber
+	}
 }

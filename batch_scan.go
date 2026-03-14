@@ -68,6 +68,9 @@ func (r *scanBatchRunner) run(ctx context.Context) error {
 	if err := r.flush(context.Background(), r.buffers.drainAll()); err != nil {
 		return err
 	}
+	if err := r.consumer.flushCheckpoints(); err != nil {
+		return fmt.Errorf("checkpoint flush error: %w", err)
+	}
 	if err := r.getAsyncErr(); err != nil {
 		return err
 	}

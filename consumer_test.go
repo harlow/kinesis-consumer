@@ -112,6 +112,217 @@ func TestScan(t *testing.T) {
 	}
 }
 
+func TestScan_FlushesBufferedCheckpointsBeforeReturning(t *testing.T) {
+	client := &kinesisClientMock{
+		getShardIteratorMock: func(ctx context.Context, params *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {
+			return &kinesis.GetShardIteratorOutput{
+				ShardIterator: aws.String("iterator"),
+			}, nil
+		},
+		getRecordsMock: func(ctx context.Context, params *kinesis.GetRecordsInput, optFns ...func(*kinesis.Options)) (*kinesis.GetRecordsOutput, error) {
+			return &kinesis.GetRecordsOutput{
+				NextShardIterator: nil,
+				Records:           records,
+			}, nil
+		},
+		listShardsMock: func(ctx context.Context, params *kinesis.ListShardsInput, optFns ...func(*kinesis.Options)) (*kinesis.ListShardsOutput, error) {
+			return &kinesis.ListShardsOutput{
+				Shards: []types.Shard{{ShardId: aws.String("myShard")}},
+			}, nil
+		},
+	}
+
+	flushes := 0
+	sequence := ""
+	store := &flushableStoreMock{
+		setCheckpointMock: func(streamName, shardID, sequenceNumber string) error {
+			sequence = sequenceNumber
+			return nil
+		},
+		flushMock: func() error {
+			flushes++
+			return nil
+		},
+	}
+
+	c, err := New("myStreamName",
+		WithClient(client),
+		WithStore(store),
+	)
+	if err != nil {
+		t.Fatalf("new consumer error: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := c.Scan(ctx, func(r *Record) error {
+		if aws.ToString(r.SequenceNumber) == "lastSeqNum" {
+			cancel()
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("scan returned unexpected error %v", err)
+	}
+
+	if flushes != 1 {
+		t.Fatalf("flush count = %d, want 1", flushes)
+	}
+	if sequence != "lastSeqNum" {
+		t.Fatalf("sequence = %q, want %q", sequence, "lastSeqNum")
+	}
+}
+
+func TestScanShard_FlushesBufferedCheckpointsBeforeReturning(t *testing.T) {
+	client := &kinesisClientMock{
+		getShardIteratorMock: func(ctx context.Context, params *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {
+			return &kinesis.GetShardIteratorOutput{
+				ShardIterator: aws.String("iterator"),
+			}, nil
+		},
+		getRecordsMock: func(ctx context.Context, params *kinesis.GetRecordsInput, optFns ...func(*kinesis.Options)) (*kinesis.GetRecordsOutput, error) {
+			return &kinesis.GetRecordsOutput{
+				NextShardIterator: nil,
+				Records:           records,
+			}, nil
+		},
+	}
+
+	flushes := 0
+	store := &flushableStoreMock{
+		setCheckpointMock: func(streamName, shardID, sequenceNumber string) error { return nil },
+		flushMock: func() error {
+			flushes++
+			return nil
+		},
+	}
+
+	c, err := New("myStreamName",
+		WithClient(client),
+		WithStore(store),
+	)
+	if err != nil {
+		t.Fatalf("new consumer error: %v", err)
+	}
+
+	if err := c.ScanShard(context.Background(), "myShard", func(r *Record) error { return nil }); err != nil {
+		t.Fatalf("ScanShard returned unexpected error %v", err)
+	}
+
+	if flushes != 1 {
+		t.Fatalf("flush count = %d, want 1", flushes)
+	}
+}
+
+func TestScan_FlushesThroughGroupBeforeFallingBackToStore(t *testing.T) {
+	client := &kinesisClientMock{
+		getShardIteratorMock: func(ctx context.Context, params *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {
+			return &kinesis.GetShardIteratorOutput{
+				ShardIterator: aws.String("iterator"),
+			}, nil
+		},
+		getRecordsMock: func(ctx context.Context, params *kinesis.GetRecordsInput, optFns ...func(*kinesis.Options)) (*kinesis.GetRecordsOutput, error) {
+			return &kinesis.GetRecordsOutput{
+				NextShardIterator: nil,
+				Records: []types.Record{
+					{
+						Data:           []byte("record"),
+						SequenceNumber: aws.String("seq-1"),
+					},
+				},
+			}, nil
+		},
+	}
+
+	storeFlushes := 0
+	groupFlushes := 0
+	group := &flushableGroupMock{
+		setCheckpointMock: func(streamName, shardID, sequenceNumber string) error { return nil },
+		flushMock: func() error {
+			groupFlushes++
+			return nil
+		},
+	}
+	store := &flushableStoreMock{
+		flushMock: func() error {
+			storeFlushes++
+			return nil
+		},
+	}
+
+	c, err := New("myStreamName",
+		WithClient(client),
+		WithGroup(group),
+		WithStore(store),
+	)
+	if err != nil {
+		t.Fatalf("new consumer error: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := c.Scan(ctx, func(r *Record) error {
+		cancel()
+		return nil
+	}); err != nil {
+		t.Fatalf("scan returned unexpected error %v", err)
+	}
+
+	if groupFlushes != 1 {
+		t.Fatalf("group flush count = %d, want 1", groupFlushes)
+	}
+	if storeFlushes != 0 {
+		t.Fatalf("store flush count = %d, want 0", storeFlushes)
+	}
+}
+
+func TestScan_ReturnsFlushErrorWhenScanSucceeds(t *testing.T) {
+	client := &kinesisClientMock{
+		getShardIteratorMock: func(ctx context.Context, params *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {
+			return &kinesis.GetShardIteratorOutput{
+				ShardIterator: aws.String("iterator"),
+			}, nil
+		},
+		getRecordsMock: func(ctx context.Context, params *kinesis.GetRecordsInput, optFns ...func(*kinesis.Options)) (*kinesis.GetRecordsOutput, error) {
+			return &kinesis.GetRecordsOutput{
+				NextShardIterator: nil,
+				Records: []types.Record{
+					{
+						Data:           []byte("record"),
+						SequenceNumber: aws.String("seq-1"),
+					},
+				},
+			}, nil
+		},
+		listShardsMock: func(ctx context.Context, params *kinesis.ListShardsInput, optFns ...func(*kinesis.Options)) (*kinesis.ListShardsOutput, error) {
+			return &kinesis.ListShardsOutput{
+				Shards: []types.Shard{{ShardId: aws.String("myShard")}},
+			}, nil
+		},
+	}
+
+	flushErr := errors.New("flush failed")
+	c, err := New("myStreamName",
+		WithClient(client),
+		WithStore(&flushableStoreMock{
+			setCheckpointMock: func(streamName, shardID, sequenceNumber string) error { return nil },
+			flushMock:         func() error { return flushErr },
+		}),
+	)
+	if err != nil {
+		t.Fatalf("new consumer error: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err = c.Scan(ctx, func(r *Record) error {
+		cancel()
+		return nil
+	})
+	if !errors.Is(err, flushErr) {
+		t.Fatalf("scan error = %v, want %v", err, flushErr)
+	}
+}
+
 func TestScanBatch_FlushByMaxSize(t *testing.T) {
 	client := &kinesisClientMock{
 		getShardIteratorMock: func(ctx context.Context, params *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {
@@ -1348,6 +1559,33 @@ type groupMock struct {
 	setCheckpointMock func(streamName, shardID, sequenceNumber string) error
 }
 
+type flushableStoreMock struct {
+	getCheckpointMock func(streamName, shardID string) (string, error)
+	setCheckpointMock func(streamName, shardID, sequenceNumber string) error
+	flushMock         func() error
+}
+
+func (s *flushableStoreMock) GetCheckpoint(streamName, shardID string) (string, error) {
+	if s.getCheckpointMock != nil {
+		return s.getCheckpointMock(streamName, shardID)
+	}
+	return "", nil
+}
+
+func (s *flushableStoreMock) SetCheckpoint(streamName, shardID, sequenceNumber string) error {
+	if s.setCheckpointMock != nil {
+		return s.setCheckpointMock(streamName, shardID, sequenceNumber)
+	}
+	return nil
+}
+
+func (s *flushableStoreMock) Flush() error {
+	if s.flushMock != nil {
+		return s.flushMock()
+	}
+	return nil
+}
+
 type duplicateShardGroup struct{}
 
 func (g *duplicateShardGroup) Start(ctx context.Context, shardC chan types.Shard) error {
@@ -1369,6 +1607,38 @@ type closeableGroupMock struct {
 	closeShardMock    func(ctx context.Context, shardID string) error
 	getCheckpointMock func(streamName, shardID string) (string, error)
 	setCheckpointMock func(streamName, shardID, sequenceNumber string) error
+}
+
+type flushableGroupMock struct {
+	getCheckpointMock func(streamName, shardID string) (string, error)
+	setCheckpointMock func(streamName, shardID, sequenceNumber string) error
+	flushMock         func() error
+}
+
+func (g *flushableGroupMock) Start(ctx context.Context, shardC chan types.Shard) error {
+	shardC <- types.Shard{ShardId: aws.String("myShard")}
+	return nil
+}
+
+func (g *flushableGroupMock) GetCheckpoint(streamName, shardID string) (string, error) {
+	if g.getCheckpointMock != nil {
+		return g.getCheckpointMock(streamName, shardID)
+	}
+	return "", nil
+}
+
+func (g *flushableGroupMock) SetCheckpoint(streamName, shardID, sequenceNumber string) error {
+	if g.setCheckpointMock != nil {
+		return g.setCheckpointMock(streamName, shardID, sequenceNumber)
+	}
+	return nil
+}
+
+func (g *flushableGroupMock) Flush() error {
+	if g.flushMock != nil {
+		return g.flushMock()
+	}
+	return nil
 }
 
 func (g *closeableGroupMock) Start(ctx context.Context, shardC chan types.Shard) error {

@@ -118,13 +118,18 @@ func (c *Checkpoint) SetCheckpoint(streamName, shardID, sequenceNumber string) e
 	return nil
 }
 
+// Flush saves any buffered checkpoints without closing the store.
+func (c *Checkpoint) Flush() error {
+	return c.save()
+}
+
 // Shutdown the checkpoint. Save any in-flight data.
 func (c *Checkpoint) Shutdown() error {
 	defer c.conn.Close()
 
 	c.done <- struct{}{}
 
-	return c.save()
+	return c.Flush()
 }
 
 func (c *Checkpoint) loop() {
