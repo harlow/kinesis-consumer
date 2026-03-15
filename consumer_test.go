@@ -213,6 +213,75 @@ func TestScanShard_FlushesBufferedCheckpointsBeforeReturning(t *testing.T) {
 	}
 }
 
+func TestAggregationCheckpointing_RestartsAfterWholeSequenceNumber(t *testing.T) {
+	cp := store.New()
+
+	c, err := New("myStreamName",
+		WithStore(cp),
+		WithAggregation(true),
+	)
+	if err != nil {
+		t.Fatalf("new consumer error: %v", err)
+	}
+
+	aggregatedRecords := []types.Record{
+		{SequenceNumber: aws.String("agg-seq"), Data: []byte("logical-1")},
+		{SequenceNumber: aws.String("agg-seq"), Data: []byte("logical-2")},
+	}
+
+	calls := 0
+	_, err = c.processRecords(context.Background(), "myShard", aggregatedRecords, nil, func(r *Record) error {
+		calls++
+		if calls == 2 {
+			return errors.New("stop after checkpointing first logical record")
+		}
+		return nil
+	}, "")
+	if err == nil {
+		t.Fatal("processRecords() error = nil, want stop error")
+	}
+
+	checkpoint, err := cp.GetCheckpoint("myStreamName", "myShard")
+	if err != nil {
+		t.Fatalf("GetCheckpoint() error = %v", err)
+	}
+	if checkpoint != "agg-seq" {
+		t.Fatalf("checkpoint = %q, want %q", checkpoint, "agg-seq")
+	}
+
+	client := &kinesisClientMock{
+		getShardIteratorMock: func(ctx context.Context, params *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {
+			if got := params.ShardIteratorType; got != types.ShardIteratorTypeAfterSequenceNumber {
+				t.Fatalf("ShardIteratorType = %q, want %q", got, types.ShardIteratorTypeAfterSequenceNumber)
+			}
+			if got := aws.ToString(params.StartingSequenceNumber); got != "agg-seq" {
+				t.Fatalf("StartingSequenceNumber = %q, want %q", got, "agg-seq")
+			}
+			return &kinesis.GetShardIteratorOutput{ShardIterator: aws.String("next-iterator")}, nil
+		},
+	}
+
+	resumeConsumer, err := New("myStreamName",
+		WithClient(client),
+		WithStore(cp),
+		WithAggregation(true),
+	)
+	if err != nil {
+		t.Fatalf("new resume consumer error: %v", err)
+	}
+
+	iterator, resumedSeq, err := resumeConsumer.getShardIteratorWithCheckpointFallback(context.Background(), "myStreamName", "myShard", checkpoint)
+	if err != nil {
+		t.Fatalf("getShardIteratorWithCheckpointFallback() error = %v", err)
+	}
+	if aws.ToString(iterator) != "next-iterator" {
+		t.Fatalf("iterator = %q, want %q", aws.ToString(iterator), "next-iterator")
+	}
+	if resumedSeq != "agg-seq" {
+		t.Fatalf("resumedSeq = %q, want %q", resumedSeq, "agg-seq")
+	}
+}
+
 func TestScan_FlushesThroughGroupBeforeFallingBackToStore(t *testing.T) {
 	client := &kinesisClientMock{
 		getShardIteratorMock: func(ctx context.Context, params *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {

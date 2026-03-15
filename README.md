@@ -100,6 +100,24 @@ Checkpoint behavior in batch mode:
 - checkpoint advances only after a batch callback succeeds
 - on callback error, scan stops and that batch is not checkpointed
 
+### Aggregated records
+
+`WithAggregation(true)` enables KPL deaggregation before records reach your callback.
+
+Checkpoint persistence in this library is still sequence-number based. That means a
+persisted checkpoint can resume only at the Kinesis record boundary, not at a
+sub-record position inside an aggregated KPL record.
+
+Practical implication:
+- if a process stops after checkpointing one logical record from an aggregated
+  Kinesis record but before finishing the rest of that same aggregate, a restart
+  will resume *after* that Kinesis sequence number
+- remaining logical records from that aggregate may be skipped on restart
+
+If you need exact restart semantics for aggregated records, avoid persisted
+checkpoints for that workload until the library adds sub-sequence checkpoint
+support.
+
 Use context cancel to signal the scan to exit without error. For example if we wanted to gracefully exit the scan on interrupt.
 
 ```go
@@ -380,6 +398,15 @@ c, err := consumer.New(
 ```
 
 [See AWS Docs for more options.](https://docs.aws.amazon.com/kinesis/latest/APIReference/API_GetShardIterator.html)
+
+### Aggregation
+
+Use `WithAggregation(true)` when records were produced with KPL aggregation and
+you want the consumer to deaggregate them before invoking your callback.
+
+This affects callback delivery only. Checkpoint stores still persist a single
+sequence number per shard, so a persisted restart cannot resume partway through
+an aggregated Kinesis record.
 
 ### Logging
 
