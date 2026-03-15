@@ -76,6 +76,30 @@ func (s *fakeCheckpointStore) SetCheckpoint(streamName, shardID, sequenceNumber 
 	return nil
 }
 
+type fakeFlushableCheckpointStore struct {
+	*fakeCheckpointStore
+	mu         sync.Mutex
+	flushCalls int
+	flushErr   error
+}
+
+func newFakeFlushableCheckpointStore() *fakeFlushableCheckpointStore {
+	return &fakeFlushableCheckpointStore{fakeCheckpointStore: newFakeCheckpointStore()}
+}
+
+func (s *fakeFlushableCheckpointStore) Flush() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.flushCalls++
+	return s.flushErr
+}
+
+func (s *fakeFlushableCheckpointStore) FlushCalls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.flushCalls
+}
+
 func newFakeLeaseRepo(leases []Lease) *fakeLeaseRepo {
 	repo := &fakeLeaseRepo{
 		leases:       map[string]Lease{},
@@ -373,6 +397,88 @@ func TestGroupCloseShard_ReleasesAndDoesNotReemit(t *testing.T) {
 	}
 }
 
+func TestGroupCloseShard_FlushesBeforeRelease(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+	repo := newFakeLeaseRepo(nil)
+	store := newFakeFlushableCheckpointStore()
+	client := &fakeKinesisClient{
+		shards: []types.Shard{
+			{ShardId: aws.String("s0")},
+		},
+	}
+
+	group, err := New(Config{
+		AppName:         "my-app",
+		StreamName:      "my-stream",
+		WorkerID:        "worker-a",
+		KinesisClient:   client,
+		Repository:      repo,
+		CheckpointStore: store,
+		Clock:           fakeClock{now: now},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	shardC := make(chan types.Shard, 4)
+	if err := group.runOnce(context.Background(), shardC); err != nil {
+		t.Fatalf("runOnce() error = %v", err)
+	}
+
+	if err := group.CloseShard(context.Background(), "s0"); err != nil {
+		t.Fatalf("CloseShard() error = %v", err)
+	}
+
+	if got := store.FlushCalls(); got != 1 {
+		t.Fatalf("Flush() calls = %d, want 1", got)
+	}
+	if got := repo.leases["s0"].Owner; got != "" {
+		t.Fatalf("lease owner = %q, want empty", got)
+	}
+}
+
+func TestGroupCloseShard_FlushFailurePreventsRelease(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+	repo := newFakeLeaseRepo(nil)
+	store := newFakeFlushableCheckpointStore()
+	store.flushErr = context.DeadlineExceeded
+	client := &fakeKinesisClient{
+		shards: []types.Shard{
+			{ShardId: aws.String("s0")},
+		},
+	}
+
+	group, err := New(Config{
+		AppName:         "my-app",
+		StreamName:      "my-stream",
+		WorkerID:        "worker-a",
+		KinesisClient:   client,
+		Repository:      repo,
+		CheckpointStore: store,
+		Clock:           fakeClock{now: now},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	shardC := make(chan types.Shard, 4)
+	if err := group.runOnce(context.Background(), shardC); err != nil {
+		t.Fatalf("runOnce() error = %v", err)
+	}
+
+	err = group.CloseShard(context.Background(), "s0")
+	if err == nil {
+		t.Fatal("CloseShard() error = nil, want flush error")
+	}
+
+	if got := store.FlushCalls(); got != 1 {
+		t.Fatalf("Flush() calls = %d, want 1", got)
+	}
+	if got := repo.leases["s0"].Owner; got != "worker-a" {
+		t.Fatalf("lease owner = %q, want worker-a", got)
+	}
+}
+
 func TestGroupCheckpointPassthrough(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
 	repo := newFakeLeaseRepo(nil)
@@ -405,6 +511,94 @@ func TestGroupCheckpointPassthrough(t *testing.T) {
 	}
 	if got != "42" {
 		t.Fatalf("GetCheckpoint() = %q, want %q", got, "42")
+	}
+}
+
+func TestGroupShardStopped_FlushFailurePreventsRelease(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+	repo := newFakeLeaseRepo([]Lease{
+		{ShardID: "s0", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
+	})
+	store := newFakeFlushableCheckpointStore()
+	store.flushErr = context.Canceled
+	client := &fakeKinesisClient{shards: []types.Shard{{ShardId: aws.String("s0")}}}
+
+	group, err := New(Config{
+		AppName:         "my-app",
+		StreamName:      "my-stream",
+		WorkerID:        "worker-a",
+		KinesisClient:   client,
+		Repository:      repo,
+		CheckpointStore: store,
+		Clock:           fakeClock{now: now},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	group.mu.Lock()
+	group.active["s0"] = true
+	group.mu.Unlock()
+
+	err = group.ShardStopped(context.Background(), "s0")
+	if err == nil {
+		t.Fatal("ShardStopped() error = nil, want flush error")
+	}
+	if got := repo.leases["s0"].Owner; got != "worker-a" {
+		t.Fatalf("lease owner = %q, want worker-a", got)
+	}
+}
+
+func TestGroupRunOnce_ReleaseExcessLeaseFlushFailurePreventsRelease(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+	repo := newFakeLeaseRepo([]Lease{
+		{ShardID: "s0", Owner: "worker-b", ExpiresAt: now.Add(time.Minute)},
+		{ShardID: "s1", Owner: "worker-b", ExpiresAt: now.Add(time.Minute)},
+		{ShardID: "s2", Owner: "worker-b", ExpiresAt: now.Add(time.Minute)},
+		{ShardID: "s3", Owner: "worker-b", ExpiresAt: now.Add(time.Minute)},
+		{ShardID: "s4", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
+		{ShardID: "s5", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
+	})
+	repo.workerExpiry["worker-a"] = now.Add(time.Minute)
+	repo.workerExpiry["worker-b"] = now.Add(time.Minute)
+	store := newFakeFlushableCheckpointStore()
+	store.flushErr = context.DeadlineExceeded
+
+	client := &fakeKinesisClient{
+		shards: []types.Shard{
+			{ShardId: aws.String("s0")},
+			{ShardId: aws.String("s1")},
+			{ShardId: aws.String("s2")},
+			{ShardId: aws.String("s3")},
+			{ShardId: aws.String("s4")},
+			{ShardId: aws.String("s5")},
+		},
+	}
+
+	group, err := New(Config{
+		AppName:         "my-app",
+		StreamName:      "my-stream",
+		WorkerID:        "worker-b",
+		KinesisClient:   client,
+		Repository:      repo,
+		CheckpointStore: store,
+		Clock:           fakeClock{now: now},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	shardC := make(chan types.Shard, 8)
+	err = group.runOnce(context.Background(), shardC)
+	if err == nil {
+		t.Fatal("runOnce() error = nil, want flush error")
+	}
+
+	if got := store.FlushCalls(); got != 1 {
+		t.Fatalf("Flush() calls = %d, want 1", got)
+	}
+	if got := repo.leases["s3"].Owner; got != "worker-b" {
+		t.Fatalf("released lease owner = %q, want worker-b", got)
 	}
 }
 
