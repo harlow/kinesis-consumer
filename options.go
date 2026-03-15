@@ -83,6 +83,9 @@ func WithGetRecordsOptions(opts ...func(*kinesis.Options)) Option {
 	}
 }
 
+// WithAggregation enables KPL record deaggregation before records are passed to
+// the scan callback. Checkpoints remain sequence-number based, so persisted
+// checkpoints cannot resume within an aggregated Kinesis record.
 func WithAggregation(a bool) Option {
 	return func(c *Consumer) {
 		c.isAggregated = a
