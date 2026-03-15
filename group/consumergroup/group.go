@@ -213,6 +213,9 @@ func (g *Group) CloseShard(ctx context.Context, shardID string) error {
 	delete(g.shardStop, shardID)
 	g.mu.Unlock()
 
+	if err := g.flushCheckpoints(); err != nil {
+		return err
+	}
 	return g.repo.ReleaseLease(ctx, g.namespace(), shardID, g.workerID)
 }
 
@@ -242,6 +245,9 @@ func (g *Group) ShardStopped(ctx context.Context, shardID string) error {
 	delete(g.shardStop, shardID)
 	g.mu.Unlock()
 
+	if err := g.flushCheckpoints(); err != nil {
+		return err
+	}
 	return g.repo.ReleaseLease(ctx, g.namespace(), shardID, g.workerID)
 }
 
@@ -373,7 +379,18 @@ func (g *Group) releaseShard(ctx context.Context, shardID string) error {
 	delete(g.shardStop, shardID)
 	g.mu.Unlock()
 
+	if err := g.flushCheckpoints(); err != nil {
+		return err
+	}
 	return g.repo.ReleaseLease(ctx, g.namespace(), shardID, g.workerID)
+}
+
+func (g *Group) flushCheckpoints() error {
+	flushable, ok := g.store.(interface{ Flush() error })
+	if !ok {
+		return nil
+	}
+	return flushable.Flush()
 }
 
 func (g *Group) namespace() string {
