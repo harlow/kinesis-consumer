@@ -32,7 +32,6 @@ type LeaseRepository interface {
 	ListLeases(ctx context.Context, namespace string) ([]Lease, error)
 	RenewLeases(ctx context.Context, namespace, workerID string, shardIDs []string, expiresAt time.Time) error
 	ClaimLease(ctx context.Context, namespace, shardID, workerID string, now, expiresAt time.Time) (bool, error)
-	StealLease(ctx context.Context, namespace, shardID, fromWorker, toWorker string, now, expiresAt time.Time) (bool, error)
 	ReleaseLease(ctx context.Context, namespace, shardID, workerID string) error
 }
 
@@ -61,8 +60,6 @@ type Config struct {
 	RenewInterval      time.Duration
 	AssignInterval     time.Duration
 	MaxLeasesForWorker int
-	MaxLeasesToSteal   int
-	EnableStealing     bool
 	Clock              Clock
 }
 
@@ -80,8 +77,6 @@ type Group struct {
 	renewInterval      time.Duration
 	assignInterval     time.Duration
 	maxLeasesForWorker int
-	maxLeasesToSteal   int
-	enableStealing     bool
 
 	mu         sync.Mutex
 	active     map[string]bool
@@ -133,9 +128,6 @@ func New(cfg Config) (*Group, error) {
 	if cfg.AssignInterval <= 0 {
 		cfg.AssignInterval = 10 * time.Second
 	}
-	if cfg.MaxLeasesToSteal <= 0 {
-		cfg.MaxLeasesToSteal = 1
-	}
 	if cfg.Clock == nil {
 		cfg.Clock = realClock{}
 	}
@@ -152,8 +144,6 @@ func New(cfg Config) (*Group, error) {
 		renewInterval:      cfg.RenewInterval,
 		assignInterval:     cfg.AssignInterval,
 		maxLeasesForWorker: cfg.MaxLeasesForWorker,
-		maxLeasesToSteal:   cfg.MaxLeasesToSteal,
-		enableStealing:     cfg.EnableStealing,
 		active:             map[string]bool{},
 		completed:          map[string]bool{},
 		releasing:          map[string]bool{},
@@ -285,8 +275,6 @@ func (g *Group) runOnce(ctx context.Context, shardC chan types.Shard) error {
 		WorkerID:           g.workerID,
 		Now:                now,
 		MaxLeasesForWorker: g.maxLeasesForWorker,
-		MaxLeasesToSteal:   g.maxLeasesToSteal,
-		EnableStealing:     g.enableStealing,
 	}
 
 	leaseStates := make([]leaseState, 0, len(leases))

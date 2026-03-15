@@ -128,10 +128,6 @@ func main() {
 		LeaseDuration:   *leaseDuration,
 		RenewInterval:   *renewInterval,
 		AssignInterval:  *assignInterval,
-		// Lease stealing is disabled in the example because the current
-		// consumer API does not provide shard revocation for in-flight scans.
-		EnableStealing:   false,
-		MaxLeasesToSteal: 1,
 	})
 	if err != nil {
 		log.Fatalf("group create error: %v", err)

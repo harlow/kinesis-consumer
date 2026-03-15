@@ -103,19 +103,11 @@ func TestRepositoryLifecycle_DynamoDBLocal(t *testing.T) {
 		t.Fatalf("ClaimLease(worker-b) = true, want false")
 	}
 
-	claimed, err = repo.StealLease(context.Background(), namespace, "s0", "worker-a", "worker-b", now, now.Add(time.Minute))
-	if err != nil {
-		t.Fatalf("StealLease() error = %v", err)
-	}
-	if !claimed {
-		t.Fatalf("StealLease() = false, want true")
-	}
-
-	if err := repo.RenewLeases(context.Background(), namespace, "worker-b", []string{"s0"}, now.Add(2*time.Minute)); err != nil {
+	if err := repo.RenewLeases(context.Background(), namespace, "worker-a", []string{"s0"}, now.Add(2*time.Minute)); err != nil {
 		t.Fatalf("RenewLeases() error = %v", err)
 	}
 
-	if err := repo.ReleaseLease(context.Background(), namespace, "s0", "worker-b"); err != nil {
+	if err := repo.ReleaseLease(context.Background(), namespace, "s0", "worker-a"); err != nil {
 		t.Fatalf("ReleaseLease() error = %v", err)
 	}
 
