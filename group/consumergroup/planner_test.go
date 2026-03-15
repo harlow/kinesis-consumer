@@ -114,3 +114,56 @@ func TestAssignmentPlanner_ReleasesExcessOwnedLeases(t *testing.T) {
 		t.Fatalf("ClaimShardIDs = %v, want none", plan.ClaimShardIDs)
 	}
 }
+
+func TestAssignmentPlanner_WaitsForCompletedParents(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+
+	leases := []leaseState{
+		{ShardID: "parent"},
+		{ShardID: "child", ParentShardID: "parent"},
+	}
+
+	p := assignmentPlanner{
+		WorkerID:           "worker-a",
+		Now:                now,
+		MaxLeasesForWorker: 0,
+	}
+
+	plan := p.Plan(leases, []string{"worker-a"})
+	if !reflect.DeepEqual(plan.ClaimShardIDs, []string{"parent"}) {
+		t.Fatalf("ClaimShardIDs = %v, want [parent]", plan.ClaimShardIDs)
+	}
+
+	leases[0].Completed = true
+	plan = p.Plan(leases, []string{"worker-a"})
+	if !reflect.DeepEqual(plan.ClaimShardIDs, []string{"child"}) {
+		t.Fatalf("ClaimShardIDs = %v, want [child]", plan.ClaimShardIDs)
+	}
+}
+
+func TestAssignmentPlanner_WaitsForBothMergeParents(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+
+	leases := []leaseState{
+		{ShardID: "left", Completed: true},
+		{ShardID: "right"},
+		{ShardID: "merged", ParentShardID: "left", AdjacentParentID: "right"},
+	}
+
+	p := assignmentPlanner{
+		WorkerID:           "worker-a",
+		Now:                now,
+		MaxLeasesForWorker: 0,
+	}
+
+	plan := p.Plan(leases, []string{"worker-a"})
+	if !reflect.DeepEqual(plan.ClaimShardIDs, []string{"right"}) {
+		t.Fatalf("ClaimShardIDs = %v, want [right]", plan.ClaimShardIDs)
+	}
+
+	leases[1].Completed = true
+	plan = p.Plan(leases, []string{"worker-a"})
+	if !reflect.DeepEqual(plan.ClaimShardIDs, []string{"merged"}) {
+		t.Fatalf("ClaimShardIDs = %v, want [merged]", plan.ClaimShardIDs)
+	}
+}

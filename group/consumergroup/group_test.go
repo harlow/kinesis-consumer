@@ -2,6 +2,7 @@ package consumergroup
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"sync"
 	"testing"
@@ -118,10 +119,23 @@ func (r *fakeLeaseRepo) SyncShardLeases(ctx context.Context, namespace string, s
 	defer r.mu.Unlock()
 	for _, shard := range shards {
 		shardID := aws.ToString(shard.ShardId)
-		if _, ok := r.leases[shardID]; ok {
+		parentShardID := aws.ToString(shard.ParentShardId)
+		adjacentParentID := aws.ToString(shard.AdjacentParentShardId)
+		if lease, ok := r.leases[shardID]; ok {
+			if lease.ParentShardID == "" {
+				lease.ParentShardID = parentShardID
+			}
+			if lease.AdjacentParentID == "" {
+				lease.AdjacentParentID = adjacentParentID
+			}
+			r.leases[shardID] = lease
 			continue
 		}
-		r.leases[shardID] = Lease{ShardID: shardID}
+		r.leases[shardID] = Lease{
+			ShardID:          shardID,
+			ParentShardID:    parentShardID,
+			AdjacentParentID: adjacentParentID,
+		}
 		r.shardOrder = append(r.shardOrder, shardID)
 	}
 	sort.Strings(r.shardOrder)
@@ -201,6 +215,31 @@ func (r *fakeLeaseRepo) ReleaseLease(ctx context.Context, namespace, shardID, wo
 		r.leases[shardID] = lease
 	}
 	return nil
+}
+
+func (r *fakeLeaseRepo) CompleteLease(ctx context.Context, namespace, shardID, workerID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	lease, ok := r.leases[shardID]
+	if !ok {
+		return nil
+	}
+	if lease.Owner == workerID || lease.Completed {
+		lease.Owner = ""
+		lease.ExpiresAt = time.Time{}
+		lease.Completed = true
+		r.leases[shardID] = lease
+	}
+	return nil
+}
+
+func drainShardIDs(shardC chan types.Shard) []string {
+	var out []string
+	for len(shardC) > 0 {
+		out = append(out, aws.ToString((<-shardC).ShardId))
+	}
+	sort.Strings(out)
+	return out
 }
 
 func TestGroupRunOnce_ClaimsAndEmitsShards(t *testing.T) {
@@ -384,12 +423,156 @@ func TestGroupCloseShard_ReleasesAndDoesNotReemit(t *testing.T) {
 	if lease.Owner != "" {
 		t.Fatalf("lease owner = %q, want empty", lease.Owner)
 	}
+	if !lease.Completed {
+		t.Fatal("lease completed = false, want true")
+	}
 
 	if err := group.runOnce(context.Background(), shardC); err != nil {
 		t.Fatalf("runOnce() error = %v", err)
 	}
 	if len(shardC) != 1 {
 		t.Fatalf("len(shardC) = %d, want 1 (no re-emit after close)", len(shardC))
+	}
+}
+
+func TestGroupRunOnce_WaitsForParentCompletionBeforeClaimingChild(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+	repo := newFakeLeaseRepo(nil)
+	client := &fakeKinesisClient{
+		shards: []types.Shard{
+			{ShardId: aws.String("parent")},
+			{ShardId: aws.String("child"), ParentShardId: aws.String("parent")},
+		},
+	}
+
+	group, err := New(Config{
+		AppName:       "my-app",
+		StreamName:    "my-stream",
+		WorkerID:      "worker-a",
+		KinesisClient: client,
+		Repository:    repo,
+		Clock:         fakeClock{now: now},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	shardC := make(chan types.Shard, 4)
+	if err := group.runOnce(context.Background(), shardC); err != nil {
+		t.Fatalf("runOnce() error = %v", err)
+	}
+	if len(shardC) != 1 {
+		t.Fatalf("len(shardC) = %d, want 1", len(shardC))
+	}
+	if got := aws.ToString((<-shardC).ShardId); got != "parent" {
+		t.Fatalf("claimed shard = %q, want parent", got)
+	}
+
+	if err := group.CloseShard(context.Background(), "parent"); err != nil {
+		t.Fatalf("CloseShard(parent) error = %v", err)
+	}
+
+	if err := group.runOnce(context.Background(), shardC); err != nil {
+		t.Fatalf("runOnce(after parent complete) error = %v", err)
+	}
+	if len(shardC) != 1 {
+		t.Fatalf("len(shardC) = %d, want 1 after parent completion", len(shardC))
+	}
+	if got := aws.ToString((<-shardC).ShardId); got != "child" {
+		t.Fatalf("claimed shard = %q, want child", got)
+	}
+}
+
+func TestGroupRunOnce_WaitsForBothMergeParents(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+	repo := newFakeLeaseRepo(nil)
+	client := &fakeKinesisClient{
+		shards: []types.Shard{
+			{ShardId: aws.String("left")},
+			{ShardId: aws.String("right")},
+			{
+				ShardId:               aws.String("merged"),
+				ParentShardId:         aws.String("left"),
+				AdjacentParentShardId: aws.String("right"),
+			},
+		},
+	}
+
+	group, err := New(Config{
+		AppName:       "my-app",
+		StreamName:    "my-stream",
+		WorkerID:      "worker-a",
+		KinesisClient: client,
+		Repository:    repo,
+		Clock:         fakeClock{now: now},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	shardC := make(chan types.Shard, 8)
+	if err := group.runOnce(context.Background(), shardC); err != nil {
+		t.Fatalf("runOnce() error = %v", err)
+	}
+	if got := fmt.Sprintf("%v", drainShardIDs(shardC)); got != "[left right]" {
+		t.Fatalf("initial claimed shards = %s, want [left right]", got)
+	}
+
+	if err := group.CloseShard(context.Background(), "left"); err != nil {
+		t.Fatalf("CloseShard(left) error = %v", err)
+	}
+	if err := group.runOnce(context.Background(), shardC); err != nil {
+		t.Fatalf("runOnce(after left complete) error = %v", err)
+	}
+	if got := len(shardC); got != 0 {
+		t.Fatalf("len(shardC) = %d, want 0 before both parents complete", got)
+	}
+
+	if err := group.CloseShard(context.Background(), "right"); err != nil {
+		t.Fatalf("CloseShard(right) error = %v", err)
+	}
+	if err := group.runOnce(context.Background(), shardC); err != nil {
+		t.Fatalf("runOnce(after both complete) error = %v", err)
+	}
+	if got := fmt.Sprintf("%v", drainShardIDs(shardC)); got != "[merged]" {
+		t.Fatalf("claimed shards after both parents complete = %s, want [merged]", got)
+	}
+}
+
+func TestGroupRunOnce_RestartSeesCompletedParentAndClaimsChild(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+	repo := newFakeLeaseRepo([]Lease{
+		{ShardID: "parent", Completed: true},
+		{ShardID: "child", ParentShardID: "parent"},
+	})
+	client := &fakeKinesisClient{
+		shards: []types.Shard{
+			{ShardId: aws.String("parent")},
+			{ShardId: aws.String("child"), ParentShardId: aws.String("parent")},
+		},
+	}
+
+	group, err := New(Config{
+		AppName:       "my-app",
+		StreamName:    "my-stream",
+		WorkerID:      "worker-b",
+		KinesisClient: client,
+		Repository:    repo,
+		Clock:         fakeClock{now: now},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	shardC := make(chan types.Shard, 4)
+	if err := group.runOnce(context.Background(), shardC); err != nil {
+		t.Fatalf("runOnce() error = %v", err)
+	}
+	if len(shardC) != 1 {
+		t.Fatalf("len(shardC) = %d, want 1", len(shardC))
+	}
+	if got := aws.ToString((<-shardC).ShardId); got != "child" {
+		t.Fatalf("claimed shard = %q, want child", got)
 	}
 }
 

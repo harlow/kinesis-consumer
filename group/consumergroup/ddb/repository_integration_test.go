@@ -32,7 +32,7 @@ func TestRepositoryLifecycle_DynamoDBLocal(t *testing.T) {
 	namespace := "app#stream"
 	shards := []types.Shard{
 		{ShardId: aws.String("s0")},
-		{ShardId: aws.String("s1")},
+		{ShardId: aws.String("s1"), ParentShardId: aws.String("s0")},
 	}
 	if err := repo.SyncShardLeases(context.Background(), namespace, shards); err != nil {
 		t.Fatalf("SyncShardLeases() error = %v", err)
@@ -44,6 +44,16 @@ func TestRepositoryLifecycle_DynamoDBLocal(t *testing.T) {
 	}
 	if len(leases) != 2 {
 		t.Fatalf("len(ListLeases()) = %d, want 2", len(leases))
+	}
+	sort.Slice(leases, func(i, j int) bool { return leases[i].ShardID < leases[j].ShardID })
+	if leases[0].ParentShardID != "" {
+		t.Fatalf("s0 ParentShardID = %q, want empty", leases[0].ParentShardID)
+	}
+	if leases[1].ParentShardID != "s0" {
+		t.Fatalf("s1 ParentShardID = %q, want s0", leases[1].ParentShardID)
+	}
+	if leases[1].Completed {
+		t.Fatal("s1 Completed = true, want false")
 	}
 
 	now := time.Unix(1700000000, 0).UTC()
@@ -117,6 +127,22 @@ func TestRepositoryLifecycle_DynamoDBLocal(t *testing.T) {
 	}
 	if !claimed {
 		t.Fatalf("ClaimLease(after release) = false, want true")
+	}
+
+	if err := repo.CompleteLease(context.Background(), namespace, "s0", "worker-a"); err != nil {
+		t.Fatalf("CompleteLease() error = %v", err)
+	}
+
+	leases, err = repo.ListLeases(context.Background(), namespace)
+	if err != nil {
+		t.Fatalf("ListLeases(after complete) error = %v", err)
+	}
+	sort.Slice(leases, func(i, j int) bool { return leases[i].ShardID < leases[j].ShardID })
+	if !leases[0].Completed {
+		t.Fatal("s0 Completed = false, want true")
+	}
+	if leases[0].Owner != "" {
+		t.Fatalf("s0 Owner = %q, want empty", leases[0].Owner)
 	}
 }
 

@@ -31,10 +31,13 @@ type Config struct {
 }
 
 type leaseItem struct {
-	Namespace      string `dynamodbav:"namespace"`
-	ShardID        string `dynamodbav:"shard_id"`
-	LeaseOwner     string `dynamodbav:"lease_owner"`
-	LeaseExpiresAt int64  `dynamodbav:"lease_expires_at"`
+	Namespace        string `dynamodbav:"namespace"`
+	ShardID          string `dynamodbav:"shard_id"`
+	LeaseOwner       string `dynamodbav:"lease_owner"`
+	LeaseExpiresAt   int64  `dynamodbav:"lease_expires_at"`
+	ParentShardID    string `dynamodbav:"parent_shard_id"`
+	AdjacentParentID string `dynamodbav:"adjacent_parent_shard_id"`
+	Completed        bool   `dynamodbav:"completed"`
 }
 
 type workerItem struct {
@@ -61,26 +64,31 @@ func New(cfg Config) (*Repository, error) {
 func (r *Repository) SyncShardLeases(ctx context.Context, namespace string, shards []types.Shard) error {
 	for _, shard := range shards {
 		shardID := aws.ToString(shard.ShardId)
-		item, err := attributevalue.MarshalMap(leaseItem{
-			Namespace:      namespace,
-			ShardID:        leaseSortKey(shardID),
-			LeaseOwner:     "",
-			LeaseExpiresAt: 0,
-		})
-		if err != nil {
-			return err
-		}
+		parentShardID := aws.ToString(shard.ParentShardId)
+		adjacentParentID := aws.ToString(shard.AdjacentParentShardId)
 
-		_, err = r.client.PutItem(ctx, &dynamodb.PutItemInput{
-			TableName:           aws.String(r.tableName),
-			Item:                item,
-			ConditionExpression: aws.String("attribute_not_exists(namespace) AND attribute_not_exists(shard_id)"),
+		_, err := r.client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+			TableName: aws.String(r.tableName),
+			Key: map[string]ddbt.AttributeValue{
+				"namespace": &ddbt.AttributeValueMemberS{Value: namespace},
+				"shard_id":  &ddbt.AttributeValueMemberS{Value: leaseSortKey(shardID)},
+			},
+			UpdateExpression: aws.String(
+				"SET lease_owner = if_not_exists(lease_owner, :empty), " +
+					"lease_expires_at = if_not_exists(lease_expires_at, :zero), " +
+					"parent_shard_id = if_not_exists(parent_shard_id, :parent), " +
+					"adjacent_parent_shard_id = if_not_exists(adjacent_parent_shard_id, :adjacent_parent), " +
+					"completed = if_not_exists(completed, :completed)",
+			),
+			ExpressionAttributeValues: map[string]ddbt.AttributeValue{
+				":empty":           &ddbt.AttributeValueMemberS{Value: ""},
+				":zero":            &ddbt.AttributeValueMemberN{Value: "0"},
+				":parent":          &ddbt.AttributeValueMemberS{Value: parentShardID},
+				":adjacent_parent": &ddbt.AttributeValueMemberS{Value: adjacentParentID},
+				":completed":       &ddbt.AttributeValueMemberBOOL{Value: false},
+			},
 		})
 		if err != nil {
-			var condErr *ddbt.ConditionalCheckFailedException
-			if errors.As(err, &condErr) {
-				continue
-			}
 			return err
 		}
 	}
@@ -143,8 +151,11 @@ func (r *Repository) ListLeases(ctx context.Context, namespace string) ([]consum
 
 		shardID := strings.TrimPrefix(raw.ShardID, leaseKeyPrefix)
 		lease := consumergroup.Lease{
-			ShardID: shardID,
-			Owner:   raw.LeaseOwner,
+			ShardID:          shardID,
+			Owner:            raw.LeaseOwner,
+			ParentShardID:    raw.ParentShardID,
+			AdjacentParentID: raw.AdjacentParentID,
+			Completed:        raw.Completed,
 		}
 		if raw.LeaseExpiresAt > 0 {
 			lease.ExpiresAt = time.Unix(0, raw.LeaseExpiresAt*int64(time.Millisecond)).UTC()
@@ -152,6 +163,34 @@ func (r *Repository) ListLeases(ctx context.Context, namespace string) ([]consum
 		leases = append(leases, lease)
 	}
 	return leases, nil
+}
+
+func (r *Repository) CompleteLease(ctx context.Context, namespace, shardID, workerID string) error {
+	_, err := r.client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+		TableName: aws.String(r.tableName),
+		Key: map[string]ddbt.AttributeValue{
+			"namespace": &ddbt.AttributeValueMemberS{Value: namespace},
+			"shard_id":  &ddbt.AttributeValueMemberS{Value: leaseSortKey(shardID)},
+		},
+		UpdateExpression: aws.String("SET completed = :completed, lease_owner = :empty, lease_expires_at = :zero"),
+		ConditionExpression: aws.String(
+			"lease_owner = :worker OR completed = :completed",
+		),
+		ExpressionAttributeValues: map[string]ddbt.AttributeValue{
+			":completed": &ddbt.AttributeValueMemberBOOL{Value: true},
+			":empty":     &ddbt.AttributeValueMemberS{Value: ""},
+			":zero":      &ddbt.AttributeValueMemberN{Value: "0"},
+			":worker":    &ddbt.AttributeValueMemberS{Value: workerID},
+		},
+	})
+	if err != nil {
+		var condErr *ddbt.ConditionalCheckFailedException
+		if errors.As(err, &condErr) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func (r *Repository) RenewLeases(ctx context.Context, namespace, workerID string, shardIDs []string, expiresAt time.Time) error {
