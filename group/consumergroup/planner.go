@@ -21,8 +21,6 @@ type assignmentPlanner struct {
 	WorkerID           string
 	Now                time.Time
 	MaxLeasesForWorker int
-	MaxLeasesToSteal   int
-	EnableStealing     bool
 }
 
 func (p assignmentPlanner) Plan(leases []leaseState, activeWorkers []string) assignmentPlan {

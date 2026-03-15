@@ -21,8 +21,6 @@ type GroupConfig struct {
 	RenewInterval      time.Duration
 	AssignInterval     time.Duration
 	MaxLeasesForWorker int
-	MaxLeasesToSteal   int
-	EnableStealing     bool
 	Clock              consumergroup.Clock
 }
 
@@ -49,8 +47,6 @@ func NewGroup(cfg GroupConfig) (*consumergroup.Group, error) {
 		RenewInterval:      cfg.RenewInterval,
 		AssignInterval:     cfg.AssignInterval,
 		MaxLeasesForWorker: cfg.MaxLeasesForWorker,
-		MaxLeasesToSteal:   cfg.MaxLeasesToSteal,
-		EnableStealing:     cfg.EnableStealing,
 		Clock:              cfg.Clock,
 	})
 }

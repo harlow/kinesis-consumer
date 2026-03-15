@@ -212,35 +212,6 @@ func (r *Repository) ClaimLease(ctx context.Context, namespace, shardID, workerI
 	return true, nil
 }
 
-func (r *Repository) StealLease(ctx context.Context, namespace, shardID, fromWorker, toWorker string, now, expiresAt time.Time) (bool, error) {
-	nowMillis := now.UnixNano() / int64(time.Millisecond)
-	expiresMillis := expiresAt.UnixNano() / int64(time.Millisecond)
-
-	_, err := r.client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
-		TableName: aws.String(r.tableName),
-		Key: map[string]ddbt.AttributeValue{
-			"namespace": &ddbt.AttributeValueMemberS{Value: namespace},
-			"shard_id":  &ddbt.AttributeValueMemberS{Value: leaseSortKey(shardID)},
-		},
-		UpdateExpression:    aws.String("SET lease_owner = :to_worker, lease_expires_at = :expires_at"),
-		ConditionExpression: aws.String("lease_owner = :from_worker AND lease_expires_at > :now"),
-		ExpressionAttributeValues: map[string]ddbt.AttributeValue{
-			":from_worker": &ddbt.AttributeValueMemberS{Value: fromWorker},
-			":to_worker":   &ddbt.AttributeValueMemberS{Value: toWorker},
-			":now":         &ddbt.AttributeValueMemberN{Value: fmt.Sprintf("%d", nowMillis)},
-			":expires_at":  &ddbt.AttributeValueMemberN{Value: fmt.Sprintf("%d", expiresMillis)},
-		},
-	})
-	if err != nil {
-		var condErr *ddbt.ConditionalCheckFailedException
-		if errors.As(err, &condErr) {
-			return false, nil
-		}
-		return false, err
-	}
-	return true, nil
-}
-
 func (r *Repository) ReleaseLease(ctx context.Context, namespace, shardID, workerID string) error {
 	_, err := r.client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
 		TableName: aws.String(r.tableName),

@@ -188,10 +188,6 @@ func (r *fakeLeaseRepo) ClaimLease(ctx context.Context, namespace, shardID, work
 	return true, nil
 }
 
-func (r *fakeLeaseRepo) StealLease(ctx context.Context, namespace, shardID, fromWorker, toWorker string, now, expiresAt time.Time) (bool, error) {
-	return false, nil
-}
-
 func (r *fakeLeaseRepo) ReleaseLease(ctx context.Context, namespace, shardID, workerID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -771,7 +767,6 @@ func TestGroupFailover_ExpiredLeasesClaimedBySurvivor(t *testing.T) {
 		Repository:     repo,
 		Clock:          clockB,
 		LeaseDuration:  leaseDuration,
-		EnableStealing: false,
 	})
 	if err != nil {
 		t.Fatalf("New(worker-b) error = %v", err)
