@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"testing"
 	"time"
 
@@ -163,6 +164,152 @@ func TestGroupStart_DynamoDBRebalanceAndFailover(t *testing.T) {
 	}
 }
 
+func TestGroupStart_DynamoDBWaitsForParentCompletion(t *testing.T) {
+	client := mustLocalDynamoClient(t)
+	tableName := createTestTable(t, client)
+
+	repo, err := ddbgroup.New(ddbgroup.Config{
+		Client:    client,
+		TableName: tableName,
+	})
+	if err != nil {
+		t.Fatalf("ddb.New() error = %v", err)
+	}
+
+	group, err := consumergroup.New(consumergroup.Config{
+		AppName:    "lineage-app",
+		StreamName: "lineage-stream",
+		WorkerID:   "worker-a",
+		KinesisClient: &fakeKinesisClient{
+			shards: []types.Shard{
+				{ShardId: aws.String("parent")},
+				{ShardId: aws.String("child"), ParentShardId: aws.String("parent")},
+			},
+		},
+		Repository:     repo,
+		LeaseDuration:  500 * time.Millisecond,
+		RenewInterval:  50 * time.Millisecond,
+		AssignInterval: 50 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	shardC := make(chan types.Shard, 8)
+	errC := make(chan error, 1)
+	go func() { errC <- group.Start(ctx, shardC) }()
+
+	first, err := waitForShard(t, shardC, 3*time.Second)
+	if err != nil {
+		t.Fatalf("waitForShard(parent) error = %v", err)
+	}
+	if got := aws.ToString(first.ShardId); got != "parent" {
+		t.Fatalf("first shard = %q, want parent", got)
+	}
+
+	if got := drainShardIDsFromChannel(shardC); len(got) != 0 {
+		t.Fatalf("unexpected shards before parent completion = %v", got)
+	}
+
+	if err := group.CloseShard(context.Background(), "parent"); err != nil {
+		t.Fatalf("CloseShard(parent) error = %v", err)
+	}
+
+	second, err := waitForShard(t, shardC, 3*time.Second)
+	if err != nil {
+		t.Fatalf("waitForShard(child) error = %v", err)
+	}
+	if got := aws.ToString(second.ShardId); got != "child" {
+		t.Fatalf("second shard = %q, want child", got)
+	}
+
+	cancel()
+	if gotErr := <-errC; gotErr != nil && !errors.Is(gotErr, context.Canceled) {
+		t.Fatalf("group.Start() error = %v", gotErr)
+	}
+}
+
+func TestGroupStart_DynamoDBWaitsForBothMergeParents(t *testing.T) {
+	client := mustLocalDynamoClient(t)
+	tableName := createTestTable(t, client)
+
+	repo, err := ddbgroup.New(ddbgroup.Config{
+		Client:    client,
+		TableName: tableName,
+	})
+	if err != nil {
+		t.Fatalf("ddb.New() error = %v", err)
+	}
+
+	group, err := consumergroup.New(consumergroup.Config{
+		AppName:    "merge-app",
+		StreamName: "merge-stream",
+		WorkerID:   "worker-a",
+		KinesisClient: &fakeKinesisClient{
+			shards: []types.Shard{
+				{ShardId: aws.String("left")},
+				{ShardId: aws.String("right")},
+				{
+					ShardId:               aws.String("merged"),
+					ParentShardId:         aws.String("left"),
+					AdjacentParentShardId: aws.String("right"),
+				},
+			},
+		},
+		Repository:     repo,
+		LeaseDuration:  500 * time.Millisecond,
+		RenewInterval:  50 * time.Millisecond,
+		AssignInterval: 50 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	shardC := make(chan types.Shard, 8)
+	errC := make(chan error, 1)
+	go func() { errC <- group.Start(ctx, shardC) }()
+
+	initial, err := waitForShardSet(t, shardC, 2, 3*time.Second)
+	if err != nil {
+		t.Fatalf("waitForShardSet(initial) error = %v", err)
+	}
+	sort.Strings(initial)
+	if fmt.Sprintf("%v", initial) != "[left right]" {
+		t.Fatalf("initial shards = %v, want [left right]", initial)
+	}
+
+	if err := group.CloseShard(context.Background(), "left"); err != nil {
+		t.Fatalf("CloseShard(left) error = %v", err)
+	}
+	time.Sleep(150 * time.Millisecond)
+	if got := drainShardIDsFromChannel(shardC); len(got) != 0 {
+		t.Fatalf("unexpected shards after one parent completed = %v", got)
+	}
+
+	if err := group.CloseShard(context.Background(), "right"); err != nil {
+		t.Fatalf("CloseShard(right) error = %v", err)
+	}
+
+	merged, err := waitForShard(t, shardC, 3*time.Second)
+	if err != nil {
+		t.Fatalf("waitForShard(merged) error = %v", err)
+	}
+	if got := aws.ToString(merged.ShardId); got != "merged" {
+		t.Fatalf("merged shard = %q, want merged", got)
+	}
+
+	cancel()
+	if gotErr := <-errC; gotErr != nil && !errors.Is(gotErr, context.Canceled) {
+		t.Fatalf("group.Start() error = %v", gotErr)
+	}
+}
+
 func ownerCounts(ctx context.Context, repo *ddbgroup.Repository, namespace string) (int, int, error) {
 	leases, err := repo.ListLeases(ctx, namespace)
 	if err != nil {
@@ -191,6 +338,42 @@ func waitFor(t *testing.T, timeout time.Duration, fn func() bool) error {
 		time.Sleep(50 * time.Millisecond)
 	}
 	return fmt.Errorf("condition not met within %s", timeout)
+}
+
+func waitForShard(t *testing.T, shardC <-chan types.Shard, timeout time.Duration) (types.Shard, error) {
+	t.Helper()
+
+	select {
+	case shard := <-shardC:
+		return shard, nil
+	case <-time.After(timeout):
+		return types.Shard{}, fmt.Errorf("timed out waiting for shard after %s", timeout)
+	}
+}
+
+func waitForShardSet(t *testing.T, shardC <-chan types.Shard, count int, timeout time.Duration) ([]string, error) {
+	t.Helper()
+
+	deadline := time.After(timeout)
+	got := make([]string, 0, count)
+	for len(got) < count {
+		select {
+		case shard := <-shardC:
+			got = append(got, aws.ToString(shard.ShardId))
+		case <-deadline:
+			return nil, fmt.Errorf("timed out waiting for %d shards after %s", count, timeout)
+		}
+	}
+	return got, nil
+}
+
+func drainShardIDsFromChannel(shardC chan types.Shard) []string {
+	var out []string
+	for len(shardC) > 0 {
+		out = append(out, aws.ToString((<-shardC).ShardId))
+	}
+	sort.Strings(out)
+	return out
 }
 
 func mustLocalDynamoClient(t *testing.T) *dynamodb.Client {
