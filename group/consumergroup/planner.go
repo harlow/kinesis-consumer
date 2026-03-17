@@ -9,15 +9,22 @@ type leaseState struct {
 	ShardID          string
 	Owner            string
 	ExpiresAt        time.Time
+	PendingOwner     string
+	HandoffDeadline  time.Time
 	ParentShardID    string
 	AdjacentParentID string
 	Completed        bool
 }
 
+type handoffRequest struct {
+	ShardID      string
+	FromWorkerID string
+}
+
 type assignmentPlan struct {
 	ClaimShardIDs   []string
-	ReleaseShardIDs []string
 	RenewShardIDs   []string
+	HandoffRequests []handoffRequest
 }
 
 type assignmentPlanner struct {
@@ -39,26 +46,22 @@ func (p assignmentPlanner) Plan(leases []leaseState, activeWorkers []string) ass
 	var plan assignmentPlan
 	var ownedLeases []string
 	leaseByShard := make(map[string]leaseState, len(leases))
+	ownerCounts := map[string]int{}
 
 	for _, lease := range leases {
 		leaseByShard[lease.ShardID] = lease
-	}
-
-	for _, lease := range leases {
+		if lease.Owner != "" && !lease.Completed && !isExpired(lease, p.Now) {
+			ownerCounts[lease.Owner]++
+		}
 		if lease.Completed {
 			continue
 		}
-		if lease.Owner == p.WorkerID && !isExpired(lease, p.Now) {
+		if lease.Owner == p.WorkerID && !isExpired(lease, p.Now) && !handoffActive(lease.PendingOwner, lease.HandoffDeadline, p.Now) {
 			ownedLeases = append(ownedLeases, lease.ShardID)
 		}
 	}
 
 	sort.Strings(ownedLeases)
-	if len(ownedLeases) > target {
-		plan.RenewShardIDs = append(plan.RenewShardIDs, ownedLeases[:target]...)
-		plan.ReleaseShardIDs = append(plan.ReleaseShardIDs, ownedLeases[target:]...)
-		return plan
-	}
 	plan.RenewShardIDs = append(plan.RenewShardIDs, ownedLeases...)
 
 	need := target - len(ownedLeases)
@@ -75,6 +78,9 @@ func (p assignmentPlanner) Plan(leases []leaseState, activeWorkers []string) ass
 			continue
 		}
 		if lease.Owner != "" {
+			continue
+		}
+		if handoffPendingForOtherWorker(lease.PendingOwner, lease.HandoffDeadline, p.Now, p.WorkerID) {
 			continue
 		}
 		plan.ClaimShardIDs = append(plan.ClaimShardIDs, lease.ShardID)
@@ -96,6 +102,32 @@ func (p assignmentPlanner) Plan(leases []leaseState, activeWorkers []string) ass
 			continue
 		}
 		plan.ClaimShardIDs = append(plan.ClaimShardIDs, lease.ShardID)
+		need--
+	}
+
+	if need <= 0 {
+		return plan
+	}
+
+	for _, lease := range leases {
+		if need <= 0 {
+			break
+		}
+		if lease.Owner == "" || lease.Owner == p.WorkerID || isExpired(lease, p.Now) {
+			continue
+		}
+		if handoffActive(lease.PendingOwner, lease.HandoffDeadline, p.Now) {
+			continue
+		}
+		if ownerCounts[lease.Owner] <= target {
+			continue
+		}
+
+		plan.HandoffRequests = append(plan.HandoffRequests, handoffRequest{
+			ShardID:      lease.ShardID,
+			FromWorkerID: lease.Owner,
+		})
+		ownerCounts[lease.Owner]--
 		need--
 	}
 

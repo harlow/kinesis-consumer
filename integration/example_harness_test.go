@@ -39,7 +39,8 @@ var (
 	buildErr  error
 	binDir    string
 
-	groupRecordPattern = regexp.MustCompile(`worker=(\S+) shard=(\S+) seq=(\S+) data=(.*)$`)
+	groupRecordPattern  = regexp.MustCompile(`worker=(\S+) shard=(\S+) seq=(\S+) data=(.*)$`)
+	logTimestampPattern = regexp.MustCompile(`consumer-group:\s+(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})`)
 )
 
 type lockedBuffer struct {
@@ -73,6 +74,11 @@ type groupRecord struct {
 	Shard  string
 	Seq    string
 	Data   string
+}
+
+type timedGroupRecord struct {
+	Time   time.Time
+	Record groupRecord
 }
 
 func requireExampleIntegration(t *testing.T) {
@@ -425,6 +431,35 @@ func parseGroupRecords(logs string) []groupRecord {
 	return records
 }
 
+func parseTimedGroupRecords(logs string) []timedGroupRecord {
+	lines := strings.Split(logs, "\n")
+	records := make([]timedGroupRecord, 0)
+	for _, line := range lines {
+		recordMatch := groupRecordPattern.FindStringSubmatch(line)
+		if len(recordMatch) != 5 {
+			continue
+		}
+		timeMatch := logTimestampPattern.FindStringSubmatch(line)
+		if len(timeMatch) != 2 {
+			continue
+		}
+		ts, err := time.ParseInLocation("2006/01/02 15:04:05", timeMatch[1], time.Local)
+		if err != nil {
+			continue
+		}
+		records = append(records, timedGroupRecord{
+			Time: ts,
+			Record: groupRecord{
+				Worker: recordMatch[1],
+				Shard:  recordMatch[2],
+				Seq:    recordMatch[3],
+				Data:   recordMatch[4],
+			},
+		})
+	}
+	return records
+}
+
 func countUniqueSeq(records ...[]groupRecord) int {
 	seen := make(map[string]struct{})
 	for _, slice := range records {
@@ -460,4 +495,14 @@ func countTag(records []groupRecord, tag string) int {
 		}
 	}
 	return count
+}
+
+func firstTaggedRecord(records []timedGroupRecord, tag string) (timedGroupRecord, bool) {
+	needle := strconv.Quote(tag)
+	for _, record := range records {
+		if strings.Contains(record.Record.Data, `"run":`+needle) || strings.Contains(record.Record.Data, `"run":"`+tag+`"`) {
+			return record, true
+		}
+	}
+	return timedGroupRecord{}, false
 }

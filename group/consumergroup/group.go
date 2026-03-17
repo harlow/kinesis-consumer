@@ -23,6 +23,8 @@ type Lease struct {
 	ShardID          string
 	Owner            string
 	ExpiresAt        time.Time
+	PendingOwner     string
+	HandoffDeadline  time.Time
 	ParentShardID    string
 	AdjacentParentID string
 	Completed        bool
@@ -34,6 +36,7 @@ type LeaseRepository interface {
 	ListActiveWorkers(ctx context.Context, namespace string, now time.Time) ([]string, error)
 	ListLeases(ctx context.Context, namespace string) ([]Lease, error)
 	RenewLeases(ctx context.Context, namespace, workerID string, shardIDs []string, expiresAt time.Time) error
+	RequestHandoff(ctx context.Context, namespace, shardID, fromWorkerID, toWorkerID string, now, deadline time.Time) (bool, error)
 	ClaimLease(ctx context.Context, namespace, shardID, workerID string, now, expiresAt time.Time) (bool, error)
 	CompleteLease(ctx context.Context, namespace, shardID, workerID string) error
 	ReleaseLease(ctx context.Context, namespace, shardID, workerID string) error
@@ -287,10 +290,18 @@ func (g *Group) runOnce(ctx context.Context, shardC chan types.Shard) error {
 
 	leaseStates := make([]leaseState, 0, len(leases))
 	for _, lease := range leases {
+		if lease.Owner == g.workerID && handoffPendingForOtherWorker(lease.PendingOwner, lease.HandoffDeadline, now, g.workerID) {
+			if err := g.releaseShard(ctx, lease.ShardID); err != nil {
+				return err
+			}
+		}
+
 		leaseStates = append(leaseStates, leaseState{
 			ShardID:          lease.ShardID,
 			Owner:            lease.Owner,
 			ExpiresAt:        lease.ExpiresAt,
+			PendingOwner:     lease.PendingOwner,
+			HandoffDeadline:  lease.HandoffDeadline,
 			ParentShardID:    lease.ParentShardID,
 			AdjacentParentID: lease.AdjacentParentID,
 			Completed:        lease.Completed,
@@ -303,12 +314,6 @@ func (g *Group) runOnce(ctx context.Context, shardC chan types.Shard) error {
 			return err
 		}
 	}
-	for _, shardID := range plan.ReleaseShardIDs {
-		if err := g.releaseShard(ctx, shardID); err != nil {
-			return err
-		}
-	}
-
 	for _, shardID := range plan.ClaimShardIDs {
 		ok, err := g.repo.ClaimLease(ctx, g.namespace(), shardID, g.workerID, now, now.Add(g.leaseDuration))
 		if err != nil {
@@ -316,6 +321,21 @@ func (g *Group) runOnce(ctx context.Context, shardC chan types.Shard) error {
 		}
 		if ok {
 			g.emitShardIfNeeded(shardC, shardID)
+		}
+	}
+
+	for _, handoff := range plan.HandoffRequests {
+		_, err := g.repo.RequestHandoff(
+			ctx,
+			g.namespace(),
+			handoff.ShardID,
+			handoff.FromWorkerID,
+			g.workerID,
+			now,
+			now.Add(g.leaseDuration),
+		)
+		if err != nil {
+			return err
 		}
 	}
 
@@ -332,7 +352,7 @@ func (g *Group) renewOwned(ctx context.Context) error {
 	var shardIDs []string
 	g.mu.Lock()
 	for _, lease := range leases {
-		if lease.Owner == g.workerID && !g.releasing[lease.ShardID] {
+		if lease.Owner == g.workerID && !g.releasing[lease.ShardID] && !handoffPendingForOtherWorker(lease.PendingOwner, lease.HandoffDeadline, now, g.workerID) {
 			shardIDs = append(shardIDs, lease.ShardID)
 		}
 	}

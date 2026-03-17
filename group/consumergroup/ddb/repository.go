@@ -35,6 +35,8 @@ type leaseItem struct {
 	ShardID          string `dynamodbav:"shard_id"`
 	LeaseOwner       string `dynamodbav:"lease_owner"`
 	LeaseExpiresAt   int64  `dynamodbav:"lease_expires_at"`
+	PendingOwner     string `dynamodbav:"pending_owner"`
+	HandoffDeadline  int64  `dynamodbav:"handoff_deadline"`
 	ParentShardID    string `dynamodbav:"parent_shard_id"`
 	AdjacentParentID string `dynamodbav:"adjacent_parent_shard_id"`
 	Completed        bool   `dynamodbav:"completed"`
@@ -153,12 +155,17 @@ func (r *Repository) ListLeases(ctx context.Context, namespace string) ([]consum
 		lease := consumergroup.Lease{
 			ShardID:          shardID,
 			Owner:            raw.LeaseOwner,
+			PendingOwner:     raw.PendingOwner,
+			HandoffDeadline:  time.Time{},
 			ParentShardID:    raw.ParentShardID,
 			AdjacentParentID: raw.AdjacentParentID,
 			Completed:        raw.Completed,
 		}
 		if raw.LeaseExpiresAt > 0 {
 			lease.ExpiresAt = time.Unix(0, raw.LeaseExpiresAt*int64(time.Millisecond)).UTC()
+		}
+		if raw.HandoffDeadline > 0 {
+			lease.HandoffDeadline = time.Unix(0, raw.HandoffDeadline*int64(time.Millisecond)).UTC()
 		}
 		leases = append(leases, lease)
 	}
@@ -220,6 +227,38 @@ func (r *Repository) RenewLeases(ctx context.Context, namespace, workerID string
 	return nil
 }
 
+func (r *Repository) RequestHandoff(ctx context.Context, namespace, shardID, fromWorkerID, toWorkerID string, now, deadline time.Time) (bool, error) {
+	nowMillis := now.UnixNano() / int64(time.Millisecond)
+	deadlineMillis := deadline.UnixNano() / int64(time.Millisecond)
+
+	_, err := r.client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+		TableName: aws.String(r.tableName),
+		Key: map[string]ddbt.AttributeValue{
+			"namespace": &ddbt.AttributeValueMemberS{Value: namespace},
+			"shard_id":  &ddbt.AttributeValueMemberS{Value: leaseSortKey(shardID)},
+		},
+		UpdateExpression: aws.String("SET pending_owner = :pending_owner, handoff_deadline = :handoff_deadline"),
+		ConditionExpression: aws.String(
+			"lease_owner = :from_worker AND (attribute_not_exists(pending_owner) OR pending_owner = :empty OR pending_owner = :pending_owner OR handoff_deadline <= :now)",
+		),
+		ExpressionAttributeValues: map[string]ddbt.AttributeValue{
+			":from_worker":      &ddbt.AttributeValueMemberS{Value: fromWorkerID},
+			":pending_owner":    &ddbt.AttributeValueMemberS{Value: toWorkerID},
+			":handoff_deadline": &ddbt.AttributeValueMemberN{Value: fmt.Sprintf("%d", deadlineMillis)},
+			":empty":            &ddbt.AttributeValueMemberS{Value: ""},
+			":now":              &ddbt.AttributeValueMemberN{Value: fmt.Sprintf("%d", nowMillis)},
+		},
+	})
+	if err != nil {
+		var condErr *ddbt.ConditionalCheckFailedException
+		if errors.As(err, &condErr) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
 func (r *Repository) ClaimLease(ctx context.Context, namespace, shardID, workerID string, now, expiresAt time.Time) (bool, error) {
 	nowMillis := now.UnixNano() / int64(time.Millisecond)
 	expiresMillis := expiresAt.UnixNano() / int64(time.Millisecond)
@@ -230,15 +269,16 @@ func (r *Repository) ClaimLease(ctx context.Context, namespace, shardID, workerI
 			"namespace": &ddbt.AttributeValueMemberS{Value: namespace},
 			"shard_id":  &ddbt.AttributeValueMemberS{Value: leaseSortKey(shardID)},
 		},
-		UpdateExpression: aws.String("SET lease_owner = :worker, lease_expires_at = :expires_at"),
+		UpdateExpression: aws.String("SET lease_owner = :worker, lease_expires_at = :expires_at, pending_owner = :empty, handoff_deadline = :zero"),
 		ConditionExpression: aws.String(
-			"attribute_not_exists(lease_owner) OR lease_owner = :empty OR lease_owner = :worker OR lease_expires_at <= :now",
+			"((attribute_not_exists(lease_owner) OR lease_owner = :empty OR lease_owner = :worker OR lease_expires_at <= :now) AND (attribute_not_exists(pending_owner) OR pending_owner = :empty OR pending_owner = :worker OR handoff_deadline <= :now))",
 		),
 		ExpressionAttributeValues: map[string]ddbt.AttributeValue{
 			":worker":     &ddbt.AttributeValueMemberS{Value: workerID},
 			":empty":      &ddbt.AttributeValueMemberS{Value: ""},
 			":now":        &ddbt.AttributeValueMemberN{Value: fmt.Sprintf("%d", nowMillis)},
 			":expires_at": &ddbt.AttributeValueMemberN{Value: fmt.Sprintf("%d", expiresMillis)},
+			":zero":       &ddbt.AttributeValueMemberN{Value: "0"},
 		},
 	})
 	if err != nil {

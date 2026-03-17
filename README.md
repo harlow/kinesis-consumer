@@ -209,6 +209,53 @@ Integration tests for this path are available and opt-in:
 RUN_DDB_INTEGRATION=1 DDB_ENDPOINT=http://localhost:8000 go test ./group/consumergroup/... -run DynamoDB -v
 ```
 
+### Consumer-group shard management
+
+Consumer-group rebalancing uses a cooperative handoff flow:
+
+- an under-target worker requests handoff for a shard owned by an overloaded worker
+- the current owner sees the handoff request, stops the local shard scan, flushes checkpoints, and releases the lease
+- the requesting worker claims the shard after release
+
+This avoids the older release-first behavior where excess shards could become immediately unowned and sit idle waiting for the next assignment cycle.
+
+There is also an opt-in example integration test that shows the handoff timing during a late join on a 10-shard local stream:
+
+```bash
+RUN_EXAMPLE_INTEGRATION=1 go test -v ./integration -run TestGroupExample_LateJoinLogsHandoffTimeline
+```
+
+The test logs a small timeline including:
+
+- when worker A was already consuming
+- when worker B joined
+- when worker B first consumed a post-join record
+- the elapsed time from join to B's first post-join record
+
+Example `go test -v` output:
+
+```text
+=== RUN   TestGroupExample_LateJoinLogsHandoffTimeline
+    group_example_integration_test.go:152: ownership: t=2026-03-17T14:22:39.081234-07:00 worker-a=10 worker-b=0
+    group_example_integration_test.go:163: ownership: t=2026-03-17T14:22:41.312345-07:00 worker-b joined
+    group_example_integration_test.go:173: ownership: t=2026-03-17T14:22:41.9-07:00 worker-a=9 worker-b=1 elapsed_since_join=600ms
+    group_example_integration_test.go:173: ownership: t=2026-03-17T14:22:42.5-07:00 worker-a=7 worker-b=3 elapsed_since_join=1.2s
+    group_example_integration_test.go:173: ownership: t=2026-03-17T14:22:43.1-07:00 worker-a=5 worker-b=5 elapsed_since_join=1.8s
+    group_example_integration_test.go:182: ownership: rebalance reached 5/5 in 1.8s
+    group_example_integration_test.go:194: handoff timeline: join_at=2026-03-17T14:22:41.312345-07:00 worker_a_first_before=2026-03-17T14:22:39-07:00 shard=shardId-000000000003 seq=49613890083656679142130284297101740673125758020959617026 worker_b_first_after=2026-03-17T14:22:43-07:00 shard=shardId-000000000007 seq=49613890083656679142130284297101740673125758020959617104 join_to_b_first_after=2s
+    group_example_integration_test.go:203: post-join message counts: worker-a before=40 after=43 worker-b before=0 after=37 total_after=80
+--- PASS: TestGroupExample_LateJoinLogsHandoffTimeline (8.41s)
+```
+
+The worker processes also emit per-record logs such as:
+
+```text
+consumer-group: 2026/03/17 14:22:39 worker=worker-a shard=shardId-000000000003 seq=49613890083656679142130284297101740673125758020959617026 data={"run":"before","i":12}
+consumer-group: 2026/03/17 14:22:43 worker=worker-b shard=shardId-000000000007 seq=49613890083656679142130284297101740673125758020959617104 data={"run":"after","i":4}
+```
+
+That combination shows the expected handoff shape: worker A starts at 10 shards, worker B joins, the lease table converges to 5/5 over time, and the post-join batch is split across both workers without duplicates.
+
 ## Options
 
 The consumer allows the following optional overrides.

@@ -186,6 +186,27 @@ func (r *fakeLeaseRepo) RenewLeases(ctx context.Context, namespace, workerID str
 	return nil
 }
 
+func (r *fakeLeaseRepo) RequestHandoff(ctx context.Context, namespace, shardID, fromWorkerID, toWorkerID string, now, deadline time.Time) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	lease, ok := r.leases[shardID]
+	if !ok {
+		return false, nil
+	}
+	if lease.Owner != fromWorkerID {
+		return false, nil
+	}
+	if lease.PendingOwner != "" && lease.PendingOwner != toWorkerID && lease.HandoffDeadline.After(now) {
+		return false, nil
+	}
+
+	lease.PendingOwner = toWorkerID
+	lease.HandoffDeadline = deadline
+	r.leases[shardID] = lease
+	return true, nil
+}
+
 func (r *fakeLeaseRepo) ClaimLease(ctx context.Context, namespace, shardID, workerID string, now, expiresAt time.Time) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -196,8 +217,13 @@ func (r *fakeLeaseRepo) ClaimLease(ctx context.Context, namespace, shardID, work
 	if lease.Owner != "" && lease.Owner != workerID && lease.ExpiresAt.After(now) {
 		return false, nil
 	}
+	if lease.PendingOwner != "" && lease.PendingOwner != workerID && lease.HandoffDeadline.After(now) {
+		return false, nil
+	}
 	lease.Owner = workerID
 	lease.ExpiresAt = expiresAt
+	lease.PendingOwner = ""
+	lease.HandoffDeadline = time.Time{}
 	r.leases[shardID] = lease
 	return true, nil
 }
@@ -274,13 +300,13 @@ func TestGroupRunOnce_ClaimsAndEmitsShards(t *testing.T) {
 	}
 }
 
-func TestGroupRunOnce_ReleasesExcessLeasesWhenOverTarget(t *testing.T) {
+func TestGroupRunOnce_RequestsHandoffWhenUnderTarget(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
 	repo := newFakeLeaseRepo([]Lease{
-		{ShardID: "s0", Owner: "worker-b", ExpiresAt: now.Add(time.Minute)},
-		{ShardID: "s1", Owner: "worker-b", ExpiresAt: now.Add(time.Minute)},
-		{ShardID: "s2", Owner: "worker-b", ExpiresAt: now.Add(time.Minute)},
-		{ShardID: "s3", Owner: "worker-b", ExpiresAt: now.Add(time.Minute)},
+		{ShardID: "s0", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
+		{ShardID: "s1", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
+		{ShardID: "s2", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
+		{ShardID: "s3", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
 		{ShardID: "s4", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
 		{ShardID: "s5", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
 	})
@@ -317,21 +343,27 @@ func TestGroupRunOnce_ReleasesExcessLeasesWhenOverTarget(t *testing.T) {
 
 	repo.mu.Lock()
 	defer repo.mu.Unlock()
-	if got := repo.leases["s3"].Owner; got != "" {
-		t.Fatalf("released lease owner = %q, want empty", got)
+	for _, shardID := range []string{"s0", "s1", "s2"} {
+		lease := repo.leases[shardID]
+		if lease.Owner != "worker-a" {
+			t.Fatalf("lease %s owner = %q, want worker-a", shardID, lease.Owner)
+		}
+		if lease.PendingOwner != "worker-b" {
+			t.Fatalf("lease %s pending owner = %q, want worker-b", shardID, lease.PendingOwner)
+		}
 	}
 	if len(shardC) != 0 {
 		t.Fatalf("len(shardC) = %d, want 0", len(shardC))
 	}
 }
 
-func TestGroupRunOnce_CancelsActiveShardBeforeRelease(t *testing.T) {
+func TestGroupRunOnce_CancelsActiveShardWhenHandoffRequested(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
 	repo := newFakeLeaseRepo([]Lease{
 		{ShardID: "s0", Owner: "worker-b", ExpiresAt: now.Add(time.Minute)},
 		{ShardID: "s1", Owner: "worker-b", ExpiresAt: now.Add(time.Minute)},
 		{ShardID: "s2", Owner: "worker-b", ExpiresAt: now.Add(time.Minute)},
-		{ShardID: "s3", Owner: "worker-b", ExpiresAt: now.Add(time.Minute)},
+		{ShardID: "s3", Owner: "worker-b", ExpiresAt: now.Add(time.Minute), PendingOwner: "worker-a", HandoffDeadline: now.Add(time.Minute)},
 		{ShardID: "s4", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
 		{ShardID: "s5", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
 	})
@@ -383,6 +415,9 @@ func TestGroupRunOnce_CancelsActiveShardBeforeRelease(t *testing.T) {
 	defer repo.mu.Unlock()
 	if got := repo.leases["s3"].Owner; got != "" {
 		t.Fatalf("released lease owner = %q, want empty", got)
+	}
+	if got := repo.leases["s3"].PendingOwner; got != "worker-a" {
+		t.Fatalf("pending owner = %q, want worker-a", got)
 	}
 }
 
@@ -728,13 +763,13 @@ func TestGroupShardStopped_FlushFailurePreventsRelease(t *testing.T) {
 	}
 }
 
-func TestGroupRunOnce_ReleaseExcessLeaseFlushFailurePreventsRelease(t *testing.T) {
+func TestGroupRunOnce_HandoffReleaseFlushFailurePreventsRelease(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
 	repo := newFakeLeaseRepo([]Lease{
 		{ShardID: "s0", Owner: "worker-b", ExpiresAt: now.Add(time.Minute)},
 		{ShardID: "s1", Owner: "worker-b", ExpiresAt: now.Add(time.Minute)},
 		{ShardID: "s2", Owner: "worker-b", ExpiresAt: now.Add(time.Minute)},
-		{ShardID: "s3", Owner: "worker-b", ExpiresAt: now.Add(time.Minute)},
+		{ShardID: "s3", Owner: "worker-b", ExpiresAt: now.Add(time.Minute), PendingOwner: "worker-a", HandoffDeadline: now.Add(time.Minute)},
 		{ShardID: "s4", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
 		{ShardID: "s5", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
 	})
@@ -778,6 +813,9 @@ func TestGroupRunOnce_ReleaseExcessLeaseFlushFailurePreventsRelease(t *testing.T
 	}
 	if got := repo.leases["s3"].Owner; got != "worker-b" {
 		t.Fatalf("released lease owner = %q, want worker-b", got)
+	}
+	if got := repo.leases["s3"].PendingOwner; got != "worker-a" {
+		t.Fatalf("pending owner = %q, want worker-a", got)
 	}
 }
 
@@ -943,13 +981,13 @@ func TestGroupFailover_ExpiredLeasesClaimedBySurvivor(t *testing.T) {
 
 	clockB := newMutableClock(now)
 	groupB, err := New(Config{
-		AppName:        "my-app",
-		StreamName:     "my-stream",
-		WorkerID:       "worker-b",
-		KinesisClient:  client,
-		Repository:     repo,
-		Clock:          clockB,
-		LeaseDuration:  leaseDuration,
+		AppName:       "my-app",
+		StreamName:    "my-stream",
+		WorkerID:      "worker-b",
+		KinesisClient: client,
+		Repository:    repo,
+		Clock:         clockB,
+		LeaseDuration: leaseDuration,
 	})
 	if err != nil {
 		t.Fatalf("New(worker-b) error = %v", err)

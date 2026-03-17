@@ -81,14 +81,14 @@ func TestAssignmentPlanner_UnownedThenExpired(t *testing.T) {
 	}
 }
 
-func TestAssignmentPlanner_ReleasesExcessOwnedLeases(t *testing.T) {
+func TestAssignmentPlanner_RequestsHandoffFromOverloadedWorker(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
 
 	leases := []leaseState{
-		{ShardID: "s0", Owner: "worker-b", ExpiresAt: now.Add(time.Minute)},
-		{ShardID: "s1", Owner: "worker-b", ExpiresAt: now.Add(time.Minute)},
-		{ShardID: "s2", Owner: "worker-b", ExpiresAt: now.Add(time.Minute)},
-		{ShardID: "s3", Owner: "worker-b", ExpiresAt: now.Add(time.Minute)},
+		{ShardID: "s0", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
+		{ShardID: "s1", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
+		{ShardID: "s2", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
+		{ShardID: "s3", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
 		{ShardID: "s4", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
 		{ShardID: "s5", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
 	}
@@ -101,14 +101,17 @@ func TestAssignmentPlanner_ReleasesExcessOwnedLeases(t *testing.T) {
 
 	plan := p.Plan(leases, []string{"worker-a", "worker-b"})
 
-	wantRenew := []string{"s0", "s1", "s2"}
-	if !reflect.DeepEqual(plan.RenewShardIDs, wantRenew) {
-		t.Fatalf("RenewShardIDs = %v, want %v", plan.RenewShardIDs, wantRenew)
+	if len(plan.RenewShardIDs) != 0 {
+		t.Fatalf("RenewShardIDs = %v, want none", plan.RenewShardIDs)
 	}
 
-	wantRelease := []string{"s3"}
-	if !reflect.DeepEqual(plan.ReleaseShardIDs, wantRelease) {
-		t.Fatalf("ReleaseShardIDs = %v, want %v", plan.ReleaseShardIDs, wantRelease)
+	wantHandoffs := []handoffRequest{
+		{ShardID: "s0", FromWorkerID: "worker-a"},
+		{ShardID: "s1", FromWorkerID: "worker-a"},
+		{ShardID: "s2", FromWorkerID: "worker-a"},
+	}
+	if !reflect.DeepEqual(plan.HandoffRequests, wantHandoffs) {
+		t.Fatalf("HandoffRequests = %v, want %v", plan.HandoffRequests, wantHandoffs)
 	}
 	if len(plan.ClaimShardIDs) != 0 {
 		t.Fatalf("ClaimShardIDs = %v, want none", plan.ClaimShardIDs)
