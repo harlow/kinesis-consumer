@@ -40,7 +40,7 @@ var (
 	binDir    string
 
 	groupRecordPattern  = regexp.MustCompile(`worker=(\S+) shard=(\S+) seq=(\S+) data=(.*)$`)
-	logTimestampPattern = regexp.MustCompile(`consumer-group:\s+(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})`)
+	logTimestampPattern = regexp.MustCompile(`(?:consumer-group:\s+)?(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})`)
 )
 
 type lockedBuffer struct {
