@@ -1217,6 +1217,111 @@ func TestScanShard_ProvisionedThroughputExceededRetries(t *testing.T) {
 	}
 }
 
+func TestScanShard_ProvisionedThroughputExceededBacksOffBeforeRetry(t *testing.T) {
+	var (
+		getShardIteratorCalls int
+		waits                 []time.Duration
+	)
+
+	client := &kinesisClientMock{
+		getShardIteratorMock: func(ctx context.Context, params *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {
+			getShardIteratorCalls++
+			return &kinesis.GetShardIteratorOutput{
+				ShardIterator: aws.String(fmt.Sprintf("iter-%d", getShardIteratorCalls)),
+			}, nil
+		},
+		getRecordsMock: func(ctx context.Context, params *kinesis.GetRecordsInput, optFns ...func(*kinesis.Options)) (*kinesis.GetRecordsOutput, error) {
+			switch aws.ToString(params.ShardIterator) {
+			case "iter-1":
+				return nil, &types.ProvisionedThroughputExceededException{Message: aws.String("throttled")}
+			case "iter-2":
+				return &kinesis.GetRecordsOutput{
+					NextShardIterator: nil,
+					Records:           nil,
+				}, nil
+			default:
+				t.Fatalf("unexpected shard iterator: %s", aws.ToString(params.ShardIterator))
+				return nil, nil
+			}
+		},
+	}
+
+	c, err := New("myStreamName", WithClient(client))
+	if err != nil {
+		t.Fatalf("new consumer error: %v", err)
+	}
+	c.retryWait = func(ctx context.Context, d time.Duration) bool {
+		waits = append(waits, d)
+		return true
+	}
+
+	if err := c.ScanShard(context.Background(), "myShard", func(r *Record) error { return nil }); err != nil {
+		t.Fatalf("scan shard error: %v", err)
+	}
+
+	if len(waits) != 1 || waits[0] != getRecordsRetryBaseDelay {
+		t.Fatalf("retry waits = %v, want [%v]", waits, getRecordsRetryBaseDelay)
+	}
+}
+
+func TestScanShard_RetriesGetShardIteratorRefreshWhenThrottled(t *testing.T) {
+	var (
+		getShardIteratorCalls int
+		waits                 []time.Duration
+	)
+
+	client := &kinesisClientMock{
+		getShardIteratorMock: func(ctx context.Context, params *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {
+			getShardIteratorCalls++
+			switch getShardIteratorCalls {
+			case 1:
+				return &kinesis.GetShardIteratorOutput{ShardIterator: aws.String("iter-1")}, nil
+			case 2:
+				return nil, &types.ProvisionedThroughputExceededException{Message: aws.String("refresh throttled")}
+			case 3:
+				return &kinesis.GetShardIteratorOutput{ShardIterator: aws.String("iter-3")}, nil
+			default:
+				t.Fatalf("unexpected get shard iterator call %d", getShardIteratorCalls)
+				return nil, nil
+			}
+		},
+		getRecordsMock: func(ctx context.Context, params *kinesis.GetRecordsInput, optFns ...func(*kinesis.Options)) (*kinesis.GetRecordsOutput, error) {
+			switch aws.ToString(params.ShardIterator) {
+			case "iter-1":
+				return nil, &types.ProvisionedThroughputExceededException{Message: aws.String("throttled")}
+			case "iter-3":
+				return &kinesis.GetRecordsOutput{NextShardIterator: nil, Records: nil}, nil
+			default:
+				t.Fatalf("unexpected shard iterator: %s", aws.ToString(params.ShardIterator))
+				return nil, nil
+			}
+		},
+	}
+
+	c, err := New("myStreamName", WithClient(client))
+	if err != nil {
+		t.Fatalf("new consumer error: %v", err)
+	}
+	c.retryWait = func(ctx context.Context, d time.Duration) bool {
+		waits = append(waits, d)
+		return true
+	}
+
+	if err := c.ScanShard(context.Background(), "myShard", func(r *Record) error { return nil }); err != nil {
+		t.Fatalf("scan shard error: %v", err)
+	}
+
+	if getShardIteratorCalls != 3 {
+		t.Fatalf("expected 3 get-shard-iterator calls, got %d", getShardIteratorCalls)
+	}
+	if len(waits) != 2 {
+		t.Fatalf("retry waits = %v, want 2 waits", waits)
+	}
+	if waits[0] != getRecordsRetryBaseDelay || waits[1] != getRecordsRetryBaseDelay*2 {
+		t.Fatalf("retry waits = %v, want [%v %v]", waits, getRecordsRetryBaseDelay, getRecordsRetryBaseDelay*2)
+	}
+}
+
 func TestScanShard_CheckpointSetRetriesTransientFailure(t *testing.T) {
 	var (
 		mu       sync.Mutex

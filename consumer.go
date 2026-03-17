@@ -44,6 +44,7 @@ func New(streamName string, opts ...Option) (*Consumer, error) {
 		},
 		scanInterval: 250 * time.Millisecond,
 		maxRecords:   10000,
+		retryWait:    waitWithContext,
 	}
 
 	// override defaults
@@ -83,6 +84,7 @@ type Consumer struct {
 	isAggregated             bool
 	shardClosedHandler       ShardClosedHandler
 	getRecordsOpts           []func(*kinesis.Options)
+	retryWait                retryWaitFunc
 }
 
 // ScanFunc is the type of the function called for each message read
@@ -135,7 +137,11 @@ var ErrSkipCheckpoint = errors.New("skip checkpoint")
 const (
 	checkpointSetMaxAttempts = 3
 	checkpointSetRetryDelay  = 100 * time.Millisecond
+	getRecordsRetryBaseDelay = 200 * time.Millisecond
+	getRecordsRetryMaxDelay  = 5 * time.Second
 )
+
+type retryWaitFunc func(context.Context, time.Duration) bool
 
 // Scan launches a goroutine to process each of the shards in the stream. The ScanFunc
 // is passed through to each of the goroutines and called with each message pulled from
@@ -410,6 +416,43 @@ func isRetriableError(err error) bool {
 		return true
 	}
 	return false
+}
+
+func retryDelay(err error, attempt int) time.Duration {
+	if attempt <= 0 {
+		return 0
+	}
+	if oe := (*types.ProvisionedThroughputExceededException)(nil); !errors.As(err, &oe) {
+		return 0
+	}
+
+	delay := getRecordsRetryBaseDelay
+	for i := 1; i < attempt; i++ {
+		if delay >= getRecordsRetryMaxDelay {
+			return getRecordsRetryMaxDelay
+		}
+		delay *= 2
+	}
+	if delay > getRecordsRetryMaxDelay {
+		return getRecordsRetryMaxDelay
+	}
+	return delay
+}
+
+func waitWithContext(ctx context.Context, d time.Duration) bool {
+	if d <= 0 {
+		return ctx.Err() == nil
+	}
+
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }
 
 func isShardClosed(nextShardIterator, currentShardIterator *string) bool {
