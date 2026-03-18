@@ -418,11 +418,20 @@ func TestGroupExample_MultiWorkerJoinLeaveRebalances(t *testing.T) {
 		if readErr != nil {
 			return false
 		}
+		minOwned, maxOwned := counts["worker-a"], counts["worker-a"]
+		for _, worker := range []string{"worker-b", "worker-c"} {
+			if counts[worker] < minOwned {
+				minOwned = counts[worker]
+			}
+			if counts[worker] > maxOwned {
+				maxOwned = counts[worker]
+			}
+		}
 		return totalOwned(counts, "worker-a", "worker-b", "worker-c") == 10 &&
 			counts["worker-a"] > 0 &&
 			counts["worker-b"] > 0 &&
 			counts["worker-c"] > 0 &&
-			roughlyBalanced(counts, "worker-a", "worker-b", "worker-c")
+			maxOwned-minOwned <= 2
 	}, "workers a/b/c to rebalance across 10 shards")
 	waitFor(t, 10*time.Second, func() bool {
 		ok, readErr := noActivePendingHandoffs(repo, namespace)
