@@ -194,7 +194,6 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 			if err = c.scanShard(shardCtx, shardID, fn); err != nil {
 				err = fmt.Errorf("shard %s error: %w", shardID, err)
 			} else if hasShardContext && shardCtx.Err() != nil {
-			} else if hasShardContext && shardCtx.Err() != nil {
 				if stoppable, ok := c.group.(shardStopHandler); ok {
 					if err = stoppable.ShardStopped(context.Background(), shardID); err != nil {
 						err = fmt.Errorf("shard stopped error: %w", err)
