@@ -1002,7 +1002,6 @@ func TestScan_GlobalShutdownCallsShardStoppedForAllActiveShards(t *testing.T) {
 		t.Fatalf("expected CloseShard to be skipped on global shutdown, got %d calls", group.closeShardCalls)
 	}
 }
-
 func TestScan_DuplicateShardIsProcessedOnce(t *testing.T) {
 	var (
 		mu                    sync.Mutex
