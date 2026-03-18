@@ -187,6 +187,10 @@ func TestGroupExample_LateJoinLogsHandoffTimeline(t *testing.T) {
 		return aCount == 5 && bCount == 5
 	}, "workers to rebalance to 5/5")
 	t.Logf("ownership: rebalance reached 5/5 in %s", time.Since(rebalanceStart).Round(100*time.Millisecond))
+	waitFor(t, 10*time.Second, func() bool {
+		ok, readErr := noActivePendingHandoffs(repo, namespace)
+		return readErr == nil && ok
+	}, "handoff state to clear after 5/5 rebalance")
 
 	putRecords(t, kinesisClient, stream, "after", 80)
 	waitFor(t, 20*time.Second, func() bool {
@@ -262,6 +266,23 @@ func integrationOwnerCountMap(repo *groupddb.Repository, namespace string) (map[
 		counts[lease.Owner]++
 	}
 	return counts, nil
+}
+
+func noActivePendingHandoffs(repo *groupddb.Repository, namespace string) (bool, error) {
+	leases, err := repo.ListLeases(context.Background(), namespace)
+	if err != nil {
+		return false, err
+	}
+	now := time.Now().UTC()
+	for _, lease := range leases {
+		if lease.PendingOwner == "" {
+			continue
+		}
+		if lease.HandoffDeadline.IsZero() || lease.HandoffDeadline.After(now) {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func totalOwned(counts map[string]int, workers ...string) int {
@@ -403,6 +424,10 @@ func TestGroupExample_MultiWorkerJoinLeaveRebalances(t *testing.T) {
 			counts["worker-c"] > 0 &&
 			roughlyBalanced(counts, "worker-a", "worker-b", "worker-c")
 	}, "workers a/b/c to rebalance across 10 shards")
+	waitFor(t, 10*time.Second, func() bool {
+		ok, readErr := noActivePendingHandoffs(repo, namespace)
+		return readErr == nil && ok
+	}, "handoff state to clear after three-worker rebalance")
 
 	if err := workerB.StopInterrupt(10 * time.Second); err != nil {
 		t.Fatalf("workerB.StopInterrupt() error = %v\n%s", err, workerB.Logs())
@@ -418,6 +443,10 @@ func TestGroupExample_MultiWorkerJoinLeaveRebalances(t *testing.T) {
 			counts["worker-c"] > 0 &&
 			roughlyBalanced(counts, "worker-a", "worker-c")
 	}, "workers a/c to own all shards after worker-b leaves")
+	waitFor(t, 10*time.Second, func() bool {
+		ok, readErr := noActivePendingHandoffs(repo, namespace)
+		return readErr == nil && ok
+	}, "handoff state to clear after worker-b leaves")
 
 	putRecords(t, kinesisClient, stream, "after-b-leaves", 60)
 	waitFor(t, 20*time.Second, func() bool {
@@ -460,6 +489,93 @@ func TestGroupExample_MultiWorkerJoinLeaveRebalances(t *testing.T) {
 	assertNoScanError(t, workerA)
 	assertNoScanError(t, workerB)
 	assertNoScanError(t, workerC)
+}
+
+func TestGroupExample_CrashDuringHandoffFallsBackAfterLeaseExpiry(t *testing.T) {
+	requireExampleIntegration(t)
+	kinesisClient := mustLocalKinesisClient(t)
+	dynamoClient := mustLocalDynamoClient(t)
+
+	groupBin := buildExampleBinary(t, "./examples/consumer-group-ddb")
+	stream := uniqueName("group-crash-handoff")
+	groupName := uniqueName("group")
+	leaseTable := uniqueName("lease")
+	checkpointTable := uniqueName("checkpoint")
+	cleanupDynamoTable(t, dynamoClient, leaseTable)
+	cleanupDynamoTable(t, dynamoClient, checkpointTable)
+	createStream(t, kinesisClient, stream, 10)
+
+	repo, err := groupddb.New(groupddb.Config{
+		Client:    dynamoClient,
+		TableName: leaseTable,
+	})
+	if err != nil {
+		t.Fatalf("ddb.New() error = %v", err)
+	}
+	namespace := groupName + "#" + stream
+
+	workerA := startGroupWorker(t, groupBin, stream, groupName, leaseTable, checkpointTable, "worker-a")
+	waitFor(t, 10*time.Second, func() bool {
+		return strings.Contains(workerA.Logs(), "start scan:")
+	}, "worker-a to start scanning")
+	waitFor(t, 15*time.Second, func() bool {
+		counts, readErr := integrationOwnerCountMap(repo, namespace)
+		return readErr == nil && counts["worker-a"] == 10
+	}, "worker-a to own all 10 shards")
+
+	putRecords(t, kinesisClient, stream, "before-crash", 40)
+	waitFor(t, 20*time.Second, func() bool {
+		return countTag(parseGroupRecords(workerA.Logs()), "before-crash") >= 20
+	}, "worker-a to consume initial batch")
+
+	workerB := startGroupWorker(t, groupBin, stream, groupName, leaseTable, checkpointTable, "worker-b")
+	waitFor(t, 10*time.Second, func() bool {
+		return strings.Contains(workerB.Logs(), "start scan:")
+	}, "worker-b to start scanning")
+	waitFor(t, 20*time.Second, func() bool {
+		counts, readErr := integrationOwnerCountMap(repo, namespace)
+		if readErr != nil {
+			return false
+		}
+		return counts["worker-b"] > 0
+	}, "worker-b to begin claiming shards")
+
+	if err := workerA.Kill(); err != nil {
+		t.Fatalf("workerA.Kill() error = %v", err)
+	}
+
+	waitFor(t, 20*time.Second, func() bool {
+		counts, readErr := integrationOwnerCountMap(repo, namespace)
+		if readErr != nil {
+			return false
+		}
+		return counts["worker-a"] == 0 && counts["worker-b"] == 10
+	}, "worker-b to take all shards after worker-a crash")
+	waitFor(t, 10*time.Second, func() bool {
+		ok, readErr := noActivePendingHandoffs(repo, namespace)
+		return readErr == nil && ok
+	}, "handoff state to clear after crash fallback")
+
+	putRecords(t, kinesisClient, stream, "after-crash", 40)
+	waitFor(t, 20*time.Second, func() bool {
+		return countTag(parseGroupRecords(workerB.Logs()), "after-crash") >= 40
+	}, "worker-b to consume post-crash batch")
+
+	recordsA := parseGroupRecords(workerA.Logs())
+	recordsB := parseGroupRecords(workerB.Logs())
+	if got := countDuplicateSeq(recordsA, recordsB); got != 0 {
+		t.Fatalf("duplicate sequence count = %d\nworker-a:\n%s\nworker-b:\n%s", got, workerA.Logs(), workerB.Logs())
+	}
+	if got := countTag(recordsB, "after-crash"); got != 40 {
+		t.Fatalf("worker-b consumed %d post-crash records, want 40\n%s", got, workerB.Logs())
+	}
+
+	if err := workerB.StopInterrupt(10 * time.Second); err != nil {
+		t.Fatalf("workerB.StopInterrupt() error = %v\n%s", err, workerB.Logs())
+	}
+
+	assertNoScanError(t, workerA)
+	assertNoScanError(t, workerB)
 }
 
 func startGroupWorker(t *testing.T, bin, stream, group, leaseTable, checkpointTable, workerID string) *exampleProcess {
