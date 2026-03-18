@@ -475,6 +475,12 @@ Consume data from the stream:
 
 	$ go run examples/consumer/main.go --stream myStream
 
+## Community Contributions
+
+Thanks to everyone who has helped improve this project over time by reporting issues, fixing bugs, and contributing code.
+
+That includes contributors from companies such as Uber, GoDaddy, Signal, Splunk, LaunchDarkly, Qualtrics, Swift Navigation, Datadog, Disney, Globant, Nubank, and others.
+
 ## Contributing
 
 Please see [CONTRIBUTING.md] for more information. Thank you, [contributors]!
