@@ -20,9 +20,12 @@ type KinesisClient interface {
 }
 
 type Lease struct {
-	ShardID   string
-	Owner     string
-	ExpiresAt time.Time
+	ShardID          string
+	Owner            string
+	ExpiresAt        time.Time
+	ParentShardID    string
+	AdjacentParentID string
+	Completed        bool
 }
 
 type LeaseRepository interface {
@@ -32,6 +35,7 @@ type LeaseRepository interface {
 	ListLeases(ctx context.Context, namespace string) ([]Lease, error)
 	RenewLeases(ctx context.Context, namespace, workerID string, shardIDs []string, expiresAt time.Time) error
 	ClaimLease(ctx context.Context, namespace, shardID, workerID string, now, expiresAt time.Time) (bool, error)
+	CompleteLease(ctx context.Context, namespace, shardID, workerID string) error
 	ReleaseLease(ctx context.Context, namespace, shardID, workerID string) error
 }
 
@@ -196,6 +200,13 @@ func (g *Group) Flush() error {
 }
 
 func (g *Group) CloseShard(ctx context.Context, shardID string) error {
+	if err := g.flushCheckpoints(); err != nil {
+		return err
+	}
+	if err := g.repo.CompleteLease(ctx, g.namespace(), shardID, g.workerID); err != nil {
+		return err
+	}
+
 	g.mu.Lock()
 	g.completed[shardID] = true
 	delete(g.active, shardID)
@@ -203,10 +214,7 @@ func (g *Group) CloseShard(ctx context.Context, shardID string) error {
 	delete(g.shardStop, shardID)
 	g.mu.Unlock()
 
-	if err := g.flushCheckpoints(); err != nil {
-		return err
-	}
-	return g.repo.ReleaseLease(ctx, g.namespace(), shardID, g.workerID)
+	return nil
 }
 
 func (g *Group) ShardContext(parent context.Context, shardID string) (context.Context, func()) {
@@ -280,9 +288,12 @@ func (g *Group) runOnce(ctx context.Context, shardC chan types.Shard) error {
 	leaseStates := make([]leaseState, 0, len(leases))
 	for _, lease := range leases {
 		leaseStates = append(leaseStates, leaseState{
-			ShardID:   lease.ShardID,
-			Owner:     lease.Owner,
-			ExpiresAt: lease.ExpiresAt,
+			ShardID:          lease.ShardID,
+			Owner:            lease.Owner,
+			ExpiresAt:        lease.ExpiresAt,
+			ParentShardID:    lease.ParentShardID,
+			AdjacentParentID: lease.AdjacentParentID,
+			Completed:        lease.Completed,
 		})
 	}
 

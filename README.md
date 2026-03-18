@@ -146,6 +146,10 @@ For multi-process shard coordination, use the opt-in consumer-group package.
 
 > Note: Consumer-group support is experimental and may evolve.
 
+Consumer-group shard assignment preserves parent/child ordering for resharded
+streams: child shards are not assigned until their parent shards have been
+fully completed.
+
 ```go
 import (
 	consumer "github.com/harlow/kinesis-consumer"

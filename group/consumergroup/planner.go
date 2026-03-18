@@ -6,9 +6,12 @@ import (
 )
 
 type leaseState struct {
-	ShardID   string
-	Owner     string
-	ExpiresAt time.Time
+	ShardID          string
+	Owner            string
+	ExpiresAt        time.Time
+	ParentShardID    string
+	AdjacentParentID string
+	Completed        bool
 }
 
 type assignmentPlan struct {
@@ -25,12 +28,26 @@ type assignmentPlanner struct {
 
 func (p assignmentPlanner) Plan(leases []leaseState, activeWorkers []string) assignmentPlan {
 	workers := normalizeActiveWorkers(activeWorkers, p.WorkerID)
-	target := targetLeaseCount(len(leases), len(workers), p.MaxLeasesForWorker)
+	incompleteLeases := 0
+	for _, lease := range leases {
+		if !lease.Completed {
+			incompleteLeases++
+		}
+	}
+	target := targetLeaseCount(incompleteLeases, len(workers), p.MaxLeasesForWorker)
 
 	var plan assignmentPlan
 	var ownedLeases []string
+	leaseByShard := make(map[string]leaseState, len(leases))
 
 	for _, lease := range leases {
+		leaseByShard[lease.ShardID] = lease
+	}
+
+	for _, lease := range leases {
+		if lease.Completed {
+			continue
+		}
 		if lease.Owner == p.WorkerID && !isExpired(lease, p.Now) {
 			ownedLeases = append(ownedLeases, lease.ShardID)
 		}
@@ -54,6 +71,9 @@ func (p assignmentPlanner) Plan(leases []leaseState, activeWorkers []string) ass
 		if need <= 0 {
 			break
 		}
+		if !isClaimable(lease, leaseByShard) {
+			continue
+		}
 		if lease.Owner != "" {
 			continue
 		}
@@ -65,6 +85,9 @@ func (p assignmentPlanner) Plan(leases []leaseState, activeWorkers []string) ass
 	for _, lease := range leases {
 		if need <= 0 {
 			break
+		}
+		if !isClaimable(lease, leaseByShard) {
+			continue
 		}
 		if lease.Owner == "" || lease.Owner == p.WorkerID {
 			continue
@@ -119,4 +142,28 @@ func isExpired(lease leaseState, now time.Time) bool {
 		return false
 	}
 	return !lease.ExpiresAt.After(now)
+}
+
+func isClaimable(lease leaseState, byShard map[string]leaseState) bool {
+	if lease.Completed {
+		return false
+	}
+	if !parentCompleted(lease.ParentShardID, byShard) {
+		return false
+	}
+	if !parentCompleted(lease.AdjacentParentID, byShard) {
+		return false
+	}
+	return true
+}
+
+func parentCompleted(parentShardID string, byShard map[string]leaseState) bool {
+	if parentShardID == "" {
+		return true
+	}
+	parent, ok := byShard[parentShardID]
+	if !ok {
+		return true
+	}
+	return parent.Completed
 }
