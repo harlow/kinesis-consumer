@@ -934,12 +934,11 @@ func TestScan_GlobalShutdownCallsShardStoppedInsteadOfCloseShard(t *testing.T) {
 		t.Fatalf("new consumer error: %v", err)
 	}
 
+	time.AfterFunc(10*time.Millisecond, cancel)
+
 	done := make(chan error, 1)
 	go func() {
-		done <- c.Scan(ctx, func(r *Record) error {
-			cancel()
-			return nil
-		})
+		done <- c.Scan(ctx, func(r *Record) error { return nil })
 	}()
 
 	if err := <-done; err != nil {
@@ -2003,6 +2002,11 @@ func (g *multiShardRebalanceAwareGroupMock) SetCheckpoint(streamName, shardID, s
 func (g *multiShardRebalanceAwareGroupMock) CloseShard(ctx context.Context, shardID string) error {
 	g.closeShardCalls++
 	return nil
+}
+
+func (g *multiShardRebalanceAwareGroupMock) ShardContext(parent context.Context, shardID string) (context.Context, func()) {
+	ctx, cancel := context.WithCancel(parent)
+	return ctx, func() { cancel() }
 }
 
 func (g *multiShardRebalanceAwareGroupMock) ShardStopped(ctx context.Context, shardID string) error {
