@@ -183,7 +183,9 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 
 			shardCtx := ctx
 			shardCleanup := func() {}
+			hasShardContext := false
 			if provider, ok := c.group.(shardContextProvider); ok {
+				hasShardContext = true
 				shardCtx, shardCleanup = provider.ShardContext(ctx, shardID)
 			}
 			defer shardCleanup()
@@ -191,7 +193,7 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 			var err error
 			if err = c.scanShard(shardCtx, shardID, fn); err != nil {
 				err = fmt.Errorf("shard %s error: %w", shardID, err)
-			} else if shardCtx.Err() != nil && ctx.Err() == nil {
+			} else if hasShardContext && shardCtx.Err() != nil {
 				if stoppable, ok := c.group.(shardStopHandler); ok {
 					if err = stoppable.ShardStopped(context.Background(), shardID); err != nil {
 						err = fmt.Errorf("shard stopped error: %w", err)

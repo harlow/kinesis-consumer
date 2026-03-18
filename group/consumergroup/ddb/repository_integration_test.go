@@ -189,6 +189,80 @@ func TestRepositoryExpiredLeaseCanBeClaimed_DynamoDBLocal(t *testing.T) {
 	}
 }
 
+func TestRepositoryRequestHandoff_DynamoDBLocal(t *testing.T) {
+	client := mustLocalDynamoClient(t)
+	tableName := createTestTable(t, client)
+
+	repo, err := New(Config{
+		Client:    client,
+		TableName: tableName,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	namespace := "app#stream"
+	if err := repo.SyncShardLeases(context.Background(), namespace, []types.Shard{{ShardId: aws.String("s0")}}); err != nil {
+		t.Fatalf("SyncShardLeases() error = %v", err)
+	}
+
+	now := time.Unix(1700000000, 0).UTC()
+	ok, err := repo.ClaimLease(context.Background(), namespace, "s0", "worker-a", now, now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("ClaimLease(worker-a) error = %v", err)
+	}
+	if !ok {
+		t.Fatalf("ClaimLease(worker-a) = false, want true")
+	}
+
+	ok, err = repo.RequestHandoff(context.Background(), namespace, "s0", "worker-a", "worker-b", now, now.Add(30*time.Second))
+	if err != nil {
+		t.Fatalf("RequestHandoff() error = %v", err)
+	}
+	if !ok {
+		t.Fatalf("RequestHandoff() = false, want true")
+	}
+
+	leases, err := repo.ListLeases(context.Background(), namespace)
+	if err != nil {
+		t.Fatalf("ListLeases() error = %v", err)
+	}
+	if len(leases) != 1 {
+		t.Fatalf("len(ListLeases()) = %d, want 1", len(leases))
+	}
+	if leases[0].PendingOwner != "worker-b" {
+		t.Fatalf("PendingOwner = %q, want worker-b", leases[0].PendingOwner)
+	}
+
+	ok, err = repo.ClaimLease(context.Background(), namespace, "s0", "worker-c", now, now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("ClaimLease(worker-c) error = %v", err)
+	}
+	if ok {
+		t.Fatalf("ClaimLease(worker-c) = true, want false")
+	}
+
+	if err := repo.ReleaseLease(context.Background(), namespace, "s0", "worker-a"); err != nil {
+		t.Fatalf("ReleaseLease(worker-a) error = %v", err)
+	}
+
+	ok, err = repo.ClaimLease(context.Background(), namespace, "s0", "worker-c", now, now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("ClaimLease(worker-c after release) error = %v", err)
+	}
+	if ok {
+		t.Fatalf("ClaimLease(worker-c after release) = true, want false")
+	}
+
+	ok, err = repo.ClaimLease(context.Background(), namespace, "s0", "worker-b", now, now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("ClaimLease(worker-b after release) error = %v", err)
+	}
+	if !ok {
+		t.Fatalf("ClaimLease(worker-b after release) = false, want true")
+	}
+}
+
 func mustLocalDynamoClient(t *testing.T) *dynamodb.Client {
 	t.Helper()
 

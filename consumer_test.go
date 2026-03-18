@@ -905,6 +905,104 @@ func TestScan_RevokedShardCallsShardStoppedInsteadOfCloseShard(t *testing.T) {
 	}
 }
 
+func TestScan_GlobalShutdownCallsShardStoppedInsteadOfCloseShard(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	client := &kinesisClientMock{
+		getShardIteratorMock: func(ctx context.Context, params *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {
+			return &kinesis.GetShardIteratorOutput{
+				ShardIterator: aws.String("iterator"),
+			}, nil
+		},
+		getRecordsMock: func(ctx context.Context, params *kinesis.GetRecordsInput, optFns ...func(*kinesis.Options)) (*kinesis.GetRecordsOutput, error) {
+			<-ctx.Done()
+			return &kinesis.GetRecordsOutput{
+				NextShardIterator: aws.String("iterator-2"),
+			}, nil
+		},
+	}
+
+	group := &rebalanceAwareGroupMock{}
+
+	c, err := New("myStreamName",
+		WithClient(client),
+		WithGroup(group),
+		WithScanInterval(time.Millisecond),
+	)
+	if err != nil {
+		t.Fatalf("new consumer error: %v", err)
+	}
+
+	time.AfterFunc(10*time.Millisecond, cancel)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- c.Scan(ctx, func(r *Record) error { return nil })
+	}()
+
+	if err := <-done; err != nil {
+		t.Fatalf("scan returned unexpected error %v", err)
+	}
+
+	if group.shardStoppedCalls != 1 {
+		t.Fatalf("expected ShardStopped to be called once on global shutdown, got %d", group.shardStoppedCalls)
+	}
+	if group.closeShardCalls != 0 {
+		t.Fatalf("expected CloseShard to be skipped on global shutdown, got %d calls", group.closeShardCalls)
+	}
+}
+
+func TestScan_GlobalShutdownCallsShardStoppedForAllActiveShards(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	client := &kinesisClientMock{
+		getShardIteratorMock: func(ctx context.Context, params *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {
+			return &kinesis.GetShardIteratorOutput{
+				ShardIterator: aws.String("iterator"),
+			}, nil
+		},
+		getRecordsMock: func(ctx context.Context, params *kinesis.GetRecordsInput, optFns ...func(*kinesis.Options)) (*kinesis.GetRecordsOutput, error) {
+			<-ctx.Done()
+			return &kinesis.GetRecordsOutput{
+				NextShardIterator: aws.String("iterator-2"),
+			}, nil
+		},
+	}
+
+	group := &multiShardRebalanceAwareGroupMock{
+		shards: []string{"shard-a", "shard-b"},
+	}
+
+	c, err := New("myStreamName",
+		WithClient(client),
+		WithGroup(group),
+		WithScanInterval(time.Millisecond),
+	)
+	if err != nil {
+		t.Fatalf("new consumer error: %v", err)
+	}
+
+	time.AfterFunc(10*time.Millisecond, cancel)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- c.Scan(ctx, func(r *Record) error { return nil })
+	}()
+
+	if err := <-done; err != nil {
+		t.Fatalf("scan returned unexpected error %v", err)
+	}
+
+	if group.shardStoppedCalls != 2 {
+		t.Fatalf("expected ShardStopped to be called twice on global shutdown, got %d", group.shardStoppedCalls)
+	}
+	if group.closeShardCalls != 0 {
+		t.Fatalf("expected CloseShard to be skipped on global shutdown, got %d calls", group.closeShardCalls)
+	}
+}
+
 func TestScan_DuplicateShardIsProcessedOnce(t *testing.T) {
 	var (
 		mu                    sync.Mutex
@@ -1872,6 +1970,46 @@ func (g *rebalanceAwareGroupMock) ShardContext(parent context.Context, shardID s
 }
 
 func (g *rebalanceAwareGroupMock) ShardStopped(ctx context.Context, shardID string) error {
+	g.shardStoppedCalls++
+	if g.shardStoppedMock != nil {
+		return g.shardStoppedMock(ctx, shardID)
+	}
+	return nil
+}
+
+type multiShardRebalanceAwareGroupMock struct {
+	shards            []string
+	shardStoppedMock  func(ctx context.Context, shardID string) error
+	shardStoppedCalls int
+	closeShardCalls   int
+}
+
+func (g *multiShardRebalanceAwareGroupMock) Start(ctx context.Context, shardC chan types.Shard) error {
+	for _, shardID := range g.shards {
+		shardC <- types.Shard{ShardId: aws.String(shardID)}
+	}
+	return nil
+}
+
+func (g *multiShardRebalanceAwareGroupMock) GetCheckpoint(streamName, shardID string) (string, error) {
+	return "", nil
+}
+
+func (g *multiShardRebalanceAwareGroupMock) SetCheckpoint(streamName, shardID, sequenceNumber string) error {
+	return nil
+}
+
+func (g *multiShardRebalanceAwareGroupMock) CloseShard(ctx context.Context, shardID string) error {
+	g.closeShardCalls++
+	return nil
+}
+
+func (g *multiShardRebalanceAwareGroupMock) ShardContext(parent context.Context, shardID string) (context.Context, func()) {
+	ctx, cancel := context.WithCancel(parent)
+	return ctx, func() { cancel() }
+}
+
+func (g *multiShardRebalanceAwareGroupMock) ShardStopped(ctx context.Context, shardID string) error {
 	g.shardStoppedCalls++
 	if g.shardStoppedMock != nil {
 		return g.shardStoppedMock(ctx, shardID)

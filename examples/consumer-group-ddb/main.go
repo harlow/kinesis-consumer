@@ -163,6 +163,10 @@ func main() {
 		log.Printf("worker=%s shard=%s seq=%s data=%s", *workerID, r.ShardID, aws.ToString(r.SequenceNumber), string(r.Data))
 		return nil
 	})
+	if errors.Is(err, context.Canceled) {
+		log.Printf("scan stopped: %v", err)
+		return
+	}
 	if err != nil {
 		log.Fatalf("scan error: %v", err)
 	}

@@ -4,4 +4,4 @@ test:
 	go test ./...
 
 integration:
-	./scripts/run-example-integration.sh
+	./scripts/run-e2e-integration.sh
