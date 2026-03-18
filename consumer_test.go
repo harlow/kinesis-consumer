@@ -905,6 +905,55 @@ func TestScan_RevokedShardCallsShardStoppedInsteadOfCloseShard(t *testing.T) {
 	}
 }
 
+func TestScan_GlobalShutdownCallsShardStoppedInsteadOfCloseShard(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	client := &kinesisClientMock{
+		getShardIteratorMock: func(ctx context.Context, params *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {
+			return &kinesis.GetShardIteratorOutput{
+				ShardIterator: aws.String("iterator"),
+			}, nil
+		},
+		getRecordsMock: func(ctx context.Context, params *kinesis.GetRecordsInput, optFns ...func(*kinesis.Options)) (*kinesis.GetRecordsOutput, error) {
+			<-ctx.Done()
+			return &kinesis.GetRecordsOutput{
+				NextShardIterator: aws.String("iterator-2"),
+			}, nil
+		},
+	}
+
+	group := &rebalanceAwareGroupMock{}
+
+	c, err := New("myStreamName",
+		WithClient(client),
+		WithGroup(group),
+		WithScanInterval(time.Millisecond),
+	)
+	if err != nil {
+		t.Fatalf("new consumer error: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- c.Scan(ctx, func(r *Record) error {
+			cancel()
+			return nil
+		})
+	}()
+
+	if err := <-done; err != nil {
+		t.Fatalf("scan returned unexpected error %v", err)
+	}
+
+	if group.shardStoppedCalls != 1 {
+		t.Fatalf("expected ShardStopped to be called once on global shutdown, got %d", group.shardStoppedCalls)
+	}
+	if group.closeShardCalls != 0 {
+		t.Fatalf("expected CloseShard to be skipped on global shutdown, got %d calls", group.closeShardCalls)
+	}
+}
+
 func TestScan_DuplicateShardIsProcessedOnce(t *testing.T) {
 	var (
 		mu                    sync.Mutex
