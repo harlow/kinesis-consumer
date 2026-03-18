@@ -500,6 +500,114 @@ func TestGroupExample_MultiWorkerJoinLeaveRebalances(t *testing.T) {
 	assertNoScanError(t, workerC)
 }
 
+func TestGroupExample_WorkerLeavesDuringActiveHandoff(t *testing.T) {
+	requireExampleIntegration(t)
+	kinesisClient := mustLocalKinesisClient(t)
+	dynamoClient := mustLocalDynamoClient(t)
+
+	groupBin := buildExampleBinary(t, "./examples/consumer-group-ddb")
+	stream := uniqueName("group-leave-during-handoff")
+	groupName := uniqueName("group")
+	leaseTable := uniqueName("lease")
+	checkpointTable := uniqueName("checkpoint")
+	cleanupDynamoTable(t, dynamoClient, leaseTable)
+	cleanupDynamoTable(t, dynamoClient, checkpointTable)
+	createStream(t, kinesisClient, stream, 10)
+
+	repo, err := groupddb.New(groupddb.Config{
+		Client:    dynamoClient,
+		TableName: leaseTable,
+	})
+	if err != nil {
+		t.Fatalf("ddb.New() error = %v", err)
+	}
+	namespace := groupName + "#" + stream
+
+	workerA := startGroupWorker(t, groupBin, stream, groupName, leaseTable, checkpointTable, "worker-a")
+	waitFor(t, 10*time.Second, func() bool {
+		return strings.Contains(workerA.Logs(), "start scan:")
+	}, "worker-a to start scanning")
+	waitFor(t, 15*time.Second, func() bool {
+		counts, readErr := integrationOwnerCountMap(repo, namespace)
+		return readErr == nil && counts["worker-a"] == 10
+	}, "worker-a to own all 10 shards")
+
+	workerB := startGroupWorker(t, groupBin, stream, groupName, leaseTable, checkpointTable, "worker-b")
+	waitFor(t, 10*time.Second, func() bool {
+		return strings.Contains(workerB.Logs(), "start scan:")
+	}, "worker-b to start scanning")
+	waitFor(t, 20*time.Second, func() bool {
+		counts, readErr := integrationOwnerCountMap(repo, namespace)
+		return readErr == nil && counts["worker-a"] == 5 && counts["worker-b"] == 5
+	}, "workers a/b to rebalance to 5/5")
+
+	workerC := startGroupWorker(t, groupBin, stream, groupName, leaseTable, checkpointTable, "worker-c")
+	waitFor(t, 10*time.Second, func() bool {
+		return strings.Contains(workerC.Logs(), "start scan:")
+	}, "worker-c to start scanning")
+	waitFor(t, 20*time.Second, func() bool {
+		counts, readErr := integrationOwnerCountMap(repo, namespace)
+		if readErr != nil {
+			return false
+		}
+		return counts["worker-a"] > 0 && counts["worker-b"] > 0 && counts["worker-c"] > 0
+	}, "worker-c to start active handoff rebalance")
+
+	if err := workerB.StopInterrupt(10 * time.Second); err != nil {
+		t.Fatalf("workerB.StopInterrupt() error = %v\n%s", err, workerB.Logs())
+	}
+
+	waitFor(t, 20*time.Second, func() bool {
+		counts, readErr := integrationOwnerCountMap(repo, namespace)
+		if readErr != nil {
+			return false
+		}
+		return totalOwned(counts, "worker-a", "worker-c") == 10 &&
+			counts["worker-b"] == 0 &&
+			counts["worker-a"] > 0 &&
+			counts["worker-c"] > 0 &&
+			roughlyBalanced(counts, "worker-a", "worker-c")
+	}, "workers a/c to own all shards after worker-b leaves during handoff")
+	waitFor(t, 10*time.Second, func() bool {
+		ok, readErr := noActivePendingHandoffs(repo, namespace)
+		return readErr == nil && ok
+	}, "handoff state to clear after worker-b leaves during handoff")
+
+	putRecords(t, kinesisClient, stream, "after-leave-during-handoff", 60)
+	waitFor(t, 20*time.Second, func() bool {
+		recordsA := parseGroupRecords(workerA.Logs())
+		recordsC := parseGroupRecords(workerC.Logs())
+		return countTag(recordsA, "after-leave-during-handoff")+countTag(recordsC, "after-leave-during-handoff") >= 60
+	}, "workers a/c to consume post-leave-during-handoff batch")
+
+	recordsA := parseGroupRecords(workerA.Logs())
+	recordsB := parseGroupRecords(workerB.Logs())
+	recordsC := parseGroupRecords(workerC.Logs())
+	if got := countDuplicateSeq(recordsA, recordsB, recordsC); got != 0 {
+		t.Fatalf(
+			"duplicate sequence count = %d\nworker-a:\n%s\nworker-b:\n%s\nworker-c:\n%s",
+			got,
+			workerA.Logs(),
+			workerB.Logs(),
+			workerC.Logs(),
+		)
+	}
+	if countTag(recordsB, "after-leave-during-handoff") != 0 {
+		t.Fatalf("worker-b consumed post-leave-during-handoff records after shutdown\n%s", workerB.Logs())
+	}
+
+	if err := workerA.StopInterrupt(10 * time.Second); err != nil {
+		t.Fatalf("workerA.StopInterrupt() error = %v\n%s", err, workerA.Logs())
+	}
+	if err := workerC.StopInterrupt(10 * time.Second); err != nil {
+		t.Fatalf("workerC.StopInterrupt() error = %v\n%s", err, workerC.Logs())
+	}
+
+	assertNoScanError(t, workerA)
+	assertNoScanError(t, workerB)
+	assertNoScanError(t, workerC)
+}
+
 func TestGroupExample_CrashDuringHandoffFallsBackAfterLeaseExpiry(t *testing.T) {
 	requireExampleIntegration(t)
 	kinesisClient := mustLocalKinesisClient(t)

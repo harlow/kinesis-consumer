@@ -88,9 +88,9 @@
 - Required pre-release validation for any change touching consumer-group coordination, shard handoff, checkpoint/restart behavior, or example integration code:
   - `go test ./...`
   - `go test -race ./group/consumergroup/...`
-  - `bash scripts/run-example-integration.sh`
+  - `bash scripts/run-e2e-integration.sh`
 - If the default local DynamoDB port is occupied, rerun the live suite with port overrides, for example:
-  - `DDB_PORT=8002 DDB_ENDPOINT=http://localhost:8002 KINESIS_PORT=4567 KINESIS_ENDPOINT=http://localhost:4567 bash scripts/run-example-integration.sh`
+  - `DDB_PORT=8002 DDB_ENDPOINT=http://localhost:8002 KINESIS_PORT=4567 KINESIS_ENDPOINT=http://localhost:4567 bash scripts/run-e2e-integration.sh`
 - Do not claim the branch is fully validated or ready to release if the live example integration suite has only been skipped.
 - CI config (`.travis.yml`) historically used:
   - Go 1.13

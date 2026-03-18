@@ -225,6 +225,12 @@ There is also an opt-in example integration test that shows the handoff timing d
 RUN_EXAMPLE_INTEGRATION=1 go test -v ./integration -run TestGroupExample_LateJoinLogsHandoffTimeline
 ```
 
+Or run the full local end-to-end example suite:
+
+```bash
+bash scripts/run-e2e-integration.sh
+```
+
 The test logs a small timeline including:
 
 - when worker A was already consuming
