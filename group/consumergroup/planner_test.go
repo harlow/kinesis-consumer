@@ -58,7 +58,7 @@ func TestTargetLeaseCount(t *testing.T) {
 func TestAssignmentPlanner_UnownedThenExpired(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
 
-	leases := []leaseState{
+	leases := []Lease{
 		{ShardID: "s0"},
 		{ShardID: "s1", Owner: "worker-a", ExpiresAt: now.Add(-time.Second)},
 		{ShardID: "s2", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
@@ -84,7 +84,7 @@ func TestAssignmentPlanner_UnownedThenExpired(t *testing.T) {
 func TestAssignmentPlanner_RequestsHandoffFromOverloadedWorker(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
 
-	leases := []leaseState{
+	leases := []Lease{
 		{ShardID: "s0", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
 		{ShardID: "s1", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
 		{ShardID: "s2", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
@@ -121,7 +121,7 @@ func TestAssignmentPlanner_RequestsHandoffFromOverloadedWorker(t *testing.T) {
 func TestAssignmentPlanner_WaitsForCompletedParents(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
 
-	leases := []leaseState{
+	leases := []Lease{
 		{ShardID: "parent"},
 		{ShardID: "child", ParentShardID: "parent"},
 	}
@@ -147,7 +147,7 @@ func TestAssignmentPlanner_WaitsForCompletedParents(t *testing.T) {
 func TestAssignmentPlanner_WaitsForBothMergeParents(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
 
-	leases := []leaseState{
+	leases := []Lease{
 		{ShardID: "left", Completed: true},
 		{ShardID: "right"},
 		{ShardID: "merged", ParentShardID: "left", AdjacentParentID: "right"},
