@@ -1002,6 +1002,7 @@ func TestScan_GlobalShutdownCallsShardStoppedForAllActiveShards(t *testing.T) {
 		t.Fatalf("expected CloseShard to be skipped on global shutdown, got %d calls", group.closeShardCalls)
 	}
 }
+
 func TestScan_DuplicateShardIsProcessedOnce(t *testing.T) {
 	var (
 		mu                    sync.Mutex
@@ -2007,7 +2008,6 @@ func (g *multiShardRebalanceAwareGroupMock) ShardContext(parent context.Context,
 	ctx, cancel := context.WithCancel(parent)
 	return ctx, func() { cancel() }
 }
-
 func (g *multiShardRebalanceAwareGroupMock) ShardStopped(ctx context.Context, shardID string) error {
 	g.shardStoppedCalls++
 	if g.shardStoppedMock != nil {
