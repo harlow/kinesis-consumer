@@ -5,16 +5,7 @@ import (
 	"time"
 )
 
-type leaseState struct {
-	ShardID          string
-	Owner            string
-	ExpiresAt        time.Time
-	PendingOwner     string
-	HandoffDeadline  time.Time
-	ParentShardID    string
-	AdjacentParentID string
-	Completed        bool
-}
+type leaseState = Lease
 
 type handoffRequest struct {
 	ShardID      string

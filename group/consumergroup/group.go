@@ -288,27 +288,15 @@ func (g *Group) runOnce(ctx context.Context, shardC chan types.Shard) error {
 		MaxLeasesForWorker: g.maxLeasesForWorker,
 	}
 
-	leaseStates := make([]leaseState, 0, len(leases))
 	for _, lease := range leases {
 		if lease.Owner == g.workerID && handoffPendingForOtherWorker(lease.PendingOwner, lease.HandoffDeadline, now, g.workerID) {
 			if err := g.releaseShard(ctx, lease.ShardID); err != nil {
 				return err
 			}
 		}
-
-		leaseStates = append(leaseStates, leaseState{
-			ShardID:          lease.ShardID,
-			Owner:            lease.Owner,
-			ExpiresAt:        lease.ExpiresAt,
-			PendingOwner:     lease.PendingOwner,
-			HandoffDeadline:  lease.HandoffDeadline,
-			ParentShardID:    lease.ParentShardID,
-			AdjacentParentID: lease.AdjacentParentID,
-			Completed:        lease.Completed,
-		})
 	}
 
-	plan := planner.Plan(leaseStates, activeWorkers)
+	plan := planner.Plan(leases, activeWorkers)
 	if len(plan.RenewShardIDs) > 0 {
 		if err := g.repo.RenewLeases(ctx, g.namespace(), g.workerID, plan.RenewShardIDs, now.Add(g.leaseDuration)); err != nil {
 			return err

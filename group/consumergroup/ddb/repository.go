@@ -180,6 +180,8 @@ func (r *Repository) CompleteLease(ctx context.Context, namespace, shardID, work
 			"shard_id":  &ddbt.AttributeValueMemberS{Value: leaseSortKey(shardID)},
 		},
 		UpdateExpression: aws.String("SET completed = :completed, lease_owner = :empty, lease_expires_at = :zero"),
+		// Allow the current owner to mark completion, and allow repeated completion
+		// calls to succeed idempotently after the lease has already been completed.
 		ConditionExpression: aws.String(
 			"lease_owner = :worker OR completed = :completed",
 		),
