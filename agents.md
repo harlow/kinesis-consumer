@@ -84,6 +84,14 @@
   - shard discovery/ordering logic
   - store implementations
   - deaggregator behavior
+- Consumer-group and example integration changes are not considered release-ready until the live local example suite has been run against Kinesis Lite and DynamoDB Local.
+- Required pre-release validation for any change touching consumer-group coordination, shard handoff, checkpoint/restart behavior, or example integration code:
+  - `go test ./...`
+  - `go test -race ./group/consumergroup/...`
+  - `bash scripts/run-example-integration.sh`
+- If the default local DynamoDB port is occupied, rerun the live suite with port overrides, for example:
+  - `DDB_PORT=8002 DDB_ENDPOINT=http://localhost:8002 KINESIS_PORT=4567 KINESIS_ENDPOINT=http://localhost:4567 bash scripts/run-example-integration.sh`
+- Do not claim the branch is fully validated or ready to release if the live example integration suite has only been skipped.
 - CI config (`.travis.yml`) historically used:
   - Go 1.13
   - `go test -v -race ./...`
