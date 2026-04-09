@@ -125,6 +125,12 @@ func (g *AllGroup) findNewShards(ctx context.Context, shardC chan types.Shard) e
 			return nil, err
 		}
 
+		completedAncestors, err := g.inferCompletedAncestors(shards)
+		if err != nil {
+			g.logger.Log("[GROUP] error inferring completed ancestors:", err)
+			return nil, err
+		}
+
 		// We do two `for` loops, since we have to set up all the `shardsClosed`
 		// channels before we start using any of them.  It's highly probable
 		// that Kinesis provides us the shards in dependency order (parents
@@ -135,6 +141,11 @@ func (g *AllGroup) findNewShards(ctx context.Context, shardC chan types.Shard) e
 				continue
 			}
 			g.shards[*shard.ShardId] = shard
+			if _, ok := completedAncestors[*shard.ShardId]; ok {
+				// A checkpoint on a descendant implies this shard was already fully
+				// consumed before restart, so treat it as closed and do not re-emit it.
+				continue
+			}
 			g.shardsClosed[*shard.ShardId] = make(chan struct{})
 			newShards[*shard.ShardId] = shard
 		}
@@ -181,4 +192,53 @@ func (g *AllGroup) findNewShards(ctx context.Context, shardC chan types.Shard) e
 		}()
 	}
 	return nil
+}
+
+func (g *AllGroup) inferCompletedAncestors(shards []types.Shard) (map[string]struct{}, error) {
+	byShardID := make(map[string]types.Shard, len(shards))
+	for _, shard := range shards {
+		if shard.ShardId == nil {
+			continue
+		}
+		byShardID[*shard.ShardId] = shard
+	}
+
+	completed := make(map[string]struct{})
+	var markAncestors func(types.Shard)
+	markAncestors = func(shard types.Shard) {
+		if shard.ParentShardId != nil {
+			parentShardID := *shard.ParentShardId
+			if _, ok := completed[parentShardID]; !ok {
+				completed[parentShardID] = struct{}{}
+				if parent, exists := byShardID[parentShardID]; exists {
+					markAncestors(parent)
+				}
+			}
+		}
+		if shard.AdjacentParentShardId != nil {
+			parentShardID := *shard.AdjacentParentShardId
+			if _, ok := completed[parentShardID]; !ok {
+				completed[parentShardID] = struct{}{}
+				if parent, exists := byShardID[parentShardID]; exists {
+					markAncestors(parent)
+				}
+			}
+		}
+	}
+
+	for _, shard := range shards {
+		if shard.ShardId == nil {
+			continue
+		}
+		checkpoint, err := g.Store.GetCheckpoint(g.streamName, *shard.ShardId)
+		if err != nil {
+			return nil, err
+		}
+		if checkpoint == "" {
+			continue
+		}
+		markAncestors(shard)
+	}
+
+	return completed, nil
 }
