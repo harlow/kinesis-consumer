@@ -276,6 +276,116 @@ func TestAllGroup_findNewShards_UnknownParent(t *testing.T) {
 	}
 }
 
+func TestAllGroup_findNewShards_RestartWithCheckpointedChildDoesNotReemitParent(t *testing.T) {
+	client := &kinesisClientMock{
+		listShardsMock: func(ctx context.Context, params *kinesis.ListShardsInput, optFns ...func(*kinesis.Options)) (*kinesis.ListShardsOutput, error) {
+			return &kinesis.ListShardsOutput{
+				Shards: []types.Shard{
+					{
+						ShardId: aws.String("shard-parent"),
+					},
+					{
+						ShardId:       aws.String("shard-child"),
+						ParentShardId: aws.String("shard-parent"),
+					},
+				},
+			}, nil
+		},
+	}
+
+	checkpoints := store.New()
+	if err := checkpoints.SetCheckpoint("test-stream", "shard-child", "child-seq-42"); err != nil {
+		t.Fatalf("SetCheckpoint(child) failed: %v", err)
+	}
+
+	group := NewAllGroup(client, checkpoints, "test-stream", &testLogger{t})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	shardC := make(chan types.Shard, 10)
+
+	if err := group.findNewShards(ctx, shardC); err != nil {
+		t.Fatalf("findNewShards failed: %v", err)
+	}
+
+	select {
+	case shard := <-shardC:
+		if got := aws.ToString(shard.ShardId); got != "shard-child" {
+			t.Fatalf("expected restarted group to emit checkpointed child first, got %s", got)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("checkpointed child shard not received on restart")
+	}
+
+	select {
+	case shard := <-shardC:
+		t.Fatalf("unexpected extra shard emitted on restart: %s", aws.ToString(shard.ShardId))
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestAllGroup_findNewShards_RestartWithCheckpointedSiblingSkipsParent(t *testing.T) {
+	client := &kinesisClientMock{
+		listShardsMock: func(ctx context.Context, params *kinesis.ListShardsInput, optFns ...func(*kinesis.Options)) (*kinesis.ListShardsOutput, error) {
+			return &kinesis.ListShardsOutput{
+				Shards: []types.Shard{
+					{
+						ShardId: aws.String("shard-parent"),
+					},
+					{
+						ShardId:       aws.String("shard-child-a"),
+						ParentShardId: aws.String("shard-parent"),
+					},
+					{
+						ShardId:       aws.String("shard-child-b"),
+						ParentShardId: aws.String("shard-parent"),
+					},
+				},
+			}, nil
+		},
+	}
+
+	checkpoints := store.New()
+	if err := checkpoints.SetCheckpoint("test-stream", "shard-child-a", "child-a-seq-42"); err != nil {
+		t.Fatalf("SetCheckpoint(child-a) failed: %v", err)
+	}
+
+	group := NewAllGroup(client, checkpoints, "test-stream", &testLogger{t})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	shardC := make(chan types.Shard, 10)
+
+	if err := group.findNewShards(ctx, shardC); err != nil {
+		t.Fatalf("findNewShards failed: %v", err)
+	}
+
+	received := map[string]bool{}
+	for i := 0; i < 2; i++ {
+		select {
+		case shard := <-shardC:
+			received[aws.ToString(shard.ShardId)] = true
+		case <-time.After(100 * time.Millisecond):
+			t.Fatalf("expected both children on restart, received %v", received)
+		}
+	}
+
+	if !received["shard-child-a"] || !received["shard-child-b"] {
+		t.Fatalf("expected both children, received %v", received)
+	}
+	if received["shard-parent"] {
+		t.Fatalf("unexpected parent shard emitted on restart: %v", received)
+	}
+
+	select {
+	case shard := <-shardC:
+		t.Fatalf("unexpected extra shard emitted on restart: %s", aws.ToString(shard.ShardId))
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
 func TestAllGroup_findNewShards_ContextCancellation(t *testing.T) {
 	// Test that context cancellation prevents child shards from being sent
 	client := &kinesisClientMock{

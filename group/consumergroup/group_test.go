@@ -611,6 +611,43 @@ func TestGroupRunOnce_RestartSeesCompletedParentAndClaimsChild(t *testing.T) {
 	}
 }
 
+func TestGroupRunOnce_RestartSeesCompletedParentAndClaimsSiblings(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+	repo := newFakeLeaseRepo([]Lease{
+		{ShardID: "parent", Completed: true},
+		{ShardID: "child-a", ParentShardID: "parent"},
+		{ShardID: "child-b", ParentShardID: "parent"},
+	})
+	client := &fakeKinesisClient{
+		shards: []types.Shard{
+			{ShardId: aws.String("parent")},
+			{ShardId: aws.String("child-a"), ParentShardId: aws.String("parent")},
+			{ShardId: aws.String("child-b"), ParentShardId: aws.String("parent")},
+		},
+	}
+
+	group, err := New(Config{
+		AppName:       "my-app",
+		StreamName:    "my-stream",
+		WorkerID:      "worker-b",
+		KinesisClient: client,
+		Repository:    repo,
+		Clock:         fakeClock{now: now},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	shardC := make(chan types.Shard, 4)
+	if err := group.runOnce(context.Background(), shardC); err != nil {
+		t.Fatalf("runOnce() error = %v", err)
+	}
+
+	if got := fmt.Sprintf("%v", drainShardIDs(shardC)); got != "[child-a child-b]" {
+		t.Fatalf("claimed shards = %s, want [child-a child-b]", got)
+	}
+}
+
 func TestGroupCloseShard_FlushesBeforeRelease(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
 	repo := newFakeLeaseRepo(nil)
