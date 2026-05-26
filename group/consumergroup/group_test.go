@@ -648,6 +648,81 @@ func TestGroupRunOnce_RestartSeesCompletedParentAndClaimsSiblings(t *testing.T) 
 	}
 }
 
+func TestGroupRunOnce_RestartEmitsAlreadyOwnedLeases(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+	repo := newFakeLeaseRepo([]Lease{
+		{ShardID: "s0", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
+		{ShardID: "s1", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
+	})
+	client := &fakeKinesisClient{
+		shards: []types.Shard{
+			{ShardId: aws.String("s0")},
+			{ShardId: aws.String("s1")},
+		},
+	}
+
+	group, err := New(Config{
+		AppName:       "my-app",
+		StreamName:    "my-stream",
+		WorkerID:      "worker-a",
+		KinesisClient: client,
+		Repository:    repo,
+		Clock:         fakeClock{now: now},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	shardC := make(chan types.Shard, 4)
+	if err := group.runOnce(context.Background(), shardC); err != nil {
+		t.Fatalf("runOnce() error = %v", err)
+	}
+
+	if got := fmt.Sprintf("%v", drainShardIDs(shardC)); got != "[s0 s1]" {
+		t.Fatalf("emitted shards = %s, want [s0 s1]", got)
+	}
+}
+
+func TestGroupRunOnce_RestartDoesNotReemitActiveLeases(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+	repo := newFakeLeaseRepo([]Lease{
+		{ShardID: "s0", Owner: "worker-a", ExpiresAt: now.Add(time.Minute)},
+	})
+	client := &fakeKinesisClient{
+		shards: []types.Shard{
+			{ShardId: aws.String("s0")},
+		},
+	}
+
+	group, err := New(Config{
+		AppName:       "my-app",
+		StreamName:    "my-stream",
+		WorkerID:      "worker-a",
+		KinesisClient: client,
+		Repository:    repo,
+		Clock:         fakeClock{now: now},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	shardC := make(chan types.Shard, 4)
+	if err := group.runOnce(context.Background(), shardC); err != nil {
+		t.Fatalf("first runOnce() error = %v", err)
+	}
+	if got := len(shardC); got != 1 {
+		t.Fatalf("first runOnce emitted %d shards, want 1", got)
+	}
+	<-shardC
+
+	if err := group.runOnce(context.Background(), shardC); err != nil {
+		t.Fatalf("second runOnce() error = %v", err)
+	}
+	if got := len(shardC); got != 0 {
+		t.Fatalf("second runOnce emitted %d shards for already-active lease, want 0", got)
+	}
+}
+
 func TestGroupCloseShard_FlushesBeforeRelease(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
 	repo := newFakeLeaseRepo(nil)

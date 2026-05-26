@@ -301,6 +301,9 @@ func (g *Group) runOnce(ctx context.Context, shardC chan types.Shard) error {
 		if err := g.repo.RenewLeases(ctx, g.namespace(), g.workerID, plan.RenewShardIDs, now.Add(g.leaseDuration)); err != nil {
 			return err
 		}
+		for _, shardID := range plan.RenewShardIDs {
+			g.emitShardIfNeeded(shardC, shardID)
+		}
 	}
 	for _, shardID := range plan.ClaimShardIDs {
 		ok, err := g.repo.ClaimLease(ctx, g.namespace(), shardID, g.workerID, now, now.Add(g.leaseDuration))
