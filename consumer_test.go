@@ -761,6 +761,39 @@ func TestScan_GetShardIteratorError(t *testing.T) {
 	}
 }
 
+func TestScan_ConcurrentShardAndGroupErrorsDoNotDeadlock(t *testing.T) {
+	shardErr := errors.New("mock get shard iterator error")
+	groupErr := errors.New("mock group error")
+	client := &kinesisClientMock{
+		getShardIteratorMock: func(ctx context.Context, params *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {
+			return nil, shardErr
+		},
+	}
+	group := &concurrentFailureGroup{err: groupErr}
+
+	c, err := New("myStreamName",
+		WithClient(client),
+		WithGroup(group),
+	)
+	if err != nil {
+		t.Fatalf("new consumer error: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- c.Scan(context.Background(), func(r *Record) error { return nil })
+	}()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, shardErr) {
+			t.Fatalf("scan error = %v, want first shard error %v", err, shardErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Scan deadlocked after concurrent shard and group errors")
+	}
+}
+
 func TestScan_CloseableGroupClosesProcessedShard(t *testing.T) {
 	var closeCalls int
 
@@ -1829,6 +1862,24 @@ func (c *kinesisClientMock) GetShardIterator(ctx context.Context, params *kinesi
 type groupMock struct {
 	getCheckpointMock func(streamName, shardID string) (string, error)
 	setCheckpointMock func(streamName, shardID, sequenceNumber string) error
+}
+
+type concurrentFailureGroup struct {
+	err error
+}
+
+func (g *concurrentFailureGroup) Start(ctx context.Context, shardC chan types.Shard) error {
+	shardC <- types.Shard{ShardId: aws.String("myShard")}
+	<-ctx.Done()
+	return g.err
+}
+
+func (g *concurrentFailureGroup) GetCheckpoint(streamName, shardID string) (string, error) {
+	return "", nil
+}
+
+func (g *concurrentFailureGroup) SetCheckpoint(streamName, shardID, sequenceNumber string) error {
+	return nil
 }
 
 type flushableStoreMock struct {
