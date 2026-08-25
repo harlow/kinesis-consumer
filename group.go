@@ -13,6 +13,12 @@ type Group interface {
 	SetCheckpoint(ctx context.Context, streamName, shardID, sequenceNumber string) error
 }
 
+// FlushableGroup can persist any buffered checkpoints without tearing down the group.
+type FlushableGroup interface {
+	Group
+	Flush() error
+}
+
 // CloseableGroup extends Group with the ability to close a shard.
 type CloseableGroup interface {
 	Group

@@ -119,13 +119,18 @@ func (c *Checkpoint) SetCheckpoint(_ context.Context, streamName, shardID, seque
 	return nil
 }
 
+// Flush saves any buffered checkpoints without closing the store.
+func (c *Checkpoint) Flush() error {
+	return c.save()
+}
+
 // Shutdown the checkpoint. Save any in-flight data.
 func (c *Checkpoint) Shutdown() error {
 	defer c.conn.Close()
 
 	c.done <- struct{}{}
 
-	return c.save()
+	return c.Flush()
 }
 
 func (c *Checkpoint) loop() {
@@ -144,17 +149,40 @@ func (c *Checkpoint) loop() {
 }
 
 func (c *Checkpoint) save() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// nolint: gas, it replaces only the table name
+	//nolint: gas, it replaces only the table name
 	upsertCheckpoint := fmt.Sprintf(`REPLACE INTO %s (namespace, shard_id, sequence_number) VALUES (?, ?, ?)`, c.tableName)
 
-	for key, sequenceNumber := range c.checkpoints {
+	pending := c.drainCheckpoints()
+	for key, sequenceNumber := range pending {
 		if _, err := c.conn.Exec(upsertCheckpoint, fmt.Sprintf("%s-%s", c.appName, key.streamName), key.shardID, sequenceNumber); err != nil {
+			c.restoreCheckpoints(pending)
 			return err
 		}
 	}
 
 	return nil
+}
+
+func (c *Checkpoint) drainCheckpoints() map[key]string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	pending := make(map[key]string, len(c.checkpoints))
+	for checkpointKey, sequenceNumber := range c.checkpoints {
+		pending[checkpointKey] = sequenceNumber
+	}
+	c.checkpoints = map[key]string{}
+	return pending
+}
+
+func (c *Checkpoint) restoreCheckpoints(pending map[key]string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for checkpointKey, sequenceNumber := range pending {
+		if _, exists := c.checkpoints[checkpointKey]; exists {
+			continue
+		}
+		c.checkpoints[checkpointKey] = sequenceNumber
+	}
 }

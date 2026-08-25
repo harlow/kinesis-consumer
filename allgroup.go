@@ -49,17 +49,16 @@ func (g *AllGroup) Start(ctx context.Context, shardC chan types.Shard) error {
 	// necessarily close at the same time, so we could potentially get a
 	// thundering heard of notifications from the consumer.
 
-	var ticker = time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
 
 	for {
 		if err := g.findNewShards(ctx, shardC); err != nil {
-			ticker.Stop()
 			return err
 		}
 
 		select {
 		case <-ctx.Done():
-			ticker.Stop()
 			return nil
 		case <-ticker.C:
 		}
@@ -73,8 +72,18 @@ func (g *AllGroup) CloseShard(_ context.Context, shardID string) error {
 	if !ok {
 		return fmt.Errorf("closing unknown shard ID %q", shardID)
 	}
+	// Close channel and remove from map to prevent double-close
+	delete(g.shardsClosed, shardID)
 	close(c)
 	return nil
+}
+
+func (g *AllGroup) Flush() error {
+	flushable, ok := g.Store.(FlushableStore)
+	if !ok {
+		return nil
+	}
+	return flushable.Flush()
 }
 
 func waitForCloseChannel(ctx context.Context, c <-chan struct{}) bool {
@@ -96,50 +105,141 @@ func waitForCloseChannel(ctx context.Context, c <-chan struct{}) bool {
 // and uses a local cache to determine if we are already processing
 // a particular shard.
 func (g *AllGroup) findNewShards(ctx context.Context, shardC chan types.Shard) error {
-	g.shardMu.Lock()
-	defer g.shardMu.Unlock()
+	// Capture parent channels while holding the lock to avoid race conditions.
+	// We must capture all references to g.shardsClosed before releasing the lock,
+	// since concurrent calls to findNewShards() or CloseShard() may modify the map.
+	type shardWithParents struct {
+		shard          types.Shard
+		parent         <-chan struct{}
+		adjacentParent <-chan struct{}
+	}
 
-	g.slog.DebugContext(ctx, "fetching shards")
+	shardsToProcess, err := func() ([]shardWithParents, error) {
+		g.shardMu.Lock()
+		defer g.shardMu.Unlock()
 
-	shards, err := listShards(ctx, g.kinesis, g.streamName)
+		g.slog.DebugContext(ctx, "fetching shards")
+
+		shards, err := listShards(ctx, g.kinesis, g.streamName)
+		if err != nil {
+			g.slog.ErrorContext(ctx, "list shards", slog.String("error", err.Error()))
+			return nil, err
+		}
+
+		completedAncestors, err := g.inferCompletedAncestors(ctx, shards)
+		if err != nil {
+			g.slog.ErrorContext(ctx, "infer completed ancestors", slog.String("error", err.Error()))
+			return nil, err
+		}
+
+		// We do two `for` loops, since we have to set up all the `shardsClosed`
+		// channels before we start using any of them.  It's highly probable
+		// that Kinesis provides us the shards in dependency order (parents
+		// before children), but it doesn't appear to be a guarantee.
+		newShards := make(map[string]types.Shard)
+		for _, shard := range shards {
+			if _, ok := g.shards[*shard.ShardId]; ok {
+				continue
+			}
+			g.shards[*shard.ShardId] = shard
+			if _, ok := completedAncestors[*shard.ShardId]; ok {
+				// A checkpoint on a descendant implies this shard was already fully
+				// consumed before restart, so treat it as closed and do not re-emit it.
+				continue
+			}
+			g.shardsClosed[*shard.ShardId] = make(chan struct{})
+			newShards[*shard.ShardId] = shard
+		}
+
+		result := make([]shardWithParents, 0, len(newShards))
+
+		// Only new shards need to be checked for parent dependencies
+		for _, shard := range newShards {
+			var parent, adjacentParent <-chan struct{}
+			if shard.ParentShardId != nil {
+				parent = g.shardsClosed[*shard.ParentShardId]
+			}
+			if shard.AdjacentParentShardId != nil {
+				adjacentParent = g.shardsClosed[*shard.AdjacentParentShardId]
+			}
+			result = append(result, shardWithParents{
+				shard:          shard,
+				parent:         parent,
+				adjacentParent: adjacentParent,
+			})
+		}
+
+		return result, nil
+	}()
 	if err != nil {
-		g.slog.ErrorContext(ctx, "list shards", slog.String("error", err.Error()))
 		return err
 	}
 
-	// We do two `for` loops, since we have to set up all the `shardClosed`
-	// channels before we start using any of them.  It's highly probable
-	// that Kinesis provides us the shards in dependency order (parents
-	// before children), but it doesn't appear to be a guarantee.
-	newShards := make(map[string]types.Shard)
-	for _, shard := range shards {
-		if _, ok := g.shards[*shard.ShardId]; ok {
-			continue
-		}
-		g.shards[*shard.ShardId] = shard
-		g.shardsClosed[*shard.ShardId] = make(chan struct{})
-		newShards[*shard.ShardId] = shard
-	}
-	// only new shards need to be checked for parent dependencies
-	for _, shard := range newShards {
-		shard := shard // Shadow shard, since we use it in goroutine
-		var parent1, parent2 <-chan struct{}
-		if shard.ParentShardId != nil {
-			parent1 = g.shardsClosed[*shard.ParentShardId]
-		}
-		if shard.AdjacentParentShardId != nil {
-			parent2 = g.shardsClosed[*shard.AdjacentParentShardId]
-		}
+	// Now spawn goroutines after releasing the lock, using the captured channel references
+	for _, sp := range shardsToProcess {
+		sp := sp // Shadow variable for goroutine capture
 		go func() {
 			// Asynchronously wait for all parents of this shard to be processed
 			// before providing it out to our client.  Kinesis guarantees that a
 			// given partition key's data will be provided to clients in-order,
 			// but when splits or joins happen, we need to process all parents prior
 			// to processing children or that ordering guarantee is not maintained.
-			if waitForCloseChannel(ctx, parent1) && waitForCloseChannel(ctx, parent2) {
-				shardC <- shard
+			if waitForCloseChannel(ctx, sp.parent) && waitForCloseChannel(ctx, sp.adjacentParent) {
+				select {
+				case <-ctx.Done():
+				case shardC <- sp.shard:
+				}
 			}
 		}()
 	}
 	return nil
+}
+
+func (g *AllGroup) inferCompletedAncestors(ctx context.Context, shards []types.Shard) (map[string]struct{}, error) {
+	byShardID := make(map[string]types.Shard, len(shards))
+	for _, shard := range shards {
+		if shard.ShardId == nil {
+			continue
+		}
+		byShardID[*shard.ShardId] = shard
+	}
+
+	completed := make(map[string]struct{})
+	var markAncestors func(types.Shard)
+	markAncestors = func(shard types.Shard) {
+		if shard.ParentShardId != nil {
+			parentShardID := *shard.ParentShardId
+			if _, ok := completed[parentShardID]; !ok {
+				completed[parentShardID] = struct{}{}
+				if parent, exists := byShardID[parentShardID]; exists {
+					markAncestors(parent)
+				}
+			}
+		}
+		if shard.AdjacentParentShardId != nil {
+			parentShardID := *shard.AdjacentParentShardId
+			if _, ok := completed[parentShardID]; !ok {
+				completed[parentShardID] = struct{}{}
+				if parent, exists := byShardID[parentShardID]; exists {
+					markAncestors(parent)
+				}
+			}
+		}
+	}
+
+	for _, shard := range shards {
+		if shard.ShardId == nil {
+			continue
+		}
+		checkpoint, err := g.Store.GetCheckpoint(ctx, g.streamName, *shard.ShardId)
+		if err != nil {
+			return nil, err
+		}
+		if checkpoint == "" {
+			continue
+		}
+		markAncestors(shard)
+	}
+
+	return completed, nil
 }

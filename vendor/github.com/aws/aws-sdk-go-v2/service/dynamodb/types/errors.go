@@ -714,11 +714,11 @@ func (e *ReplicatedWriteConflictException) ErrorFault() smithy.ErrorFault { retu
 
 // Throughput exceeds the current throughput quota for your account. For detailed
 // information about why the request was throttled and the ARN of the impacted
-// resource, find the [ThrottlingReason]field in the returned exception. Contact [Amazon Web ServicesSupport] to request a quota
+// resource, find the [ThrottlingReason]field in the returned exception. Contact [Amazon Web Services Support] to request a quota
 // increase.
 //
+// [Amazon Web Services Support]: https://aws.amazon.com/support
 // [ThrottlingReason]: https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_ThrottlingReason.html
-// [Amazon Web ServicesSupport]: https://aws.amazon.com/support
 type RequestLimitExceeded struct {
 	Message *string
 
@@ -959,8 +959,7 @@ func (e *ThrottlingException) ErrorFault() smithy.ErrorFault { return smithy.Fau
 //
 //   - There is a user error, such as an invalid data format.
 //
-// If using Java, DynamoDB lists the cancellation reasons on the
-// CancellationReasons property. This property is not set for other languages.
+// DynamoDB lists the cancellation reasons on the CancellationReasons property.
 // Transaction cancellation reasons are ordered in the order of requested items, if
 // an item has no error it will have None code and Null message.
 //

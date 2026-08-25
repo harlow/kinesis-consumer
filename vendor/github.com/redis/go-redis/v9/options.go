@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/redis/go-redis/v9/auth"
@@ -20,6 +21,16 @@ import (
 	"github.com/redis/go-redis/v9/maintnotifications"
 	"github.com/redis/go-redis/v9/push"
 )
+
+// poolIDCounter is a global auto-increment counter for generating unique pool IDs.
+var poolIDCounter atomic.Uint64
+
+// generateUniqueID generates a short unique identifier for pool names using auto-increment.
+// This makes it easier to identify and track pools in order of creation.
+func generateUniqueID() string {
+	id := poolIDCounter.Add(1)
+	return strconv.FormatUint(id, 10)
+}
 
 // Limiter is the interface of a rate limiter or a circuit breaker.
 type Limiter interface {
@@ -34,7 +45,6 @@ type Limiter interface {
 
 // Options keeps the settings to set up redis connection.
 type Options struct {
-
 	// Network type, either tcp or unix.
 	//
 	// default: is tcp.
@@ -42,6 +52,17 @@ type Options struct {
 
 	// Addr is the address formated as host:port
 	Addr string
+
+	// NodeAddress is the address of the Redis node as reported by the server.
+	// For cluster clients, this is the exact endpoint string returned by CLUSTER SLOTS
+	// before any resolution or transformation (e.g., loopback replacement).
+	// For standalone clients, this defaults to Addr.
+	//
+	// This is used to match the source endpoint in maintenance notifications
+	// (e.g. SMIGRATED).
+	//
+	// Use Client.NodeAddress() to access this value.
+	NodeAddress string
 
 	// ClientName will execute the `CLIENT SETNAME ClientName` command for each conn.
 	ClientName string
@@ -176,6 +197,10 @@ type Options struct {
 	// default: 10 * runtime.GOMAXPROCS(0)
 	PoolSize int
 
+	// MaxConcurrentDials is the maximum number of concurrent connection creation goroutines.
+	// If <= 0, defaults to PoolSize. If > PoolSize, it will be capped at PoolSize.
+	MaxConcurrentDials int
+
 	// PoolTimeout is the amount of time client waits for connection if all connections
 	// are busy before returning an error.
 	//
@@ -197,6 +222,8 @@ type Options struct {
 	// MaxActiveConns is the maximum number of connections allocated by the pool at a given time.
 	// When zero, there is no limit on the number of connections in the pool.
 	// If the pool is full, the next call to Get() will block until a connection is released.
+	//
+	// default: 0
 	MaxActiveConns int
 
 	// ConnMaxIdleTime is the maximum amount of time a connection may be idle.
@@ -216,6 +243,19 @@ type Options struct {
 	//
 	// default: 0
 	ConnMaxLifetime time.Duration
+
+	// ConnMaxLifetimeJitter is the absolute jitter duration applied to ConnMaxLifetime
+	// to prevent all connections from expiring simultaneously.
+	//
+	// The jitter is applied as a random offset in the range [-jitter, +jitter].
+	// For example, if ConnMaxLifetime is 1 hour and ConnMaxLifetimeJitter is 6 minutes,
+	// connections will expire between 54 minutes and 66 minutes.
+	//
+	// If <= 0, no jitter is applied.
+	// If > ConnMaxLifetime, it will be capped at ConnMaxLifetime.
+	//
+	// default: 0
+	ConnMaxLifetimeJitter time.Duration
 
 	// TLSConfig to use. When set, TLS will be negotiated.
 	TLSConfig *tls.Config
@@ -277,6 +317,12 @@ func (opt *Options) init() {
 			opt.Network = "tcp"
 		}
 	}
+	// For standalone clients, default NodeAddress to Addr if not set.
+	// This ensures maintenance notifications (SMIGRATED, etc.) can match
+	// the connection's endpoint even for non-cluster clients.
+	if opt.NodeAddress == "" {
+		opt.NodeAddress = opt.Addr
+	}
 	if opt.Protocol < 2 {
 		opt.Protocol = 3
 	}
@@ -294,6 +340,11 @@ func (opt *Options) init() {
 	}
 	if opt.PoolSize == 0 {
 		opt.PoolSize = 10 * runtime.GOMAXPROCS(0)
+	}
+	if opt.MaxConcurrentDials <= 0 {
+		opt.MaxConcurrentDials = opt.PoolSize
+	} else if opt.MaxConcurrentDials > opt.PoolSize {
+		opt.MaxConcurrentDials = opt.PoolSize
 	}
 	if opt.ReadBufferSize == 0 {
 		opt.ReadBufferSize = proto.DefaultBufferSize
@@ -328,6 +379,8 @@ func (opt *Options) init() {
 		opt.ConnMaxIdleTime = 30 * time.Minute
 	}
 
+	opt.ConnMaxLifetimeJitter = min(opt.ConnMaxLifetimeJitter, opt.ConnMaxLifetime)
+
 	switch opt.MaxRetries {
 	case -1:
 		opt.MaxRetries = 0
@@ -345,6 +398,10 @@ func (opt *Options) init() {
 		opt.MaxRetryBackoff = 0
 	case 0:
 		opt.MaxRetryBackoff = 512 * time.Millisecond
+	}
+
+	if opt.FailingTimeoutSeconds == 0 {
+		opt.FailingTimeoutSeconds = 15
 	}
 
 	opt.MaintNotificationsConfig = opt.MaintNotificationsConfig.ApplyDefaultsWithPoolConfig(opt.PoolSize, opt.MaxActiveConns)
@@ -622,6 +679,7 @@ func setupConnParams(u *url.URL, o *Options) (*Options, error) {
 	o.MinIdleConns = q.int("min_idle_conns")
 	o.MaxIdleConns = q.int("max_idle_conns")
 	o.MaxActiveConns = q.int("max_active_conns")
+	o.MaxConcurrentDials = q.int("max_concurrent_dials")
 	if q.has("conn_max_idle_time") {
 		o.ConnMaxIdleTime = q.duration("conn_max_idle_time")
 	} else {
@@ -631,6 +689,9 @@ func setupConnParams(u *url.URL, o *Options) (*Options, error) {
 		o.ConnMaxLifetime = q.duration("conn_max_lifetime")
 	} else {
 		o.ConnMaxLifetime = q.duration("max_conn_age")
+	}
+	if q.has("conn_max_lifetime_jitter") {
+		o.ConnMaxLifetimeJitter = min(q.duration("conn_max_lifetime_jitter"), o.ConnMaxLifetime)
 	}
 	if q.err != nil {
 		return nil, q.err
@@ -661,6 +722,7 @@ func getUserPassword(u *url.URL) (string, string) {
 func newConnPool(
 	opt *Options,
 	dialer func(ctx context.Context, network, addr string) (net.Conn, error),
+	poolName string,
 ) (*pool.ConnPool, error) {
 	poolSize, err := util.SafeIntToInt32(opt.PoolSize, "PoolSize")
 	if err != nil {
@@ -688,6 +750,7 @@ func newConnPool(
 		},
 		PoolFIFO:                 opt.PoolFIFO,
 		PoolSize:                 poolSize,
+		MaxConcurrentDials:       opt.MaxConcurrentDials,
 		PoolTimeout:              opt.PoolTimeout,
 		DialTimeout:              opt.DialTimeout,
 		DialerRetries:            opt.DialerRetries,
@@ -697,13 +760,18 @@ func newConnPool(
 		MaxActiveConns:           maxActiveConns,
 		ConnMaxIdleTime:          opt.ConnMaxIdleTime,
 		ConnMaxLifetime:          opt.ConnMaxLifetime,
+		ConnMaxLifetimeJitter:    opt.ConnMaxLifetimeJitter,
 		ReadBufferSize:           opt.ReadBufferSize,
 		WriteBufferSize:          opt.WriteBufferSize,
 		PushNotificationsEnabled: opt.Protocol == 3,
+		Name:                     poolName,
 	}), nil
 }
 
-func newPubSubPool(opt *Options, dialer func(ctx context.Context, network, addr string) (net.Conn, error),
+func newPubSubPool(
+	opt *Options,
+	dialer func(ctx context.Context, network, addr string) (net.Conn, error),
+	poolName string,
 ) (*pool.PubSubPool, error) {
 	poolSize, err := util.SafeIntToInt32(opt.PoolSize, "PoolSize")
 	if err != nil {
@@ -728,6 +796,7 @@ func newPubSubPool(opt *Options, dialer func(ctx context.Context, network, addr 
 	return pool.NewPubSubPool(&pool.Options{
 		PoolFIFO:                 opt.PoolFIFO,
 		PoolSize:                 poolSize,
+		MaxConcurrentDials:       opt.MaxConcurrentDials,
 		PoolTimeout:              opt.PoolTimeout,
 		DialTimeout:              opt.DialTimeout,
 		DialerRetries:            opt.DialerRetries,
@@ -737,8 +806,10 @@ func newPubSubPool(opt *Options, dialer func(ctx context.Context, network, addr 
 		MaxActiveConns:           maxActiveConns,
 		ConnMaxIdleTime:          opt.ConnMaxIdleTime,
 		ConnMaxLifetime:          opt.ConnMaxLifetime,
+		ConnMaxLifetimeJitter:    opt.ConnMaxLifetimeJitter,
 		ReadBufferSize:           32 * 1024,
 		WriteBufferSize:          32 * 1024,
 		PushNotificationsEnabled: opt.Protocol == 3,
+		Name:                     poolName,
 	}, dialer), nil
 }

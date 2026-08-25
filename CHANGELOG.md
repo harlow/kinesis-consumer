@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 Major changes:
 
 * Remove the concept of `ScanStatus` to simplify the scanning interface
+* Add DynamoDB-backed consumer-group coordination with cooperative shard handoff, lineage-aware shard assignment, and local end-to-end example coverage for join, leave, and failover rebalancing
 
 For more context on this change see: https://github.com/harlow/kinesis-consumer/issues/75
 

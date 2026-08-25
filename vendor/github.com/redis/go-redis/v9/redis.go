@@ -13,6 +13,7 @@ import (
 	"github.com/redis/go-redis/v9/internal"
 	"github.com/redis/go-redis/v9/internal/auth/streaming"
 	"github.com/redis/go-redis/v9/internal/hscan"
+	"github.com/redis/go-redis/v9/internal/otel"
 	"github.com/redis/go-redis/v9/internal/pool"
 	"github.com/redis/go-redis/v9/internal/proto"
 	"github.com/redis/go-redis/v9/maintnotifications"
@@ -27,7 +28,11 @@ const Nil = proto.Nil
 
 // SetLogger set custom log
 // Use with VoidLogger to disable logging.
+// If logger is nil, the call is ignored and the existing logger is kept.
 func SetLogger(logger internal.Logging) {
+	if logger == nil {
+		return
+	}
 	internal.Logger = logger
 }
 
@@ -238,6 +243,7 @@ func (c *baseClient) clone() *baseClient {
 	clone := &baseClient{
 		opt:                         c.opt,
 		connPool:                    c.connPool,
+		pubSubPool:                  c.pubSubPool,
 		onClose:                     c.onClose,
 		pushProcessor:               c.pushProcessor,
 		maintNotificationsManager:   maintNotificationsManager,
@@ -296,6 +302,19 @@ func (c *baseClient) _getConn(ctx context.Context) (*pool.Conn, error) {
 			return nil, err
 		}
 		return nil, err
+	}
+
+	if dialStartNs := cn.GetDialStartNs(); dialStartNs > 0 {
+		if cb := pool.GetMetricConnectionCreateTimeCallback(); cb != nil {
+			duration := time.Duration(time.Now().UnixNano() - dialStartNs)
+			cb(ctx, duration, cn)
+		}
+	}
+
+	// initConn will transition to IDLE state, so we need to acquire it
+	// before returning it to the user.
+	if !cn.TryAcquire() {
+		return nil, fmt.Errorf("redis: connection is not usable")
 	}
 
 	return cn, nil
@@ -366,28 +385,102 @@ func (c *baseClient) wrappedOnClose(newOnClose func() error) func() error {
 }
 
 func (c *baseClient) initConn(ctx context.Context, cn *pool.Conn) error {
-	if !cn.Inited.CompareAndSwap(false, true) {
+	// This function is called in two scenarios:
+	// 1. First-time init: Connection is in CREATED state (from pool.Get())
+	//    - We need to transition CREATED → INITIALIZING and do the initialization
+	//    - If another goroutine is already initializing, we WAIT for it to finish
+	// 2. Re-initialization: Connection is in INITIALIZING state (from SetNetConnAndInitConn())
+	//    - We're already in INITIALIZING, so just proceed with initialization
+
+	currentState := cn.GetStateMachine().GetState()
+
+	// Fast path: Check if already initialized (IDLE or IN_USE)
+	if currentState == pool.StateIdle || currentState == pool.StateInUse {
 		return nil
 	}
-	var err error
+
+	// If in CREATED state, try to transition to INITIALIZING
+	if currentState == pool.StateCreated {
+		finalState, err := cn.GetStateMachine().TryTransition([]pool.ConnState{pool.StateCreated}, pool.StateInitializing)
+		if err != nil {
+			// Another goroutine is initializing or connection is in unexpected state
+			// Check what state we're in now
+			if finalState == pool.StateIdle || finalState == pool.StateInUse {
+				// Already initialized by another goroutine
+				return nil
+			}
+
+			if finalState == pool.StateInitializing {
+				// Another goroutine is initializing - WAIT for it to complete
+				// Use a context with timeout = min(remaining command timeout, DialTimeout)
+				// This prevents waiting too long while respecting the caller's deadline
+				var waitCtx context.Context
+				var cancel context.CancelFunc
+				dialTimeout := c.opt.DialTimeout
+
+				if cmdDeadline, hasCmdDeadline := ctx.Deadline(); hasCmdDeadline {
+					// Calculate remaining time until command deadline
+					remainingTime := time.Until(cmdDeadline)
+					// Use the minimum of remaining time and DialTimeout
+					if remainingTime < dialTimeout {
+						// Command deadline is sooner, use it
+						waitCtx = ctx
+					} else {
+						// DialTimeout is shorter, cap the wait at DialTimeout
+						waitCtx, cancel = context.WithTimeout(ctx, dialTimeout)
+					}
+				} else {
+					// No command deadline, use DialTimeout to prevent waiting indefinitely
+					waitCtx, cancel = context.WithTimeout(ctx, dialTimeout)
+				}
+				if cancel != nil {
+					defer cancel()
+				}
+
+				finalState, err := cn.GetStateMachine().AwaitAndTransition(
+					waitCtx,
+					[]pool.ConnState{pool.StateIdle, pool.StateInUse},
+					pool.StateIdle, // Target is IDLE (but we're already there, so this is a no-op)
+				)
+				if err != nil {
+					return err
+				}
+				// Verify we're now initialized
+				if finalState == pool.StateIdle || finalState == pool.StateInUse {
+					return nil
+				}
+				// Unexpected state after waiting
+				return fmt.Errorf("connection in unexpected state after initialization: %s", finalState)
+			}
+
+			// Unexpected state (CLOSED, UNUSABLE, etc.)
+			return err
+		}
+	}
+
+	// At this point, we're in INITIALIZING state and we own the initialization
+	// If we fail, we must transition to CLOSED
+	var initErr error
 	connPool := pool.NewSingleConnPool(c.connPool, cn)
 	conn := newConn(c.opt, connPool, &c.hooksMixin)
 
 	username, password := "", ""
 	if c.opt.StreamingCredentialsProvider != nil {
-		credListener, err := c.streamingCredentialsManager.Listener(
+		credListener, initErr := c.streamingCredentialsManager.Listener(
 			cn,
 			c.reAuthConnection(),
 			c.onAuthenticationErr(),
 		)
-		if err != nil {
-			return fmt.Errorf("failed to create credentials listener: %w", err)
+		if initErr != nil {
+			cn.GetStateMachine().Transition(pool.StateClosed)
+			return fmt.Errorf("failed to create credentials listener: %w", initErr)
 		}
 
-		credentials, unsubscribeFromCredentialsProvider, err := c.opt.StreamingCredentialsProvider.
+		credentials, unsubscribeFromCredentialsProvider, initErr := c.opt.StreamingCredentialsProvider.
 			Subscribe(credListener)
-		if err != nil {
-			return fmt.Errorf("failed to subscribe to streaming credentials: %w", err)
+		if initErr != nil {
+			cn.GetStateMachine().Transition(pool.StateClosed)
+			return fmt.Errorf("failed to subscribe to streaming credentials: %w", initErr)
 		}
 
 		c.onClose = c.wrappedOnClose(unsubscribeFromCredentialsProvider)
@@ -395,9 +488,10 @@ func (c *baseClient) initConn(ctx context.Context, cn *pool.Conn) error {
 
 		username, password = credentials.BasicAuth()
 	} else if c.opt.CredentialsProviderContext != nil {
-		username, password, err = c.opt.CredentialsProviderContext(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to get credentials from context provider: %w", err)
+		username, password, initErr = c.opt.CredentialsProviderContext(ctx)
+		if initErr != nil {
+			cn.GetStateMachine().Transition(pool.StateClosed)
+			return fmt.Errorf("failed to get credentials from context provider: %w", initErr)
 		}
 	} else if c.opt.CredentialsProvider != nil {
 		username, password = c.opt.CredentialsProvider()
@@ -407,9 +501,9 @@ func (c *baseClient) initConn(ctx context.Context, cn *pool.Conn) error {
 
 	// for redis-server versions that do not support the HELLO command,
 	// RESP2 will continue to be used.
-	if err = conn.Hello(ctx, c.opt.Protocol, username, password, c.opt.ClientName).Err(); err == nil {
+	if initErr = conn.Hello(ctx, c.opt.Protocol, username, password, c.opt.ClientName).Err(); initErr == nil {
 		// Authentication successful with HELLO command
-	} else if !isRedisError(err) {
+	} else if !isRedisError(initErr) {
 		// When the server responds with the RESP protocol and the result is not a normal
 		// execution result of the HELLO command, we consider it to be an indication that
 		// the server does not support the HELLO command.
@@ -417,20 +511,22 @@ func (c *baseClient) initConn(ctx context.Context, cn *pool.Conn) error {
 		// or it could be DragonflyDB or a third-party redis-proxy. They all respond
 		// with different error string results for unsupported commands, making it
 		// difficult to rely on error strings to determine all results.
-		return err
+		cn.GetStateMachine().Transition(pool.StateClosed)
+		return initErr
 	} else if password != "" {
 		// Try legacy AUTH command if HELLO failed
 		if username != "" {
-			err = conn.AuthACL(ctx, username, password).Err()
+			initErr = conn.AuthACL(ctx, username, password).Err()
 		} else {
-			err = conn.Auth(ctx, password).Err()
+			initErr = conn.Auth(ctx, password).Err()
 		}
-		if err != nil {
-			return fmt.Errorf("failed to authenticate: %w", err)
+		if initErr != nil {
+			cn.GetStateMachine().Transition(pool.StateClosed)
+			return fmt.Errorf("failed to authenticate: %w", initErr)
 		}
 	}
 
-	_, err = conn.Pipelined(ctx, func(pipe Pipeliner) error {
+	_, initErr = conn.Pipelined(ctx, func(pipe Pipeliner) error {
 		if c.opt.DB > 0 {
 			pipe.Select(ctx, c.opt.DB)
 		}
@@ -445,15 +541,19 @@ func (c *baseClient) initConn(ctx context.Context, cn *pool.Conn) error {
 
 		return nil
 	})
-	if err != nil {
-		return fmt.Errorf("failed to initialize connection options: %w", err)
+	if initErr != nil {
+		cn.GetStateMachine().Transition(pool.StateClosed)
+		return fmt.Errorf("failed to initialize connection options: %w", initErr)
 	}
 
 	// Enable maintnotifications if maintnotifications are configured
 	c.optLock.RLock()
 	maintNotifEnabled := c.opt.MaintNotificationsConfig != nil && c.opt.MaintNotificationsConfig.Mode != maintnotifications.ModeDisabled
 	protocol := c.opt.Protocol
-	endpointType := c.opt.MaintNotificationsConfig.EndpointType
+	var endpointType maintnotifications.EndpointType
+	if maintNotifEnabled {
+		endpointType = c.opt.MaintNotificationsConfig.EndpointType
+	}
 	c.optLock.RUnlock()
 	var maintNotifHandshakeErr error
 	if maintNotifEnabled && protocol == 3 {
@@ -465,6 +565,7 @@ func (c *baseClient) initConn(ctx context.Context, cn *pool.Conn) error {
 		if maintNotifHandshakeErr != nil {
 			if !isRedisError(maintNotifHandshakeErr) {
 				// if not redis error, fail the connection
+				cn.GetStateMachine().Transition(pool.StateClosed)
 				return maintNotifHandshakeErr
 			}
 			c.optLock.Lock()
@@ -473,15 +574,24 @@ func (c *baseClient) initConn(ctx context.Context, cn *pool.Conn) error {
 			case maintnotifications.ModeEnabled:
 				// enabled mode, fail the connection
 				c.optLock.Unlock()
+				cn.GetStateMachine().Transition(pool.StateClosed)
+
+				// Record handshake failure metric
+				if errorCallback := pool.GetMetricErrorCallback(); errorCallback != nil {
+					errorCallback(ctx, "HANDSHAKE_FAILED", cn, "HANDSHAKE_FAILED", true, 0)
+				}
+
 				return fmt.Errorf("failed to enable maintnotifications: %w", maintNotifHandshakeErr)
 			default: // will handle auto and any other
-				internal.Logger.Printf(ctx, "auto mode fallback: maintnotifications disabled due to handshake error: %v", maintNotifHandshakeErr)
+				// Disabling logging here as it's too noisy.
+				// TODO: Enable when we have a better logging solution for log levels
+				// internal.Logger.Printf(ctx, "auto mode fallback: maintnotifications disabled due to handshake error: %v", maintNotifHandshakeErr)
 				c.opt.MaintNotificationsConfig.Mode = maintnotifications.ModeDisabled
 				c.optLock.Unlock()
 				// auto mode, disable maintnotifications and continue
-				if err := c.disableMaintNotificationsUpgrades(); err != nil {
+				if initErr := c.disableMaintNotificationsUpgrades(); initErr != nil {
 					// Log error but continue - auto mode should be resilient
-					internal.Logger.Printf(ctx, "failed to disable maintnotifications in auto mode: %v", err)
+					internal.Logger.Printf(ctx, "failed to disable maintnotifications in auto mode: %v", initErr)
 				}
 			}
 		} else {
@@ -505,22 +615,31 @@ func (c *baseClient) initConn(ctx context.Context, cn *pool.Conn) error {
 		p.ClientSetInfo(ctx, WithLibraryVersion(libVer))
 		// Handle network errors (e.g. timeouts) in CLIENT SETINFO to avoid
 		// out of order responses later on.
-		if _, err = p.Exec(ctx); err != nil && !isRedisError(err) {
-			return err
+		if _, initErr = p.Exec(ctx); initErr != nil && !isRedisError(initErr) {
+			cn.GetStateMachine().Transition(pool.StateClosed)
+			return initErr
 		}
 	}
 
-	// mark the connection as usable and inited
-	// once returned to the pool as idle, this connection can be used by other clients
-	cn.SetUsable(true)
-	cn.SetUsed(false)
-	cn.Inited.Store(true)
-
 	// Set the connection initialization function for potential reconnections
+	// This must be set before transitioning to IDLE so that handoff/reauth can use it
 	cn.SetInitConnFunc(c.createInitConnFunc())
 
+	// Initialization succeeded - transition to IDLE state
+	// This marks the connection as initialized and ready for use
+	// NOTE: The connection is still owned by the calling goroutine at this point
+	// and won't be available to other goroutines until it's Put() back into the pool
+	cn.GetStateMachine().Transition(pool.StateIdle)
+
+	// Call OnConnect hook if configured
+	// The connection is in IDLE state but still owned by this goroutine
+	// If OnConnect needs to send commands, it can use the connection safely
 	if c.opt.OnConnect != nil {
-		return c.opt.OnConnect(ctx, conn)
+		if initErr = c.opt.OnConnect(ctx, conn); initErr != nil {
+			// OnConnect failed - transition to closed
+			cn.GetStateMachine().Transition(pool.StateClosed)
+			return initErr
+		}
 	}
 
 	return nil
@@ -565,18 +684,117 @@ func (c *baseClient) dial(ctx context.Context, network, addr string) (net.Conn, 
 }
 
 func (c *baseClient) process(ctx context.Context, cmd Cmder) error {
+	// Start measuring total operation duration (includes all retries)
+	// Only call time.Now() if operation duration callback is set to avoid overhead
+	var operationStart time.Time
+	opDurationCallback := otel.GetOperationDurationCallback()
+	if opDurationCallback != nil {
+		operationStart = time.Now()
+	}
+	var lastConn *pool.Conn
+
 	var lastErr error
+	totalAttempts := 0
 	for attempt := 0; attempt <= c.opt.MaxRetries; attempt++ {
+		totalAttempts++
 		attempt := attempt
 
-		retry, err := c._process(ctx, cmd, attempt)
+		retry, cn, err := c._process(ctx, cmd, attempt)
+		if cn != nil {
+			lastConn = cn
+		}
 		if err == nil || !retry {
+			// Record total operation duration
+			if opDurationCallback != nil {
+				operationDuration := time.Since(operationStart)
+				opDurationCallback(ctx, operationDuration, cmd, totalAttempts, err, lastConn, c.opt.DB)
+			}
+
+			if err != nil {
+				if errorCallback := pool.GetMetricErrorCallback(); errorCallback != nil {
+					errorType, statusCode, isInternal := classifyCommandError(err)
+					errorCallback(ctx, errorType, lastConn, statusCode, isInternal, totalAttempts-1)
+				}
+			}
 			return err
 		}
 
 		lastErr = err
 	}
+
+	// Record failed operation after all retries
+	if opDurationCallback != nil {
+		operationDuration := time.Since(operationStart)
+		opDurationCallback(ctx, operationDuration, cmd, totalAttempts, lastErr, lastConn, c.opt.DB)
+	}
+
+	// Record error metric for exhausted retries
+	if errorCallback := pool.GetMetricErrorCallback(); errorCallback != nil {
+		errorType, statusCode, isInternal := classifyCommandError(lastErr)
+		errorCallback(ctx, errorType, lastConn, statusCode, isInternal, totalAttempts-1)
+	}
+
 	return lastErr
+}
+
+// classifyCommandError classifies an error for metrics reporting.
+// Returns: errorType, statusCode, isInternal
+// - errorType: A string describing the error type (e.g., "TIMEOUT", "NETWORK", "ERR")
+// - statusCode: The Redis error prefix or error category
+// - isInternal: true for network/timeout errors, false for Redis server errors
+func classifyCommandError(err error) (errorType, statusCode string, isInternal bool) {
+	if err == nil {
+		return "", "", false
+	}
+
+	errStr := err.Error()
+
+	// Check for timeout errors
+	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+		return "TIMEOUT", "TIMEOUT", true
+	}
+
+	// Check for network errors
+	if _, ok := err.(net.Error); ok {
+		return "NETWORK", "NETWORK", true
+	}
+
+	// Check for context errors
+	if errors.Is(err, context.Canceled) {
+		return "CONTEXT_CANCELED", "CONTEXT_CANCELED", true
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "CONTEXT_TIMEOUT", "CONTEXT_TIMEOUT", true
+	}
+
+	// Check for Redis errors
+	// Examples: "ERR ...", "WRONGTYPE ...", "CLUSTERDOWN ..."
+	if len(errStr) > 0 {
+		// Find the first space to extract the prefix
+		spaceIdx := 0
+		for i, c := range errStr {
+			if c == ' ' {
+				spaceIdx = i
+				break
+			}
+		}
+		if spaceIdx == 0 {
+			spaceIdx = len(errStr)
+		}
+		prefix := errStr[:spaceIdx]
+		isUppercase := true
+		for _, c := range prefix {
+			if c < 'A' || c > 'Z' {
+				isUppercase = false
+				break
+			}
+		}
+		if isUppercase && len(prefix) > 0 {
+			return prefix, prefix, false
+		}
+	}
+
+	return "UNKNOWN", "UNKNOWN", true
 }
 
 func (c *baseClient) assertUnstableCommand(cmd Cmder) (bool, error) {
@@ -592,15 +810,17 @@ func (c *baseClient) assertUnstableCommand(cmd Cmder) (bool, error) {
 	}
 }
 
-func (c *baseClient) _process(ctx context.Context, cmd Cmder, attempt int) (bool, error) {
+func (c *baseClient) _process(ctx context.Context, cmd Cmder, attempt int) (bool, *pool.Conn, error) {
 	if attempt > 0 {
 		if err := internal.Sleep(ctx, c.retryBackoff(attempt)); err != nil {
-			return false, err
+			return false, nil, err
 		}
 	}
 
+	var usedConn *pool.Conn
 	retryTimeout := uint32(0)
 	if err := c.withConn(ctx, func(ctx context.Context, cn *pool.Conn) error {
+		usedConn = cn
 		// Process any pending push notifications before executing the command
 		if err := c.processPushNotifications(ctx, cn); err != nil {
 			internal.Logger.Printf(ctx, "push: error processing pending notifications before command: %v", err)
@@ -641,10 +861,10 @@ func (c *baseClient) _process(ctx context.Context, cmd Cmder, attempt int) (bool
 		return nil
 	}); err != nil {
 		retry := shouldRetry(err, atomic.LoadUint32(&retryTimeout) == 1)
-		return retry, err
+		return retry, usedConn, err
 	}
 
-	return false, nil
+	return false, usedConn, nil
 }
 
 func (c *baseClient) retryBackoff(attempt int) time.Duration {
@@ -733,6 +953,10 @@ func (c *baseClient) Close() error {
 			firstErr = err
 		}
 	}
+
+	// Unregister pools from OTel before closing them
+	otel.UnregisterPools(c.connPool, c.pubSubPool)
+
 	if c.connPool != nil {
 		if err := c.connPool.Close(); err != nil && firstErr == nil {
 			firstErr = err
@@ -751,14 +975,14 @@ func (c *baseClient) getAddr() string {
 }
 
 func (c *baseClient) processPipeline(ctx context.Context, cmds []Cmder) error {
-	if err := c.generalProcessPipeline(ctx, cmds, c.pipelineProcessCmds); err != nil {
+	if err := c.generalProcessPipeline(ctx, cmds, c.pipelineProcessCmds, "PIPELINE"); err != nil {
 		return err
 	}
 	return cmdsFirstErr(cmds)
 }
 
 func (c *baseClient) processTxPipeline(ctx context.Context, cmds []Cmder) error {
-	if err := c.generalProcessPipeline(ctx, cmds, c.txPipelineProcessCmds); err != nil {
+	if err := c.generalProcessPipeline(ctx, cmds, c.txPipelineProcessCmds, "MULTI"); err != nil {
 		return err
 	}
 	return cmdsFirstErr(cmds)
@@ -767,13 +991,27 @@ func (c *baseClient) processTxPipeline(ctx context.Context, cmds []Cmder) error 
 type pipelineProcessor func(context.Context, *pool.Conn, []Cmder) (bool, error)
 
 func (c *baseClient) generalProcessPipeline(
-	ctx context.Context, cmds []Cmder, p pipelineProcessor,
+	ctx context.Context, cmds []Cmder, p pipelineProcessor, operationName string,
 ) error {
+	// Only call time.Now() if pipeline operation duration callback is set to avoid overhead
+	var operationStart time.Time
+	pipelineOpDurationCallback := otel.GetPipelineOperationDurationCallback()
+	if pipelineOpDurationCallback != nil {
+		operationStart = time.Now()
+	}
+	var lastConn *pool.Conn
+	totalAttempts := 0
+
 	var lastErr error
 	for attempt := 0; attempt <= c.opt.MaxRetries; attempt++ {
+		totalAttempts++
 		if attempt > 0 {
 			if err := internal.Sleep(ctx, c.retryBackoff(attempt)); err != nil {
 				setCmdsErr(cmds, err)
+				if pipelineOpDurationCallback != nil {
+					operationDuration := time.Since(operationStart)
+					pipelineOpDurationCallback(ctx, operationDuration, operationName, len(cmds), totalAttempts, err, lastConn, c.opt.DB)
+				}
 				return err
 			}
 		}
@@ -781,6 +1019,7 @@ func (c *baseClient) generalProcessPipeline(
 		// Enable retries by default to retry dial errors returned by withConn.
 		canRetry := true
 		lastErr = c.withConn(ctx, func(ctx context.Context, cn *pool.Conn) error {
+			lastConn = cn
 			// Process any pending push notifications before executing the pipeline
 			if err := c.processPushNotifications(ctx, cn); err != nil {
 				internal.Logger.Printf(ctx, "push: error processing pending notifications before processing pipeline: %v", err)
@@ -794,9 +1033,31 @@ func (c *baseClient) generalProcessPipeline(
 			if !isRedisError(lastErr) {
 				setCmdsErr(cmds, lastErr)
 			}
+			if pipelineOpDurationCallback != nil {
+				operationDuration := time.Since(operationStart)
+				pipelineOpDurationCallback(ctx, operationDuration, operationName, len(cmds), totalAttempts, lastErr, lastConn, c.opt.DB)
+			}
+
+			if lastErr != nil {
+				if errorCallback := pool.GetMetricErrorCallback(); errorCallback != nil {
+					errorType, statusCode, isInternal := classifyCommandError(lastErr)
+					errorCallback(ctx, errorType, lastConn, statusCode, isInternal, totalAttempts-1)
+				}
+			}
 			return lastErr
 		}
 	}
+
+	if pipelineOpDurationCallback != nil {
+		operationDuration := time.Since(operationStart)
+		pipelineOpDurationCallback(ctx, operationDuration, operationName, len(cmds), totalAttempts, lastErr, lastConn, c.opt.DB)
+	}
+
+	if errorCallback := pool.GetMetricErrorCallback(); errorCallback != nil {
+		errorType, statusCode, isInternal := classifyCommandError(lastErr)
+		errorCallback(ctx, errorType, lastConn, statusCode, isInternal, totalAttempts-1)
+	}
+
 	return lastErr
 }
 
@@ -958,13 +1219,18 @@ func NewClient(opt *Options) *Client {
 	// set opt push processor for child clients
 	c.opt.PushNotificationProcessor = c.pushProcessor
 
+	// Generate unique pool names for metrics
+	uniqueID := generateUniqueID()
+	mainPoolName := opt.Addr + "_" + uniqueID
+	pubsubPoolName := opt.Addr + "_" + uniqueID + "_pubsub"
+
 	// Create connection pools
 	var err error
-	c.connPool, err = newConnPool(opt, c.dialHook)
+	c.connPool, err = newConnPool(opt, c.dialHook, mainPoolName)
 	if err != nil {
 		panic(fmt.Errorf("redis: failed to create connection pool: %w", err))
 	}
-	c.pubSubPool, err = newPubSubPool(opt, c.dialHook)
+	c.pubSubPool, err = newPubSubPool(opt, c.dialHook, pubsubPoolName)
 	if err != nil {
 		panic(fmt.Errorf("redis: failed to create pubsub pool: %w", err))
 	}
@@ -994,6 +1260,10 @@ func NewClient(opt *Options) *Client {
 			}
 		}
 	}
+
+	// Register pools with OTel recorder if it supports pool registration
+	// This allows async gauge metrics to pull stats from pools periodically
+	otel.RegisterPools(c.connPool, c.pubSubPool, opt.Addr)
 
 	return &c
 }
@@ -1028,6 +1298,16 @@ func (c *Client) Process(ctx context.Context, cmd Cmder) error {
 // Options returns read-only Options that were used to create the client.
 func (c *Client) Options() *Options {
 	return c.opt
+}
+
+// NodeAddress returns the address of the Redis node as reported by the server.
+// For cluster clients, this is the endpoint from CLUSTER SLOTS before any transformation
+// (e.g., loopback replacement). For standalone clients, this defaults to Addr.
+//
+// This is useful for matching the source field in maintenance notifications
+// (e.g. SMIGRATED).
+func (c *Client) NodeAddress() string {
+	return c.opt.NodeAddress
 }
 
 // GetMaintNotificationsManager returns the maintnotifications manager instance for monitoring and control.
@@ -1277,12 +1557,40 @@ func (c *Conn) TxPipeline() Pipeliner {
 // processPushNotifications processes all pending push notifications on a connection
 // This ensures that cluster topology changes are handled immediately before the connection is used
 // This method should be called by the client before using WithReader for command execution
+//
+// Performance optimization: Skip the expensive MaybeHasData() syscall if a health check
+// was performed recently (within 5 seconds). The health check already verified the connection
+// is healthy and checked for unexpected data (push notifications).
 func (c *baseClient) processPushNotifications(ctx context.Context, cn *pool.Conn) error {
 	// Only process push notifications for RESP3 connections with a processor
-	// Also check if there is any data to read before processing
-	// Which is an optimization on UNIX systems where MaybeHasData is a syscall
+	if c.opt.Protocol != 3 || c.pushProcessor == nil {
+		return nil
+	}
+
+	// Performance optimization: Skip MaybeHasData() syscall if health check was recent
+	// If the connection was health-checked within the last 5 seconds, we can skip the
+	// expensive syscall since the health check already verified no unexpected data.
+	// This is safe because:
+	// 0. lastHealthCheckNs is set in pool/conn.go:putConn() after a successful health check
+	// 1. Health check (connCheck) uses the same syscall (Recvfrom with MSG_PEEK)
+	// 2. If push notifications arrived, they would have been detected by health check
+	// 3. 5 seconds is short enough that connection state is still fresh
+	// 4. Push notifications will be processed by the next WithReader call
+	// used it is set on getConn, so we should use another timer (lastPutAt?)
+	lastHealthCheckNs := cn.LastPutAtNs()
+	if lastHealthCheckNs > 0 {
+		// Use pool's cached time to avoid expensive time.Now() syscall
+		nowNs := pool.GetCachedTimeNs()
+		if nowNs-lastHealthCheckNs < int64(5*time.Second) {
+			// Recent health check confirmed no unexpected data, skip the syscall
+			return nil
+		}
+	}
+
+	// Check if there is any data to read before processing
+	// This is an optimization on UNIX systems where MaybeHasData is a syscall
 	// On Windows, MaybeHasData always returns true, so this check is a no-op
-	if c.opt.Protocol != 3 || c.pushProcessor == nil || !cn.MaybeHasData() {
+	if !cn.MaybeHasData() {
 		return nil
 	}
 

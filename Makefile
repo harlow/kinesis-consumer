@@ -1,3 +1,11 @@
+.PHONY: test integration
+
+test:
+	go test ./...
+
+integration:
+	./scripts/run-e2e-integration.sh
+
 test.lint:
 	golangci-lint run --config .golangci.yml --verbose ./...
 

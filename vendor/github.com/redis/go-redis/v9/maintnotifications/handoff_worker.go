@@ -13,6 +13,9 @@ import (
 	"github.com/redis/go-redis/v9/internal/pool"
 )
 
+// PoolNameMain is the name used for the main connection pool in metrics.
+const PoolNameMain = "main"
+
 // handoffWorkerManager manages background workers and queue for connection handoffs
 type handoffWorkerManager struct {
 	// Event-driven handoff support
@@ -175,8 +178,6 @@ func (hwm *handoffWorkerManager) onDemandWorker() {
 
 // processHandoffRequest processes a single handoff request
 func (hwm *handoffWorkerManager) processHandoffRequest(request HandoffRequest) {
-	// Remove from pending map
-	defer hwm.pending.Delete(request.Conn.GetID())
 	if internal.LogLevel.InfoOrAbove() {
 		internal.Logger.Printf(context.Background(), logs.HandoffStarted(request.Conn.GetID(), request.Endpoint))
 	}
@@ -228,16 +229,24 @@ func (hwm *handoffWorkerManager) processHandoffRequest(request HandoffRequest) {
 				}
 				internal.Logger.Printf(context.Background(), logs.HandoffFailed(request.ConnID, request.Endpoint, currentRetries, maxRetries, err))
 			}
+			// Schedule retry - keep connection in pending map until retry is queued
 			time.AfterFunc(afterTime, func() {
 				if err := hwm.queueHandoff(request.Conn); err != nil {
 					if internal.LogLevel.WarnOrAbove() {
 						internal.Logger.Printf(context.Background(), logs.CannotQueueHandoffForRetry(err))
 					}
+					// Failed to queue retry - remove from pending and close connection
+					hwm.pending.Delete(request.Conn.GetID())
 					hwm.closeConnFromRequest(context.Background(), request, err)
+				} else {
+					// Successfully queued retry - remove from pending (will be re-added by queueHandoff)
+					hwm.pending.Delete(request.Conn.GetID())
 				}
 			})
 			return
 		} else {
+			// Won't retry - remove from pending and close connection
+			hwm.pending.Delete(request.Conn.GetID())
 			go hwm.closeConnFromRequest(ctx, request, err)
 		}
 
@@ -247,6 +256,9 @@ func (hwm *handoffWorkerManager) processHandoffRequest(request HandoffRequest) {
 		if hwm.poolHook.operationsManager != nil {
 			hwm.poolHook.operationsManager.UntrackOperationWithConnID(seqID, connID)
 		}
+	} else {
+		// Success - remove from pending map
+		hwm.pending.Delete(request.Conn.GetID())
 	}
 }
 
@@ -255,6 +267,7 @@ func (hwm *handoffWorkerManager) processHandoffRequest(request HandoffRequest) {
 func (hwm *handoffWorkerManager) queueHandoff(conn *pool.Conn) error {
 	// Get handoff info atomically to prevent race conditions
 	shouldHandoff, endpoint, seqID := conn.GetHandoffInfo()
+
 	// on retries the connection will not be marked for handoff, but it will have retries > 0
 	// if shouldHandoff is false and retries is 0, then we are not retrying and not do a handoff
 	if !shouldHandoff && conn.HandoffRetries() == 0 {
@@ -424,6 +437,11 @@ func (hwm *handoffWorkerManager) performHandoffInternal(
 		deadline := time.Now().Add(hwm.config.PostHandoffRelaxedDuration)
 		conn.SetRelaxedTimeoutWithDeadline(relaxedTimeout, relaxedTimeout, deadline)
 
+		// Record relaxed timeout metric (post-handoff)
+		if relaxedTimeoutCallback := pool.GetMetricConnectionRelaxedTimeoutCallback(); relaxedTimeoutCallback != nil {
+			relaxedTimeoutCallback(ctx, 1, conn, PoolNameMain, "HANDOFF")
+		}
+
 		if internal.LogLevel.InfoOrAbove() {
 			internal.Logger.Printf(context.Background(), logs.ApplyingRelaxedTimeoutDueToPostHandoff(connID, relaxedTimeout, deadline.Format("15:04:05.000")))
 		}
@@ -446,10 +464,17 @@ func (hwm *handoffWorkerManager) performHandoffInternal(
 	// - set the connection as usable again
 	// - clear the handoff state (shouldHandoff, endpoint, seqID)
 	// - reset the handoff retries to 0
+	// Note: Theoretically there may be a short window where the connection is in the pool
+	// and IDLE (initConn completed) but still has handoff state set.
 	conn.ClearHandoffState()
 	internal.Logger.Printf(ctx, logs.HandoffSucceeded(connID, newEndpoint))
 
 	// successfully completed the handoff, no retry needed and no error
+	// Notify metrics: connection handoff succeeded
+	if handoffCallback := pool.GetMetricConnectionHandoffCallback(); handoffCallback != nil {
+		handoffCallback(ctx, conn, PoolNameMain)
+	}
+
 	return false, nil
 }
 
@@ -475,15 +500,23 @@ func (hwm *handoffWorkerManager) createEndpointDialer(endpoint string) func(cont
 func (hwm *handoffWorkerManager) closeConnFromRequest(ctx context.Context, request HandoffRequest, err error) {
 	pooler := request.Pool
 	conn := request.Conn
+
+	// Clear handoff state before closing
+	conn.ClearHandoffState()
+
 	if pooler != nil {
-		pooler.Remove(ctx, conn, err)
+		// Use RemoveWithoutTurn instead of Remove to avoid freeing a turn that we don't have.
+		// The handoff worker doesn't call Get(), so it doesn't have a turn to free.
+		// Remove() is meant to be called after Get() and frees a turn.
+		// RemoveWithoutTurn() removes and closes the connection without affecting the queue.
+		pooler.RemoveWithoutTurn(ctx, conn, err)
 		if internal.LogLevel.WarnOrAbove() {
 			internal.Logger.Printf(ctx, logs.RemovingConnectionFromPool(conn.GetID(), err))
 		}
 	} else {
-		err := conn.Close() // Close the connection if no pool provided
-		if err != nil {
-			internal.Logger.Printf(ctx, "redis: failed to close connection: %v", err)
+		errClose := conn.Close() // Close the connection if no pool provided
+		if errClose != nil {
+			internal.Logger.Printf(ctx, "redis: failed to close connection: %v", errClose)
 		}
 		if internal.LogLevel.WarnOrAbove() {
 			internal.Logger.Printf(ctx, logs.NoPoolProvidedCannotRemove(conn.GetID(), err))

@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -47,6 +48,7 @@ func New(streamName string, opts ...Option) (*Consumer, error) {
 		maxRecords:               10000,
 		metricRegistry:           nil,
 		numWorkers:               1,
+		retryWait:                waitWithContext,
 	}
 
 	// override defaults
@@ -102,6 +104,7 @@ type Consumer struct {
 	getRecordsOpts     []func(*kinesis.Options)
 	metricRegistry     prometheus.Registerer
 	numWorkers         int
+	retryWait          retryWaitFunc
 }
 
 // ScanFunc is the type of the function called for each message read
@@ -111,10 +114,54 @@ type Consumer struct {
 // function returns the special value ErrSkipCheckpoint.
 type ScanFunc func(*Record) error
 
+// ScanBatchFunc is called with buffered records from a shard.
+// Checkpoint advances only after this callback returns nil.
+type ScanBatchFunc func([]*Record) error
+
+// ScanBatchOption customizes batch behavior for ScanBatch.
+type ScanBatchOption func(*scanBatchConfig)
+
+type scanBatchConfig struct {
+	flushInterval time.Duration
+	maxSize       int
+}
+
+type shardContextProvider interface {
+	ShardContext(parent context.Context, shardID string) (context.Context, func())
+}
+
+type shardStopHandler interface {
+	ShardStopped(ctx context.Context, shardID string) error
+}
+
+// WithBatchFlushInterval sets how often pending batches are flushed.
+// A non-positive duration disables periodic flushing.
+func WithBatchFlushInterval(d time.Duration) ScanBatchOption {
+	return func(cfg *scanBatchConfig) {
+		cfg.flushInterval = d
+	}
+}
+
+// WithBatchMaxSize sets the per-shard max buffered record count before flush.
+func WithBatchMaxSize(n int) ScanBatchOption {
+	return func(cfg *scanBatchConfig) {
+		cfg.maxSize = n
+	}
+}
+
 // ErrSkipCheckpoint is used as a return value from ScanFunc to indicate that
 // the current checkpoint should be skipped. It is not returned
 // as an error by any function.
 var ErrSkipCheckpoint = errors.New("skip checkpoint")
+
+const (
+	checkpointSetMaxAttempts = 3
+	checkpointSetRetryDelay  = 100 * time.Millisecond
+	getRecordsRetryBaseDelay = 200 * time.Millisecond
+	getRecordsRetryMaxDelay  = 5 * time.Second
+)
+
+type retryWaitFunc func(context.Context, time.Duration) bool
 
 // Scan launches a goroutine to process each of the shards in the stream. The ScanFunc
 // is passed through to each of the goroutines and called with each message pulled from
@@ -127,12 +174,19 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 		errC   = make(chan error, 1)
 		shardC = make(chan types.Shard, 1)
 	)
+	// Preserve the first error without letting another producer block shutdown.
+	reportError := func(err error) {
+		select {
+		case errC <- err:
+		default:
+		}
+		cancel()
+	}
 
 	go func() {
 		err := c.group.Start(ctx, shardC)
 		if err != nil {
-			errC <- fmt.Errorf("error starting scan: %w", err)
-			cancel()
+			reportError(fmt.Errorf("error starting scan: %w", err))
 		}
 		<-ctx.Done()
 		close(shardC)
@@ -143,32 +197,42 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 	s := newShardsInProcess()
 	for shard := range shardC {
 		shardID := aws.ToString(shard.ShardId)
-		if s.doesShardExist(shardID) {
+		if !s.tryAddShard(shardID) {
 			// safetynet: if shard already in process by another goroutine, just skipping the request
 			continue
 		}
 		wg.Add(1)
 		go func(shardID string) {
-			s.addShard(shardID)
 			defer func() {
 				s.deleteShard(shardID)
 			}()
 			defer wg.Done()
+
+			shardCtx := ctx
+			shardCleanup := func() {}
+			hasShardContext := false
+			if provider, ok := c.group.(shardContextProvider); ok {
+				hasShardContext = true
+				shardCtx, shardCleanup = provider.ShardContext(ctx, shardID)
+			}
+			defer shardCleanup()
+
 			var err error
-			if err = c.ScanShard(ctx, shardID, fn); err != nil {
+			if err = c.scanShard(shardCtx, shardID, fn); err != nil {
 				err = fmt.Errorf("shard %s error: %w", shardID, err)
+			} else if hasShardContext && shardCtx.Err() != nil {
+				if stoppable, ok := c.group.(shardStopHandler); ok {
+					if err = stoppable.ShardStopped(context.Background(), shardID); err != nil {
+						err = fmt.Errorf("shard stopped error: %w", err)
+					}
+				}
 			} else if closeable, ok := c.group.(CloseableGroup); !ok {
 				// group doesn't allow closure, skip calling CloseShard
-			} else if err = closeable.CloseShard(ctx, shardID); err != nil {
+			} else if err = closeable.CloseShard(context.Background(), shardID); err != nil {
 				err = fmt.Errorf("shard closed CloseableGroup error: %w", err)
 			}
 			if err != nil {
-				select {
-				case errC <- fmt.Errorf("shard %s error: %w", shardID, err):
-					cancel()
-				default:
-					// error has already occurred
-				}
+				reportError(err)
 			}
 		}(shardID)
 	}
@@ -178,146 +242,49 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 		close(errC)
 	}()
 
-	return <-errC
+	err := <-errC
+	return c.finishScan(err)
+}
+
+// ScanBatch scans all shards and delivers buffered records to a batch callback.
+// Existing Scan behavior remains unchanged and this method is opt-in.
+//
+// Checkpoint semantics:
+// - Each shard is checkpointed only after its batch callback succeeds.
+// - On callback error, scanning stops and that batch is not checkpointed.
+func (c *Consumer) ScanBatch(ctx context.Context, fn ScanBatchFunc, opts ...ScanBatchOption) error {
+	if fn == nil {
+		return errors.New("batch callback is required")
+	}
+
+	cfg := scanBatchConfig{
+		flushInterval: time.Second,
+		maxSize:       100,
+	}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	if cfg.maxSize <= 0 {
+		cfg.maxSize = 100
+	}
+
+	runner := newScanBatchRunner(c, fn, cfg)
+	return runner.run(ctx)
 }
 
 // ScanShard loops over records on a specific shard, calls the callback func for each record and checkpoints the
 // progress of scan.
 func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) error {
-	// get last seq number from checkpoint
-	lastSeqNum, err := c.group.GetCheckpoint(ctx, c.streamName, shardID)
-	if err != nil {
-		return fmt.Errorf("get checkpoint error: %w", err)
-	}
-
-	// get shard iterator
-	shardIterator, err := c.getShardIterator(ctx, c.streamName, shardID, lastSeqNum)
-	if err != nil {
-		return fmt.Errorf("get shard iterator error: %w", err)
-	}
-
-	c.logger.DebugContext(ctx, "start scan", slog.String("shard-id", shardID), slog.String("last-sequence-number", lastSeqNum))
-	defer func() {
-		c.logger.DebugContext(ctx, "stop scan", slog.String("shard-id", shardID))
-	}()
-
-	scanTicker := time.NewTicker(c.scanInterval)
-	defer scanTicker.Stop()
-
-	for {
-		resp, err := c.client.GetRecords(ctx, &kinesis.GetRecordsInput{
-			Limit:         aws.Int32(int32(c.maxRecords)),
-			ShardIterator: shardIterator,
-		}, c.getRecordsOpts...)
-
-		// attempt to recover from GetRecords error
-		if err != nil {
-			if !isRetriableError(err) {
-				return fmt.Errorf("get records error: %w", err)
-			}
-
-			c.logger.WarnContext(ctx, "get records", slog.String("error", err.Error()))
-
-			shardIterator, err = c.getShardIterator(ctx, c.streamName, shardID, lastSeqNum)
-			if err != nil {
-				return fmt.Errorf("get shard iterator error: %w", err)
-			}
-		} else {
-			lastSeqNum, err = c.processRecords(ctx, shardID, resp, fn)
-			if err != nil {
-				return err
-			}
-
-			if isShardClosed(resp.NextShardIterator, shardIterator) {
-				c.logger.DebugContext(ctx, "shard closed", slog.String("shard-id", shardID))
-
-				if c.shardClosedHandler != nil {
-					err := c.shardClosedHandler(c.streamName, shardID)
-
-					if err != nil {
-						return fmt.Errorf("shard closed handler error: %w", err)
-					}
-				}
-				return nil
-			}
-
-			shardIterator = resp.NextShardIterator
-		}
-
-		// Wait for next scan
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-scanTicker.C:
-			continue
-		}
-	}
+	err := c.scanShard(ctx, shardID, fn)
+	return c.finishScan(err)
 }
 
-func (c *Consumer) processRecords(ctx context.Context, shardID string, resp *kinesis.GetRecordsOutput, fn ScanFunc) (string, error) {
-	startedAt := time.Now()
-	batchSize := float64(len(resp.Records))
-	secondsBehindLatest := float64(time.Duration(*resp.MillisBehindLatest)*time.Millisecond) / float64(time.Second)
-	labels := prometheus.Labels{labelStreamName: c.streamName, labelShardID: shardID}
-	gaugeBatchSize.With(labels).Set(batchSize)
-	collectorMillisBehindLatest.With(labels).Observe(secondsBehindLatest)
-
-	// loop over records, call callback func
-	var records []types.Record
-
-	// disaggregate records
-	var err error
-	if c.isAggregated {
-		records, err = disaggregateRecords(resp.Records)
-		if err != nil {
-			return "", err
-		}
-	} else {
-		records = resp.Records
-	}
-
-	if len(records) == 0 {
-		// nothing to do here
-		return "", nil
-	}
-
-	eg, _ := errgroup.WithContext(ctx)
-	eg.SetLimit(c.numWorkers)
-	for _, r := range records {
-		eg.Go(func() error {
-			counterEventsConsumed.With(labels).Inc()
-			err := fn(&Record{Record: r, ShardID: shardID, MillisBehindLatest: resp.MillisBehindLatest})
-			if !errors.Is(err, ErrSkipCheckpoint) {
-				return err
-			}
-			return nil
-		})
-	}
-	err = eg.Wait()
-	if err != nil {
-		return "", err
-	}
-
-	// we MUST only reach this point if everything is processed
-	lastSeqNum := *records[len(records)-1].SequenceNumber
-
-	if err := c.group.SetCheckpoint(ctx, c.streamName, shardID, lastSeqNum); err != nil {
-		return "", fmt.Errorf("set checkpoint error: %w", err)
-	}
-
-	numberOfProcessedTasks := len(records)
-
-	c.counter.Add("checkpoint", int64(numberOfProcessedTasks))
-	counterCheckpointsWritten.With(labels).Add(float64(numberOfProcessedTasks))
-
-	duration := time.Since(startedAt).Seconds()
-	histogramAverageRecordDuration.With(labels).Observe(duration / batchSize)
-	histogramBatchDuration.With(labels).Observe(duration)
-	return lastSeqNum, nil
+func (c *Consumer) scanShard(ctx context.Context, shardID string, fn ScanFunc) error {
+	return newScanShardRunner(c, shardID, fn).run(ctx)
 }
 
 // temporary conversion func of []types.Record -> DesegregateRecords([]*types.Record) -> []types.Record
-func disaggregateRecords(in []types.Record) ([]types.Record, error) {
+func deaggregateRecords(in []types.Record) ([]types.Record, error) {
 	var recs []types.Record
 	recs = append(recs, in...)
 
@@ -329,6 +296,141 @@ func disaggregateRecords(in []types.Record) ([]types.Record, error) {
 	var out []types.Record
 	out = append(out, deagg...)
 	return out, nil
+}
+
+func (c *Consumer) normalizeRecords(records []types.Record) ([]types.Record, error) {
+	if !c.isAggregated {
+		return records, nil
+	}
+	return deaggregateRecords(records)
+}
+
+// processRecords runs fn concurrently (bounded by numWorkers) over the given
+// records and returns the sequence number that scanning should checkpoint to.
+//
+// Checkpoint semantics: the returned sequence number advances past every
+// record up to (and not including) the first record for which fn returned an
+// error other than ErrSkipCheckpoint, or the first record for which fn
+// returned ErrSkipCheckpoint. In other words, checkpointing walks the batch
+// in order and stops advancing at the first skip or failure, exactly as if
+// records were processed one at a time -- fn just happens to run
+// concurrently for throughput. If every record in the batch is skipped or
+// errors immediately, lastSeqNum is returned unchanged.
+func (c *Consumer) processRecords(ctx context.Context, shardID string, records []types.Record, millisBehindLatest *int64, fn ScanFunc, lastSeqNum string) (string, error) {
+	startedAt := time.Now()
+	batchSize := float64(len(records))
+	labels := prometheus.Labels{labelStreamName: c.streamName, labelShardID: shardID}
+	gaugeBatchSize.With(labels).Set(batchSize)
+	if millisBehindLatest != nil {
+		secondsBehindLatest := float64(time.Duration(*millisBehindLatest)*time.Millisecond) / float64(time.Second)
+		collectorMillisBehindLatest.With(labels).Observe(secondsBehindLatest)
+	}
+
+	if len(records) == 0 {
+		return lastSeqNum, nil
+	}
+
+	// Run fn concurrently (bounded by numWorkers), tracking per-record
+	// outcomes so we can compute, in order, how far the checkpoint may
+	// safely advance.
+	type outcome struct {
+		err     error
+		skipped bool
+	}
+	outcomes := make([]outcome, len(records))
+
+	eg, _ := errgroup.WithContext(ctx)
+	eg.SetLimit(c.numWorkers)
+	for i, r := range records {
+		i, r := i, r
+		eg.Go(func() error {
+			select {
+			case <-ctx.Done():
+				return nil
+			default:
+			}
+			counterEventsConsumed.With(labels).Inc()
+			err := fn(&Record{Record: r, ShardID: shardID, MillisBehindLatest: millisBehindLatest})
+			if errors.Is(err, ErrSkipCheckpoint) {
+				outcomes[i] = outcome{skipped: true}
+				return nil
+			}
+			if err != nil {
+				outcomes[i] = outcome{err: err}
+				return err
+			}
+			return nil
+		})
+	}
+	waitErr := eg.Wait()
+
+	// Walk outcomes in order to find how far the checkpoint may advance:
+	// stop at the first skip or error.
+	newSeqNum := lastSeqNum
+	var firstErr error
+	for i, o := range outcomes {
+		if o.err != nil {
+			firstErr = o.err
+			break
+		}
+		if o.skipped {
+			break
+		}
+		newSeqNum = aws.ToString(records[i].SequenceNumber)
+	}
+
+	if newSeqNum != lastSeqNum {
+		if err := c.setCheckpointWithRetry(ctx, shardID, newSeqNum); err != nil {
+			return lastSeqNum, err
+		}
+
+		numberOfProcessedRecords := 0
+		for i := range records {
+			if aws.ToString(records[i].SequenceNumber) == "" {
+				continue
+			}
+			numberOfProcessedRecords++
+			if aws.ToString(records[i].SequenceNumber) == newSeqNum {
+				break
+			}
+		}
+
+		c.counter.Add("checkpoint", int64(numberOfProcessedRecords))
+		counterCheckpointsWritten.With(labels).Add(float64(numberOfProcessedRecords))
+	}
+
+	duration := time.Since(startedAt).Seconds()
+	if batchSize > 0 {
+		histogramAverageRecordDuration.With(labels).Observe(duration / batchSize)
+	}
+	histogramBatchDuration.With(labels).Observe(duration)
+
+	if firstErr != nil {
+		return newSeqNum, firstErr
+	}
+	if waitErr != nil {
+		return newSeqNum, waitErr
+	}
+
+	return newSeqNum, nil
+}
+
+func (c *Consumer) getShardIteratorWithCheckpointFallback(ctx context.Context, streamName, shardID, seqNum string) (*string, string, error) {
+	shardIterator, err := c.getShardIterator(ctx, streamName, shardID, seqNum)
+	if err == nil {
+		return shardIterator, seqNum, nil
+	}
+
+	if !isExpiredCheckpointSequenceError(err, seqNum) {
+		return nil, seqNum, err
+	}
+
+	c.logger.WarnContext(ctx, "checkpoint sequence is expired, falling back to TRIM_HORIZON", slog.String("shard-id", shardID), slog.String("sequence-number", seqNum))
+	shardIterator, err = c.getTrimHorizonShardIterator(ctx, streamName, shardID)
+	if err != nil {
+		return nil, seqNum, err
+	}
+	return shardIterator, "", nil
 }
 
 func (c *Consumer) getShardIterator(ctx context.Context, streamName, shardID, seqNum string) (*string, error) {
@@ -354,6 +456,77 @@ func (c *Consumer) getShardIterator(ctx context.Context, streamName, shardID, se
 	return res.ShardIterator, nil
 }
 
+func (c *Consumer) getTrimHorizonShardIterator(ctx context.Context, streamName, shardID string) (*string, error) {
+	res, err := c.client.GetShardIterator(ctx, &kinesis.GetShardIteratorInput{
+		ShardId:           aws.String(shardID),
+		StreamName:        aws.String(streamName),
+		ShardIteratorType: types.ShardIteratorTypeTrimHorizon,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return res.ShardIterator, nil
+}
+
+func (c *Consumer) setCheckpointWithRetry(ctx context.Context, shardID, sequenceNumber string) error {
+	var err error
+	for attempt := 1; attempt <= checkpointSetMaxAttempts; attempt++ {
+		err = c.group.SetCheckpoint(ctx, c.streamName, shardID, sequenceNumber)
+		if err == nil {
+			return nil
+		}
+		if attempt == checkpointSetMaxAttempts {
+			break
+		}
+
+		c.logger.WarnContext(ctx, "checkpoint set retry", slog.String("shard-id", shardID), slog.Int("attempt", attempt), slog.String("error", err.Error()))
+		timer := time.NewTimer(checkpointSetRetryDelay * time.Duration(attempt))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil
+		case <-timer.C:
+		}
+	}
+	return fmt.Errorf("checkpoint set error after retries: %w", err)
+}
+
+func (c *Consumer) finishScan(scanErr error) error {
+	if flushErr := c.flushCheckpoints(); flushErr != nil {
+		if scanErr == nil {
+			return fmt.Errorf("checkpoint flush error: %w", flushErr)
+		}
+		c.logger.Warn("checkpoint flush error", slog.String("error", flushErr.Error()))
+	}
+	return scanErr
+}
+
+func (c *Consumer) flushCheckpoints() error {
+	if flushable, ok := c.group.(FlushableGroup); ok {
+		return flushable.Flush()
+	}
+	if flushable, ok := c.store.(FlushableStore); ok {
+		return flushable.Flush()
+	}
+	return nil
+}
+
+func isExpiredCheckpointSequenceError(err error, seqNum string) bool {
+	if seqNum == "" {
+		return false
+	}
+
+	oe := (*types.InvalidArgumentException)(nil)
+	if !errors.As(err, &oe) {
+		return false
+	}
+
+	// Kinesis reports expired checkpoints via InvalidArgumentException where
+	// the message references StartingSequenceNumber.
+	message := strings.ToLower(aws.ToString(oe.Message))
+	return strings.Contains(message, "startingsequencenumber") || strings.Contains(message, "starting sequence number")
+}
+
 func isRetriableError(err error) bool {
 	if oe := (*types.ExpiredIteratorException)(nil); errors.As(err, &oe) {
 		return true
@@ -362,6 +535,43 @@ func isRetriableError(err error) bool {
 		return true
 	}
 	return false
+}
+
+func retryDelay(err error, attempt int) time.Duration {
+	if attempt <= 0 {
+		return 0
+	}
+	if oe := (*types.ProvisionedThroughputExceededException)(nil); !errors.As(err, &oe) {
+		return 0
+	}
+
+	delay := getRecordsRetryBaseDelay
+	for i := 1; i < attempt; i++ {
+		if delay >= getRecordsRetryMaxDelay {
+			return getRecordsRetryMaxDelay
+		}
+		delay *= 2
+	}
+	if delay > getRecordsRetryMaxDelay {
+		return getRecordsRetryMaxDelay
+	}
+	return delay
+}
+
+func waitWithContext(ctx context.Context, d time.Duration) bool {
+	if d <= 0 {
+		return ctx.Err() == nil
+	}
+
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }
 
 func isShardClosed(nextShardIterator, currentShardIterator *string) bool {
@@ -376,15 +586,11 @@ func newShardsInProcess() *shards {
 	return &shards{}
 }
 
-func (s *shards) addShard(shardId string) {
-	s.shardsInProcess.Store(shardId, struct{}{})
+func (s *shards) tryAddShard(shardID string) bool {
+	_, loaded := s.shardsInProcess.LoadOrStore(shardID, struct{}{})
+	return !loaded
 }
 
-func (s *shards) doesShardExist(shardId string) bool {
-	_, ok := s.shardsInProcess.Load(shardId)
-	return ok
-}
-
-func (s *shards) deleteShard(shardId string) {
-	s.shardsInProcess.Delete(shardId)
+func (s *shards) deleteShard(shardID string) {
+	s.shardsInProcess.Delete(shardID)
 }

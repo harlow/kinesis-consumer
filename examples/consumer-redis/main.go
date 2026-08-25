@@ -45,7 +45,7 @@ func main() {
 		*kinesisStream,
 		consumer.WithClient(client),
 		consumer.WithStore(checkpointStore),
-		consumer.WithLogger(slog.Default()),
+		consumer.WithLogger(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))),
 		consumer.WithParallelProcessing(2),
 	)
 	if err != nil {
