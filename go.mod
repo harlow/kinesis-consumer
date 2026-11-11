@@ -4,12 +4,12 @@ require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/apex/log v1.9.0
-	github.com/aws/aws-sdk-go-v2 v1.41.3
+	github.com/aws/aws-sdk-go-v2 v1.41.5
 	github.com/aws/aws-sdk-go-v2/config v1.32.11
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.11
 	github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue v1.20.34
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.56.1
-	github.com/aws/aws-sdk-go-v2/service/kinesis v1.43.2
+	github.com/aws/aws-sdk-go-v2/service/kinesis v1.43.5
 	github.com/awslabs/kinesis-aggregation/go/v2 v2.0.0-20241004223953-c2774b1ab29b
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/lib/pq v1.11.2
@@ -21,8 +21,8 @@ require (
 	filippo.io/edwards25519 v1.1.1 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.8 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.19 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.19 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.19 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.21 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.21 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/ini v1.8.5 // indirect
 	github.com/aws/aws-sdk-go-v2/service/dynamodbstreams v1.32.12 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.6 // indirect
