@@ -61,6 +61,7 @@
   - `ExpiredIteratorException`
   - `ProvisionedThroughputExceededException`
 - On retriable errors it rebuilds shard iterator from the last checkpointed sequence.
+  - `ScanBatch` is different: it rebuilds after the last buffered record, because the batch buffer has the records that are not checkpointed yet.
 - Non-retriable errors stop scan and return up.
 
 ## Local Development and Examples

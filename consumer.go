@@ -134,6 +134,11 @@ func WithBatchMaxSize(n int) ScanBatchOption {
 // as an error by any function.
 var ErrSkipCheckpoint = errors.New("skip checkpoint")
 
+// errRecordBuffered is returned by the ScanBatch record callback. Like
+// ErrSkipCheckpoint it skips the checkpoint, but the record is not delivered
+// again when the shard iterator is refreshed, because the batch buffer has it.
+var errRecordBuffered = errors.New("record buffered")
+
 const (
 	checkpointSetMaxAttempts = 3
 	checkpointSetRetryDelay  = 100 * time.Millisecond
@@ -147,6 +152,32 @@ type retryWaitFunc func(context.Context, time.Duration) bool
 // is passed through to each of the goroutines and called with each message pulled from
 // the stream.
 func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
+	return c.scan(ctx, func(context.Context, string) shardProcessor {
+		return recordProcessor(fn)
+	})
+}
+
+// shardProcessor receives the records of one shard. Only the goroutine of that
+// shard calls it.
+type shardProcessor interface {
+	// process is called for each record. It has the ScanFunc semantics.
+	process(record *Record) error
+	// beforePoll is called before each GetRecords call.
+	beforePoll(ctx context.Context) error
+	// finish is called when the shard scan stops without an error, before the
+	// group is told that the shard is closed or stopped.
+	finish() error
+}
+
+type newShardProcessorFunc func(ctx context.Context, shardID string) shardProcessor
+
+type recordProcessor ScanFunc
+
+func (p recordProcessor) process(record *Record) error   { return p(record) }
+func (recordProcessor) beforePoll(context.Context) error { return nil }
+func (recordProcessor) finish() error                    { return nil }
+
+func (c *Consumer) scan(ctx context.Context, newProcessor newShardProcessorFunc) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -197,8 +228,13 @@ func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
 			}
 			defer shardCleanup()
 
+			processor := newProcessor(shardCtx, shardID)
 			var err error
-			if err = c.scanShard(shardCtx, shardID, fn); err != nil {
+			if err = c.scanShardWith(shardCtx, shardID, processor); err != nil {
+				err = fmt.Errorf("shard %s error: %w", shardID, err)
+			} else if err = processor.finish(); err != nil {
+				// The group is not told that the shard is closed or stopped, so
+				// the shard is read again from its last checkpoint.
 				err = fmt.Errorf("shard %s error: %w", shardID, err)
 			} else if hasShardContext && shardCtx.Err() != nil {
 				if stoppable, ok := c.group.(shardStopHandler); ok {
@@ -260,7 +296,11 @@ func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) e
 }
 
 func (c *Consumer) scanShard(ctx context.Context, shardID string, fn ScanFunc) error {
-	return newScanShardRunner(c, shardID, fn).run(ctx)
+	return c.scanShardWith(ctx, shardID, recordProcessor(fn))
+}
+
+func (c *Consumer) scanShardWith(ctx context.Context, shardID string, processor shardProcessor) error {
+	return newScanShardRunner(c, shardID, processor).run(ctx)
 }
 
 func deaggregateRecords(in []types.Record) ([]types.Record, error) {
@@ -283,6 +323,13 @@ func (c *Consumer) processRecords(ctx context.Context, shardID string, records [
 		}
 
 		err := fn(&Record{record, shardID, millisBehindLatest})
+		if errors.Is(err, errRecordBuffered) {
+			// The callback keeps the record and checkpoints it later, so a new
+			// shard iterator must start after it.
+			lastSeqNum = aws.ToString(record.SequenceNumber)
+			c.counter.Add("records", 1)
+			continue
+		}
 		if err != nil && !errors.Is(err, ErrSkipCheckpoint) {
 			return lastSeqNum, err
 		}

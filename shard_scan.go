@@ -10,16 +10,16 @@ import (
 )
 
 type scanShardRunner struct {
-	consumer *Consumer
-	shardID  string
-	fn       ScanFunc
+	consumer  *Consumer
+	shardID   string
+	processor shardProcessor
 }
 
-func newScanShardRunner(consumer *Consumer, shardID string, fn ScanFunc) *scanShardRunner {
+func newScanShardRunner(consumer *Consumer, shardID string, processor shardProcessor) *scanShardRunner {
 	return &scanShardRunner{
-		consumer: consumer,
-		shardID:  shardID,
-		fn:       fn,
+		consumer:  consumer,
+		shardID:   shardID,
+		processor: processor,
 	}
 }
 
@@ -44,6 +44,9 @@ func (r *scanShardRunner) run(ctx context.Context) error {
 	retryAttempt := 0
 
 	for {
+		if err := r.processor.beforePoll(ctx); err != nil {
+			return err
+		}
 		resp, err := r.getRecords(ctx, shardIterator)
 		if err != nil {
 			retryAttempt++
@@ -132,7 +135,7 @@ func (r *scanShardRunner) handleResponse(ctx context.Context, shardIterator *str
 		return nil, lastSeqNum, err
 	}
 
-	lastSeqNum, err = r.consumer.processRecords(ctx, r.shardID, records, resp.MillisBehindLatest, r.fn, lastSeqNum)
+	lastSeqNum, err = r.consumer.processRecords(ctx, r.shardID, records, resp.MillisBehindLatest, r.processor.process, lastSeqNum)
 	if err != nil {
 		return nil, lastSeqNum, err
 	}

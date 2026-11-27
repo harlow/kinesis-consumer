@@ -2,7 +2,6 @@ package consumer
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -10,17 +9,17 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 )
 
+// scanBatchRunner keeps one buffer for each shard. Only the goroutine of that
+// shard adds records, flushes the buffer and sets the checkpoint, so the
+// batches of a shard are processed and checkpointed in sequence order.
 type scanBatchRunner struct {
 	consumer *Consumer
 	fn       ScanBatchFunc
 	cfg      scanBatchConfig
+	now      func() time.Time
 
-	buffers *scanBatchBuffers
-
-	flushMu sync.Mutex
-
-	asyncErrMu sync.Mutex
-	asyncErr   error
+	// fnMu keeps the callback calls of all shards serialized.
+	fnMu sync.Mutex
 }
 
 func newScanBatchRunner(consumer *Consumer, fn ScanBatchFunc, cfg scanBatchConfig) *scanBatchRunner {
@@ -28,153 +27,70 @@ func newScanBatchRunner(consumer *Consumer, fn ScanBatchFunc, cfg scanBatchConfi
 		consumer: consumer,
 		fn:       fn,
 		cfg:      cfg,
-		buffers:  newScanBatchBuffers(),
+		now:      time.Now,
 	}
 }
 
 func (r *scanBatchRunner) run(ctx context.Context) error {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	var tickerWG sync.WaitGroup
-	if r.cfg.flushInterval > 0 {
-		tickerWG.Add(1)
-		go func() {
-			defer tickerWG.Done()
-			r.runFlushTicker(ctx, cancel)
-		}()
-	}
-
-	scanErr := r.consumer.Scan(ctx, func(record *Record) error {
-		shardID, batch := r.buffers.addAndMaybeDrain(record, r.cfg.maxSize)
-		if len(batch) > 0 {
-			if err := r.flush(ctx, map[string][]*Record{shardID: batch}); err != nil {
-				return err
-			}
-		}
-		return ErrSkipCheckpoint
+	return r.consumer.scan(ctx, func(shardCtx context.Context, shardID string) shardProcessor {
+		return &shardBatch{runner: r, ctx: shardCtx, shardID: shardID}
 	})
-
-	cancel()
-	tickerWG.Wait()
-
-	if err := r.getAsyncErr(); err != nil {
-		return err
-	}
-	if scanErr != nil && !errors.Is(scanErr, context.Canceled) {
-		return scanErr
-	}
-
-	if err := r.flush(context.Background(), r.buffers.drainAll()); err != nil {
-		return err
-	}
-	if err := r.consumer.flushCheckpoints(); err != nil {
-		return fmt.Errorf("checkpoint flush error: %w", err)
-	}
-	if err := r.getAsyncErr(); err != nil {
-		return err
-	}
-
-	return scanErr
 }
 
-func (r *scanBatchRunner) runFlushTicker(ctx context.Context, cancel context.CancelFunc) {
-	ticker := time.NewTicker(r.cfg.flushInterval)
-	defer ticker.Stop()
+// shardBatch is the buffer of one shard.
+type shardBatch struct {
+	runner  *scanBatchRunner
+	ctx     context.Context
+	shardID string
 
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if err := r.flush(ctx, r.buffers.drainAll()); err != nil {
-				r.setAsyncErr(fmt.Errorf("batch flush error: %w", err))
-				cancel()
-				return
-			}
+	records   []*Record
+	firstSeen time.Time
+}
+
+func (b *shardBatch) process(record *Record) error {
+	if len(b.records) == 0 {
+		b.firstSeen = b.runner.now()
+	}
+	b.records = append(b.records, record)
+	if len(b.records) >= b.runner.cfg.maxSize {
+		if err := b.flush(b.ctx); err != nil {
+			return err
 		}
 	}
+	return errRecordBuffered
 }
 
-func (r *scanBatchRunner) flush(ctx context.Context, batches map[string][]*Record) error {
-	if len(batches) == 0 {
+func (b *shardBatch) beforePoll(ctx context.Context) error {
+	interval := b.runner.cfg.flushInterval
+	if interval <= 0 || len(b.records) == 0 || b.runner.now().Sub(b.firstSeen) < interval {
 		return nil
 	}
-
-	r.flushMu.Lock()
-	defer r.flushMu.Unlock()
-
-	for shardID, batch := range batches {
-		if len(batch) == 0 {
-			continue
-		}
-		if err := r.fn(batch); err != nil {
-			return err
-		}
-		last := batch[len(batch)-1]
-		if err := r.consumer.setCheckpointWithRetry(ctx, shardID, aws.ToString(last.SequenceNumber)); err != nil {
-			return err
-		}
+	if err := b.flush(ctx); err != nil {
+		return fmt.Errorf("batch flush error: %w", err)
 	}
-
 	return nil
 }
 
-func (r *scanBatchRunner) setAsyncErr(err error) {
-	if err == nil {
-		return
+// finish flushes the records that are left when the shard scan stops. The
+// shard context can be cancelled at this point, so it uses a new context.
+func (b *shardBatch) finish() error {
+	return b.flush(context.Background())
+}
+
+func (b *shardBatch) flush(ctx context.Context) error {
+	if len(b.records) == 0 {
+		return nil
+	}
+	batch := b.records
+
+	b.runner.fnMu.Lock()
+	err := b.runner.fn(batch)
+	b.runner.fnMu.Unlock()
+	if err != nil {
+		return err
 	}
 
-	r.asyncErrMu.Lock()
-	defer r.asyncErrMu.Unlock()
-
-	if r.asyncErr == nil {
-		r.asyncErr = err
-	}
-}
-
-func (r *scanBatchRunner) getAsyncErr() error {
-	r.asyncErrMu.Lock()
-	defer r.asyncErrMu.Unlock()
-
-	return r.asyncErr
-}
-
-type scanBatchBuffers struct {
-	mu      sync.Mutex
-	byShard map[string][]*Record
-}
-
-func newScanBatchBuffers() *scanBatchBuffers {
-	return &scanBatchBuffers{byShard: make(map[string][]*Record)}
-}
-
-func (b *scanBatchBuffers) addAndMaybeDrain(r *Record, maxSize int) (string, []*Record) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	b.byShard[r.ShardID] = append(b.byShard[r.ShardID], r)
-	if len(b.byShard[r.ShardID]) < maxSize {
-		return "", nil
-	}
-
-	shardID := r.ShardID
-	batch := b.byShard[shardID]
-	delete(b.byShard, shardID)
-	return shardID, batch
-}
-
-func (b *scanBatchBuffers) drainAll() map[string][]*Record {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	out := make(map[string][]*Record, len(b.byShard))
-	for shardID, batch := range b.byShard {
-		if len(batch) == 0 {
-			continue
-		}
-		out[shardID] = batch
-	}
-	b.byShard = make(map[string][]*Record)
-	return out
+	b.records = nil
+	last := batch[len(batch)-1]
+	return b.runner.consumer.setCheckpointWithRetry(ctx, b.shardID, aws.ToString(last.SequenceNumber))
 }

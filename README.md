@@ -99,6 +99,10 @@ err := c.ScanBatch(ctx, func(batch []*consumer.Record) error {
 Checkpoint behavior in batch mode:
 - checkpoint advances only after a batch callback succeeds
 - on callback error, scan stops and that batch is not checkpointed
+- each shard has its own buffer, and only the goroutine of that shard flushes it, so the batches and checkpoints of a shard stay in sequence order
+- the flush interval is checked before each `GetRecords` call, so a batch can wait up to the flush interval plus the scan interval
+- when a shard scan stops (shard closed, lease moved, or context cancelled), the shard buffer is flushed and checkpointed before the group is told that the shard is closed or stopped
+- after a retriable `GetRecords` error, the shard iterator starts after the last buffered record, so the callback does not get the same record again
 
 ### Aggregated records
 
