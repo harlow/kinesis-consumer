@@ -99,6 +99,10 @@ err := c.ScanBatch(ctx, func(batch []*consumer.Record) error {
 Checkpoint behavior in batch mode:
 - checkpoint advances only after a batch callback succeeds
 - on callback error, scan stops and that batch is not checkpointed
+- each shard delivers batches and writes checkpoints in sequence order
+- the flush interval runs independently of Kinesis polling and retry backoff
+- when a shard scan stops (shard closed, lease moved, or context cancelled), the shard buffer is flushed and checkpointed before the shard-closed handler or the group receives a closure or handoff notification
+- after a retriable `GetRecords` error, the shard iterator starts after the last buffered record, so the callback does not get the same record again
 
 ### Aggregated records
 

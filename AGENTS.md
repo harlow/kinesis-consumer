@@ -22,7 +22,7 @@
 ## Shard / Group Behavior
 - `AllGroup` (`allgroup.go`) polls `ListShards` every 30 seconds.
 - It tracks parent shard dependencies and waits for parent close before processing child shards.
-- If group implements `CloseableGroup`, `Consumer` calls `CloseShard` after shard processing exits.
+- If the group implements `CloseableGroup`, `Consumer` calls `CloseShard` after processing the final page of a closed shard. A canceled lease uses `ShardStopped` when supported.
 - Closed shard behavior:
   - Detected when next shard iterator is `nil` or unchanged.
   - Optional callback: `WithShardClosedHandler(...)`.
@@ -61,6 +61,7 @@
   - `ExpiredIteratorException`
   - `ProvisionedThroughputExceededException`
 - On retriable errors it rebuilds shard iterator from the last checkpointed sequence.
+  - `ScanBatch` is different: it rebuilds after the last buffered record, because the batch buffer has the records that are not checkpointed yet.
 - Non-retriable errors stop scan and return up.
 
 ## Local Development and Examples
