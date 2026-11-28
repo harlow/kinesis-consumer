@@ -2,7 +2,9 @@ package consumer
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -82,7 +84,7 @@ func (g leaseEventGroup) ShardContext(parent context.Context, shardID string) (c
 	g.mu.Lock()
 	g.stops[shardID] = cancel
 	g.mu.Unlock()
-	return ctx, func() {}
+	return ctx, cancel
 }
 
 func (g leaseEventGroup) ShardStopped(_ context.Context, shardID string) error {
@@ -104,9 +106,26 @@ func iteratorClient(getRecords func(iterator string) (*kinesis.GetRecordsOutput,
 
 func assertEvents(t *testing.T, got, want []string) {
 	t.Helper()
-	if fmt.Sprint(got) != fmt.Sprint(want) {
+	if !slices.Equal(got, want) {
 		t.Fatalf("events = %q, want %q", got, want)
 	}
+}
+
+// Let ScanBatch exit once each shard has reported its terminal event.
+func (g *eventGroup) scanContext(t *testing.T) context.Context {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	t.Cleanup(cancel)
+	go func() {
+		for range g.shardIDs {
+			select {
+			case <-g.stopped:
+			case <-ctx.Done():
+				return
+			}
+		}
+		cancel()
+	}()
+	return ctx
 }
 
 // A closed shard must not be marked complete while its records are still in
@@ -116,17 +135,15 @@ func TestScanBatch_ClosedShardFlushesBeforeClose(t *testing.T) {
 	client := iteratorClient(func(string) (*kinesis.GetRecordsOutput, error) {
 		return &kinesis.GetRecordsOutput{NextShardIterator: nil, Records: records}, nil
 	})
-	c, err := New("myStreamName", WithClient(client), WithGroup(group), WithLogger(&testLogger{t}))
+	c, err := New("myStreamName", WithClient(client), WithGroup(group), WithShardClosedHandler(func(_, id string) error {
+		group.add("handler " + id)
+		return nil
+	}))
 	if err != nil {
 		t.Fatalf("new consumer error: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go func() {
-		<-group.stopped
-		cancel()
-	}()
+	ctx := group.scanContext(t)
 
 	err = c.ScanBatch(ctx, func(batch []*Record) error {
 		group.add(fmt.Sprintf("batch %d", len(batch)))
@@ -136,7 +153,7 @@ func TestScanBatch_ClosedShardFlushesBeforeClose(t *testing.T) {
 		t.Fatalf("ScanBatch error: %v", err)
 	}
 
-	assertEvents(t, group.recorded(), []string{"batch 2", "checkpoint parent lastSeqNum", "close parent"})
+	assertEvents(t, group.recorded(), []string{"batch 2", "checkpoint parent lastSeqNum", "handler parent", "close parent"})
 }
 
 // A shard whose lease moves to another worker must process and checkpoint its
@@ -157,12 +174,7 @@ func TestScanBatch_StoppedShardFlushesBeforeRelease(t *testing.T) {
 		t.Fatalf("new consumer error: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go func() {
-		<-group.stopped
-		cancel()
-	}()
+	ctx := group.scanContext(t)
 
 	err = c.ScanBatch(ctx, func(batch []*Record) error {
 		group.add(fmt.Sprintf("batch %d", len(batch)))
@@ -203,12 +215,7 @@ func TestScanBatch_IteratorRefreshDoesNotRedeliver(t *testing.T) {
 		t.Fatalf("new consumer error: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go func() {
-		<-group.stopped
-		cancel()
-	}()
+	ctx := group.scanContext(t)
 
 	var delivered []string
 	err = c.ScanBatch(ctx, func(batch []*Record) error {
@@ -216,15 +223,15 @@ func TestScanBatch_IteratorRefreshDoesNotRedeliver(t *testing.T) {
 			delivered = append(delivered, aws.ToString(record.SequenceNumber))
 		}
 		return nil
-	}, WithBatchMaxSize(1), WithBatchFlushInterval(time.Hour))
+	}, WithBatchMaxSize(100), WithBatchFlushInterval(time.Hour))
 	if err != nil {
 		t.Fatalf("ScanBatch error: %v", err)
 	}
 
-	if fmt.Sprint(startSequences) != fmt.Sprint([]string{"", "lastSeqNum"}) {
+	if !slices.Equal(startSequences, []string{"", "lastSeqNum"}) {
 		t.Fatalf("iterator start sequences = %q, want %q", startSequences, []string{"", "lastSeqNum"})
 	}
-	if fmt.Sprint(delivered) != fmt.Sprint([]string{"firstSeqNum", "lastSeqNum"}) {
+	if !slices.Equal(delivered, []string{"firstSeqNum", "lastSeqNum"}) {
 		t.Fatalf("delivered = %q, want each record once", delivered)
 	}
 }
@@ -271,14 +278,7 @@ func TestScanBatch_KeepsShardOrder(t *testing.T) {
 		t.Fatalf("new consumer error: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go func() {
-		for range shardIDs {
-			<-group.stopped
-		}
-		cancel()
-	}()
+	ctx := group.scanContext(t)
 
 	delivered := map[string][]int{}
 	err = c.ScanBatch(ctx, func(batch []*Record) error {
@@ -316,4 +316,67 @@ func TestScanBatch_KeepsShardOrder(t *testing.T) {
 		}
 		last[shardID] = seq
 	}
+	for _, shardID := range shardIDs {
+		if got, want := last[shardID], 1000+recordsPerShard-1; got != want {
+			t.Fatalf("%s final checkpoint = %d, want %d", shardID, got, want)
+		}
+	}
+}
+
+func TestScanBatch_CanceledMidPageKeepsShardOpen(t *testing.T) {
+	group := closeableEventGroup{newEventGroup("parent")}
+	client := iteratorClient(func(string) (*kinesis.GetRecordsOutput, error) {
+		return &kinesis.GetRecordsOutput{Records: records}, nil
+	})
+	c, err := New("stream", WithClient(client), WithGroup(group), WithShardClosedHandler(func(_, id string) error {
+		group.add("handler " + id)
+		return nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err = c.ScanBatch(ctx, func(batch []*Record) error {
+		group.add("batch " + aws.ToString(batch[0].SequenceNumber))
+		cancel()
+		return nil
+	}, WithBatchMaxSize(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEvents(t, group.recorded(), []string{"batch firstSeqNum", "checkpoint parent firstSeqNum"})
+}
+
+type failingCheckpointGroup struct {
+	leaseEventGroup
+	err error
+}
+
+func (g failingCheckpointGroup) SetCheckpoint(_, id, seq string) error {
+	g.add("failed checkpoint " + seq)
+	g.stop(id)
+	return g.err
+}
+
+func TestScanBatch_HandoffDuringCheckpointFailure(t *testing.T) {
+	want := errors.New("checkpoint unavailable")
+	group := failingCheckpointGroup{leaseEventGroup{newEventGroup("parent")}, want}
+	client := iteratorClient(func(string) (*kinesis.GetRecordsOutput, error) {
+		return &kinesis.GetRecordsOutput{Records: records}, nil
+	})
+	c, err := New("stream", WithClient(client), WithGroup(group))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err = c.ScanBatch(ctx, func(batch []*Record) error {
+		group.add("batch")
+		return nil
+	}, WithBatchMaxSize(1))
+	if !errors.Is(err, want) {
+		t.Fatalf("ScanBatch error = %v, want %v", err, want)
+	}
+	assertEvents(t, group.recorded(), []string{"batch", "failed checkpoint firstSeqNum", "failed checkpoint firstSeqNum", "failed checkpoint firstSeqNum"})
 }

@@ -9,88 +9,97 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 )
 
-// scanBatchRunner keeps one buffer for each shard. Only the goroutine of that
-// shard adds records, flushes the buffer and sets the checkpoint, so the
-// batches of a shard are processed and checkpointed in sequence order.
 type scanBatchRunner struct {
 	consumer *Consumer
 	fn       ScanBatchFunc
 	cfg      scanBatchConfig
-	now      func() time.Time
 
-	// fnMu keeps the callback calls of all shards serialized.
-	fnMu sync.Mutex
+	// Serialize callbacks and checkpoint writes across shards. Keep the first
+	// failure so another pending flush cannot advance past a failed batch.
+	mu  sync.Mutex
+	err error
 }
 
 func newScanBatchRunner(consumer *Consumer, fn ScanBatchFunc, cfg scanBatchConfig) *scanBatchRunner {
-	return &scanBatchRunner{
-		consumer: consumer,
-		fn:       fn,
-		cfg:      cfg,
-		now:      time.Now,
-	}
+	return &scanBatchRunner{consumer: consumer, fn: fn, cfg: cfg}
 }
 
 func (r *scanBatchRunner) run(ctx context.Context) error {
-	return r.consumer.scan(ctx, func(shardCtx context.Context, shardID string) shardProcessor {
-		return &shardBatch{runner: r, ctx: shardCtx, shardID: shardID}
+	return r.consumer.scan(ctx, func(shardID string, reportError func(error)) shardProcessor {
+		return &shardBatch{runner: r, shardID: shardID, reportError: reportError}
 	})
 }
 
-// shardBatch is the buffer of one shard.
 type shardBatch struct {
-	runner  *scanBatchRunner
-	ctx     context.Context
-	shardID string
+	runner      *scanBatchRunner
+	shardID     string
+	reportError func(error)
 
-	records   []*Record
-	firstSeen time.Time
+	// Hold mu from buffer mutation through the checkpoint so a timer, size
+	// flush and shard shutdown can never overtake each other.
+	mu      sync.Mutex
+	records []*Record
+	timer   *time.Timer
 }
 
-func (b *shardBatch) process(record *Record) error {
-	if len(b.records) == 0 {
-		b.firstSeen = b.runner.now()
-	}
+func (b *shardBatch) process(_ context.Context, record *Record) (bool, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
 	b.records = append(b.records, record)
 	if len(b.records) >= b.runner.cfg.maxSize {
-		if err := b.flush(b.ctx); err != nil {
-			return err
-		}
+		return true, b.flushLocked()
 	}
-	return errRecordBuffered
+	if len(b.records) == 1 && b.runner.cfg.flushInterval > 0 {
+		var timer *time.Timer
+		timer = time.AfterFunc(b.runner.cfg.flushInterval, func() {
+			b.mu.Lock()
+			defer b.mu.Unlock()
+			// A size or final flush can retire this timer while it waits for mu.
+			if b.timer == timer {
+				if err := b.flushLocked(); err != nil {
+					b.reportError(fmt.Errorf("shard %s batch flush error: %w", b.shardID, err))
+				}
+			}
+		})
+		b.timer = timer
+	}
+	return true, nil
 }
 
-func (b *shardBatch) beforePoll(ctx context.Context) error {
-	interval := b.runner.cfg.flushInterval
-	if interval <= 0 || len(b.records) == 0 || b.runner.now().Sub(b.firstSeen) < interval {
-		return nil
+func (b *shardBatch) finish(scanErr error) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if scanErr != nil {
+		b.stopTimer()
+		return scanErr
 	}
-	if err := b.flush(ctx); err != nil {
-		return fmt.Errorf("batch flush error: %w", err)
-	}
-	return nil
+	return b.flushLocked()
 }
 
-// finish flushes the records that are left when the shard scan stops. The
-// shard context can be cancelled at this point, so it uses a new context.
-func (b *shardBatch) finish() error {
-	return b.flush(context.Background())
+func (b *shardBatch) stopTimer() {
+	if b.timer != nil {
+		b.timer.Stop()
+		b.timer = nil
+	}
 }
 
-func (b *shardBatch) flush(ctx context.Context) error {
-	if len(b.records) == 0 {
-		return nil
+func (b *shardBatch) flushLocked() error {
+	b.stopTimer()
+	r := b.runner
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.err != nil || len(b.records) == 0 {
+		return r.err
 	}
+
 	batch := b.records
-
-	b.runner.fnMu.Lock()
-	err := b.runner.fn(batch)
-	b.runner.fnMu.Unlock()
-	if err != nil {
-		return err
-	}
-
 	b.records = nil
-	last := batch[len(batch)-1]
-	return b.runner.consumer.setCheckpointWithRetry(ctx, b.shardID, aws.ToString(last.SequenceNumber))
+	seq := aws.ToString(batch[len(batch)-1].SequenceNumber)
+	r.err = r.fn(batch)
+	if r.err == nil {
+		// Complete the bounded checkpoint retries even during lease handoff.
+		r.err = r.consumer.setCheckpointWithRetry(context.Background(), b.shardID, seq)
+	}
+	return r.err
 }

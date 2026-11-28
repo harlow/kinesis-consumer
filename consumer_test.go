@@ -230,13 +230,13 @@ func TestAggregationCheckpointing_RestartsAfterWholeSequenceNumber(t *testing.T)
 	}
 
 	calls := 0
-	_, err = c.processRecords(context.Background(), "myShard", aggregatedRecords, nil, func(r *Record) error {
+	_, _, err = c.processRecords(context.Background(), "myShard", aggregatedRecords, nil, recordProcessor{c, func(r *Record) error {
 		calls++
 		if calls == 2 {
 			return errors.New("stop after checkpointing first logical record")
 		}
 		return nil
-	}, "")
+	}}, "")
 	if err == nil {
 		t.Fatal("processRecords() error = nil, want stop error")
 	}
@@ -669,6 +669,7 @@ func TestScanBatch_AsyncFlushErrorStopsScan(t *testing.T) {
 
 	c, err := New("myStreamName",
 		WithClient(client),
+		WithScanInterval(time.Millisecond),
 		WithStore(cp),
 		WithLogger(&testLogger{t}),
 	)
@@ -677,9 +678,14 @@ func TestScanBatch_AsyncFlushErrorStopsScan(t *testing.T) {
 	}
 
 	callbackErr := errors.New("async batch callback error")
-	err = c.ScanBatch(context.Background(), func(batch []*Record) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err = c.ScanBatch(ctx, func(batch []*Record) error {
 		return callbackErr
-	}, WithBatchMaxSize(100), WithBatchFlushInterval(10*time.Millisecond))
+	}, WithBatchMaxSize(100), WithBatchFlushInterval(20*time.Millisecond))
+	if ctx.Err() != nil {
+		t.Fatal("batch flush waited for the blocked GetRecords call")
+	}
 	if !errors.Is(err, callbackErr) {
 		t.Fatalf("ScanBatch error = %v, want %v", err, callbackErr)
 	}
@@ -2029,6 +2035,7 @@ func (g *rebalanceAwareGroupMock) ShardStopped(ctx context.Context, shardID stri
 }
 
 type multiShardRebalanceAwareGroupMock struct {
+	mu                sync.Mutex
 	shards            []string
 	shardStoppedMock  func(ctx context.Context, shardID string) error
 	shardStoppedCalls int
@@ -2051,7 +2058,9 @@ func (g *multiShardRebalanceAwareGroupMock) SetCheckpoint(streamName, shardID, s
 }
 
 func (g *multiShardRebalanceAwareGroupMock) CloseShard(ctx context.Context, shardID string) error {
+	g.mu.Lock()
 	g.closeShardCalls++
+	g.mu.Unlock()
 	return nil
 }
 
@@ -2060,7 +2069,9 @@ func (g *multiShardRebalanceAwareGroupMock) ShardContext(parent context.Context,
 	return ctx, func() { cancel() }
 }
 func (g *multiShardRebalanceAwareGroupMock) ShardStopped(ctx context.Context, shardID string) error {
+	g.mu.Lock()
 	g.shardStoppedCalls++
+	g.mu.Unlock()
 	if g.shardStoppedMock != nil {
 		return g.shardStoppedMock(ctx, shardID)
 	}

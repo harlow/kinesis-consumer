@@ -134,11 +134,6 @@ func WithBatchMaxSize(n int) ScanBatchOption {
 // as an error by any function.
 var ErrSkipCheckpoint = errors.New("skip checkpoint")
 
-// errRecordBuffered is returned by the ScanBatch record callback. Like
-// ErrSkipCheckpoint it skips the checkpoint, but the record is not delivered
-// again when the shard iterator is refreshed, because the batch buffer has it.
-var errRecordBuffered = errors.New("record buffered")
-
 const (
 	checkpointSetMaxAttempts = 3
 	checkpointSetRetryDelay  = 100 * time.Millisecond
@@ -152,30 +147,37 @@ type retryWaitFunc func(context.Context, time.Duration) bool
 // is passed through to each of the goroutines and called with each message pulled from
 // the stream.
 func (c *Consumer) Scan(ctx context.Context, fn ScanFunc) error {
-	return c.scan(ctx, func(context.Context, string) shardProcessor {
-		return recordProcessor(fn)
+	return c.scan(ctx, func(string, func(error)) shardProcessor {
+		return recordProcessor{c, fn}
 	})
 }
 
-// shardProcessor receives the records of one shard. Only the goroutine of that
-// shard calls it.
+// A processor advances the in-memory iterator once it owns a record. Its
+// checkpoint may lag behind while a batch is waiting for delivery.
 type shardProcessor interface {
-	// process is called for each record. It has the ScanFunc semantics.
-	process(record *Record) error
-	// beforePoll is called before each GetRecords call.
-	beforePoll(ctx context.Context) error
-	// finish is called when the shard scan stops without an error, before the
-	// group is told that the shard is closed or stopped.
-	finish() error
+	process(context.Context, *Record) (advance bool, err error)
+	finish(scanErr error) error
 }
 
-type newShardProcessorFunc func(ctx context.Context, shardID string) shardProcessor
+type newShardProcessorFunc func(shardID string, reportError func(error)) shardProcessor
 
-type recordProcessor ScanFunc
+type recordProcessor struct {
+	consumer *Consumer
+	fn       ScanFunc
+}
 
-func (p recordProcessor) process(record *Record) error   { return p(record) }
-func (recordProcessor) beforePoll(context.Context) error { return nil }
-func (recordProcessor) finish() error                    { return nil }
+func (p recordProcessor) process(ctx context.Context, record *Record) (bool, error) {
+	shardID, seq := record.ShardID, aws.ToString(record.SequenceNumber)
+	if err := p.fn(record); err != nil {
+		if errors.Is(err, ErrSkipCheckpoint) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, p.consumer.setCheckpointWithRetry(ctx, shardID, seq)
+}
+
+func (recordProcessor) finish(scanErr error) error { return scanErr }
 
 func (c *Consumer) scan(ctx context.Context, newProcessor newShardProcessorFunc) error {
 	ctx, cancel := context.WithCancel(ctx)
@@ -194,19 +196,29 @@ func (c *Consumer) scan(ctx context.Context, newProcessor newShardProcessorFunc)
 		cancel()
 	}
 
+	// Groups may dispatch shards asynchronously after Start returns. Signal
+	// shutdown separately so a sender never races with a channel close.
+	groupDone := make(chan struct{})
 	go func() {
 		err := c.group.Start(ctx, shardC)
 		if err != nil {
 			reportError(fmt.Errorf("error starting scan: %w", err))
 		}
 		<-ctx.Done()
-		close(shardC)
+		close(groupDone)
 	}()
 
 	wg := new(sync.WaitGroup)
 	// process each of the shards
 	s := newShardsInProcess()
-	for shard := range shardC {
+discovery:
+	for {
+		var shard types.Shard
+		select {
+		case <-groupDone:
+			break discovery
+		case shard = <-shardC:
+		}
 		shardId := aws.ToString(shard.ShardId)
 		if !s.tryAddShard(shardId) {
 			// safetynet: if shard already in process by another goroutine, just skipping the request
@@ -214,10 +226,8 @@ func (c *Consumer) scan(ctx context.Context, newProcessor newShardProcessorFunc)
 		}
 		wg.Add(1)
 		go func(shardID string) {
-			defer func() {
-				s.deleteShard(shardID)
-			}()
 			defer wg.Done()
+			defer s.deleteShard(shardID)
 
 			shardCtx := ctx
 			shardCleanup := func() {}
@@ -228,13 +238,9 @@ func (c *Consumer) scan(ctx context.Context, newProcessor newShardProcessorFunc)
 			}
 			defer shardCleanup()
 
-			processor := newProcessor(shardCtx, shardID)
-			var err error
-			if err = c.scanShardWith(shardCtx, shardID, processor); err != nil {
-				err = fmt.Errorf("shard %s error: %w", shardID, err)
-			} else if err = processor.finish(); err != nil {
-				// The group is not told that the shard is closed or stopped, so
-				// the shard is read again from its last checkpoint.
+			processor := newProcessor(shardID, reportError)
+			closed, err := c.scanShard(shardCtx, shardID, processor)
+			if err != nil {
 				err = fmt.Errorf("shard %s error: %w", shardID, err)
 			} else if hasShardContext && shardCtx.Err() != nil {
 				if stoppable, ok := c.group.(shardStopHandler); ok {
@@ -242,10 +248,10 @@ func (c *Consumer) scan(ctx context.Context, newProcessor newShardProcessorFunc)
 						err = fmt.Errorf("shard stopped error: %w", err)
 					}
 				}
-			} else if closeable, ok := c.group.(CloseableGroup); !ok {
-				// group doesn't allow closure, skip calling CloseShard
-			} else if err = closeable.CloseShard(context.Background(), shardID); err != nil {
-				err = fmt.Errorf("shard closed CloseableGroup error: %w", err)
+			} else if closeable, ok := c.group.(CloseableGroup); closed && ok {
+				if err = closeable.CloseShard(context.Background(), shardID); err != nil {
+					err = fmt.Errorf("shard closed CloseableGroup error: %w", err)
+				}
 			}
 			if err != nil {
 				reportError(err)
@@ -253,13 +259,9 @@ func (c *Consumer) scan(ctx context.Context, newProcessor newShardProcessorFunc)
 		}(shardId)
 	}
 
-	go func() {
-		wg.Wait()
-		close(errC)
-	}()
-
-	err := <-errC
-	return c.finishScan(err)
+	wg.Wait()
+	close(errC)
+	return c.finishScan(<-errC)
 }
 
 // ScanBatch scans all shards and delivers buffered records to a batch callback.
@@ -291,15 +293,11 @@ func (c *Consumer) ScanBatch(ctx context.Context, fn ScanBatchFunc, opts ...Scan
 // ScanShard loops over records on a specific shard, calls the callback func
 // for each record and checkpoints the progress of scan.
 func (c *Consumer) ScanShard(ctx context.Context, shardID string, fn ScanFunc) error {
-	err := c.scanShard(ctx, shardID, fn)
+	_, err := c.scanShard(ctx, shardID, recordProcessor{c, fn})
 	return c.finishScan(err)
 }
 
-func (c *Consumer) scanShard(ctx context.Context, shardID string, fn ScanFunc) error {
-	return c.scanShardWith(ctx, shardID, recordProcessor(fn))
-}
-
-func (c *Consumer) scanShardWith(ctx context.Context, shardID string, processor shardProcessor) error {
+func (c *Consumer) scanShard(ctx context.Context, shardID string, processor shardProcessor) (bool, error) {
 	return newScanShardRunner(c, shardID, processor).run(ctx)
 }
 
@@ -314,38 +312,25 @@ func (c *Consumer) normalizeRecords(records []types.Record) ([]types.Record, err
 	return deaggregateRecords(records)
 }
 
-func (c *Consumer) processRecords(ctx context.Context, shardID string, records []types.Record, millisBehindLatest *int64, fn ScanFunc, lastSeqNum string) (string, error) {
+func (c *Consumer) processRecords(ctx context.Context, shardID string, records []types.Record, millisBehindLatest *int64, processor shardProcessor, lastSeqNum string) (lastSequence string, complete bool, err error) {
 	for _, record := range records {
 		select {
 		case <-ctx.Done():
-			return lastSeqNum, nil
+			return lastSeqNum, false, nil
 		default:
 		}
 
-		err := fn(&Record{record, shardID, millisBehindLatest})
-		if errors.Is(err, errRecordBuffered) {
-			// The callback keeps the record and checkpoints it later, so a new
-			// shard iterator must start after it.
-			lastSeqNum = aws.ToString(record.SequenceNumber)
-			c.counter.Add("records", 1)
-			continue
+		seq := aws.ToString(record.SequenceNumber)
+		advance, err := processor.process(ctx, &Record{record, shardID, millisBehindLatest})
+		if err != nil {
+			return lastSeqNum, false, err
 		}
-		if err != nil && !errors.Is(err, ErrSkipCheckpoint) {
-			return lastSeqNum, err
+		if advance {
+			lastSeqNum = seq
 		}
-
-		if errors.Is(err, ErrSkipCheckpoint) {
-			c.counter.Add("records", 1)
-			continue
-		}
-
-		if err := c.setCheckpointWithRetry(ctx, shardID, aws.ToString(record.SequenceNumber)); err != nil {
-			return lastSeqNum, err
-		}
-		lastSeqNum = aws.ToString(record.SequenceNumber)
 		c.counter.Add("records", 1)
 	}
-	return lastSeqNum, nil
+	return lastSeqNum, true, nil
 }
 
 func (c *Consumer) getShardIteratorWithCheckpointFallback(ctx context.Context, streamName, shardID, seqNum string) (*string, string, error) {

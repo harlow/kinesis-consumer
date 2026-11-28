@@ -14,7 +14,7 @@ For more context on this change see: https://github.com/harlow/kinesis-consumer/
 Fixes:
 
 * `ScanBatch`: flush and checkpoint the shard buffer before `CloseShard` or `ShardStopped`. Before, a closed shard could be marked complete while its records were still in the buffer, and a lease could be released before its buffer was processed.
-* `ScanBatch`: keep one buffer for each shard and flush it only from the shard goroutine. Before, the flush ticker drained the buffers outside the flush lock, so two batches of a shard could be processed and checkpointed out of order.
+* `ScanBatch`: serialize timed, size-based and final flushes for each shard. Before, the flush ticker drained the buffers outside the flush lock, so two batches of a shard could be processed and checkpointed out of order.
 * `ScanBatch`: after a retriable `GetRecords` error, start the shard iterator after the last buffered record. Before, it started where the shard scan started, so the callback got records again. `Scan` with `ErrSkipCheckpoint` keeps its behavior.
 
 ## v0.3.0 - 2018-12-28

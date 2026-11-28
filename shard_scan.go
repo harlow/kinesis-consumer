@@ -23,15 +23,26 @@ func newScanShardRunner(consumer *Consumer, shardID string, processor shardProce
 	}
 }
 
-func (r *scanShardRunner) run(ctx context.Context) error {
+func (r *scanShardRunner) run(ctx context.Context) (bool, error) {
+	closed, err := r.read(ctx)
+	if err := r.processor.finish(err); err != nil {
+		return false, err
+	}
+	if closed {
+		return true, r.handleShardClosed()
+	}
+	return false, nil
+}
+
+func (r *scanShardRunner) read(ctx context.Context) (closed bool, err error) {
 	lastSeqNum, err := r.loadCheckpoint()
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	shardIterator, lastSeqNum, err := r.loadIterator(ctx, lastSeqNum)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	r.consumer.logger.Log("[CONSUMER] start scan:", r.shardID, lastSeqNum)
@@ -44,32 +55,31 @@ func (r *scanShardRunner) run(ctx context.Context) error {
 	retryAttempt := 0
 
 	for {
-		if err := r.processor.beforePoll(ctx); err != nil {
-			return err
-		}
 		resp, err := r.getRecords(ctx, shardIterator)
 		if err != nil {
 			retryAttempt++
 			shardIterator, lastSeqNum, retryAttempt, err = r.refreshIterator(ctx, lastSeqNum, err, retryAttempt)
 			if err != nil {
-				return err
+				return false, err
 			}
 			if shardIterator == nil {
-				return nil
+				return false, nil
 			}
 		} else {
-			shardIterator, lastSeqNum, err = r.handleResponse(ctx, shardIterator, lastSeqNum, resp)
-			if err != nil {
-				return err
+			var complete bool
+			lastSeqNum, complete, err = r.processPage(ctx, lastSeqNum, resp)
+			if err != nil || !complete {
+				return false, err
 			}
-			if shardIterator == nil {
-				return nil
+			if isShardClosed(resp.NextShardIterator, shardIterator) {
+				return true, nil
 			}
+			shardIterator = resp.NextShardIterator
 			retryAttempt = 0
 		}
 
 		if !r.waitForNextPoll(ctx, scanTicker) {
-			return nil
+			return false, nil
 		}
 	}
 }
@@ -129,25 +139,12 @@ func (r *scanShardRunner) refreshIterator(ctx context.Context, lastSeqNum string
 	}
 }
 
-func (r *scanShardRunner) handleResponse(ctx context.Context, shardIterator *string, lastSeqNum string, resp *kinesis.GetRecordsOutput) (*string, string, error) {
+func (r *scanShardRunner) processPage(ctx context.Context, lastSeqNum string, resp *kinesis.GetRecordsOutput) (string, bool, error) {
 	records, err := r.consumer.normalizeRecords(resp.Records)
 	if err != nil {
-		return nil, lastSeqNum, err
+		return lastSeqNum, false, err
 	}
-
-	lastSeqNum, err = r.consumer.processRecords(ctx, r.shardID, records, resp.MillisBehindLatest, r.processor.process, lastSeqNum)
-	if err != nil {
-		return nil, lastSeqNum, err
-	}
-
-	if isShardClosed(resp.NextShardIterator, shardIterator) {
-		if err := r.handleShardClosed(); err != nil {
-			return nil, lastSeqNum, err
-		}
-		return nil, lastSeqNum, nil
-	}
-
-	return resp.NextShardIterator, lastSeqNum, nil
+	return r.consumer.processRecords(ctx, r.shardID, records, resp.MillisBehindLatest, r.processor, lastSeqNum)
 }
 
 func (r *scanShardRunner) handleShardClosed() error {
